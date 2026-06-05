@@ -101,3 +101,15 @@ func calcStressScore(
     return max(0, min(100, score))
 }
 ```
+
+---
+
+## 実装との対応（フェーズ1：ダミーデータMVP）
+
+上記の計算式は `MindWaveGraphic/MindWaveGraphic/StressScoreCalculator.swift` に実装されている。
+
+- `StressScoreCalculator.calculate(...)` が上記の式をそのまま実装している
+- 入力値として `currentHeartRate`, `averageHeartRate`, `currentHRV`, `averageHRV` を受け取る
+- 出力として `heartRateIncreaseRate`, `hrvDecreaseRate`, `stressScore` を返す
+- 現段階ではHealthKitは使用せず、`MindSampleScenario.swift` に定義したダミーデータで動作確認を行っている
+- HealthKit連携（実機からの実データ取得）はフェーズ2で実装予定
