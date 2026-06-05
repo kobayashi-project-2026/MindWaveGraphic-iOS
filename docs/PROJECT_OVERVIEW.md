@@ -37,11 +37,12 @@ Apple Watchは心拍数とHRVをリアルタイムで取得できる身近なデ
 
 ## 進捗状況
 
-### フェーズ1：ダミーデータMVP（完了）
+### フェーズ1：ダミーデータMVP（実装済み・実機確認待ち）
 - `StressScoreCalculator.swift` に計算式を実装した
 - `MindSampleScenario.swift` に3つのダミーシナリオ（平常時・軽い緊張・強い緊張）を定義した
 - `ContentView.swift` にシナリオ切り替えUI・スコアゲージ・入力値表示を実装した
 - HealthKit連携なしで計算式とUIの動作確認ができる状態になった
+- **次の作業：** Xcodeでシミュレータ／実機を使ってUIの表示を確認する
 
 ### フェーズ2：HealthKit連携（未着手）
 - Apple Watch + iPhone から心拍数・HRV（SDNN）を取得する実装を行う予定

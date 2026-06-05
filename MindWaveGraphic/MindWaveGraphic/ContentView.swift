@@ -114,7 +114,7 @@ struct ContentView: View {
                 .padding(.top)
             }
             .navigationTitle("Mind Wave Graphic")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
         }
     }
 }
