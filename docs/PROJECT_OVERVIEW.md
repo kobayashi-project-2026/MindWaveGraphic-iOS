@@ -44,8 +44,13 @@ Apple Watchは心拍数とHRVをリアルタイムで取得できる身近なデ
 - HealthKit連携なしで計算式とUIの動作確認ができる状態になった
 - **次の作業：** Xcodeでシミュレータ／実機を使ってUIの表示を確認する
 
-### フェーズ2：HealthKit連携（未着手）
-- Apple Watch + iPhone から心拍数・HRV（SDNN）を取得する実装を行う予定
+### フェーズ2：HealthKit連携（土台追加済み・実接続待ち）
+- `HealthKitManager.swift` を追加した（心拍数・HRV読み取り・平均値取得）
+- `MindWaveViewModel.swift` を追加した（HealthKit実データとデモデータの切り替え）
+- ユーザー向けUIから「平常時 / 軽い緊張 / 強い緊張」の手動選択感を除去した
+- シナリオ切り替えは `LiveWaveView` の Debug セクション（折りたたみ式）に移動した
+- HealthKit未接続時は `デモデータで表示中` を表示し、アプリが落ちないようにした
+- **次の作業：** Xcode で HealthKit Capability を追加し、実機でデータ取得を確認する
 
 ---
 

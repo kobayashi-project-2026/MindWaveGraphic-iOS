@@ -26,9 +26,36 @@ RMSSDは副交感神経活動をより直接的に反映するとされ、スト
 
 ---
 
+## 実装状況（フェーズ2開始）
+
+HealthKit連携の土台を `HealthKitManager.swift` と `MindWaveViewModel.swift` として追加した。
+
+### 読み取るデータ型
+- `HKQuantityTypeIdentifier.heartRate`（心拍数、bpm）
+- `HKQuantityTypeIdentifier.heartRateVariabilitySDNN`（HRV、ms）
+
+### 書き込みは行わない
+- `toShare` は空の Set を渡す
+
+### HealthKitデータが取得できない場合の挙動
+- Apple Watch未接続・データなしの場合は `MindSampleScenario` のデモデータにフォールバックする
+- UIには `デモデータで表示中` と必ず表示する
+- アプリは落ちない（HealthKit未接続でも動作する）
+
+### Apple Watch との接続構成
+- Apple Watch → HealthKitに心拍数・HRVを記録
+- iPhone上の HealthKitStore → `HealthKitManager` → `MindWaveViewModel` → UI
+
+### 権限設定
+- `NSHealthShareUsageDescription` を build settings に追加済み
+- `MindWaveGraphic.entitlements` に `com.apple.developer.healthkit` を追加済み
+- **Xcode で Signing & Capabilities の HealthKit Capability を手動追加が必要**（下記参照）
+
+---
+
 ## 開発フェーズとHealthKit
 
-### フェーズ1：ダミーデータMVP（現在）
+### フェーズ1：ダミーデータMVP（完了）
 HealthKit連携なしで、ハードコードしたダミーの心拍数・HRV値を使い、スコア計算とUI表示を確認する。
 
 **ダミーデータMVPを先に作る理由：**

@@ -7,6 +7,7 @@ import SwiftUI
 
 struct HomeView: View {
     @Binding var selectedTab: Int
+    @EnvironmentObject var viewModel: MindWaveViewModel
 
     var body: some View {
         ZStack {
@@ -28,7 +29,7 @@ struct HomeView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.top, 24)
 
-                    // Apple Watch 接続カード
+                    // Apple Watch / HealthKit カード
                     watchConnectionCard
 
                     // 準備チェックリスト
@@ -61,37 +62,69 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Watch Card
+    // MARK: - Watch / HealthKit Card
 
     private var watchConnectionCard: some View {
-        HStack(spacing: 14) {
-            ZStack {
+        VStack(spacing: 14) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(MindWaveTheme.accentGlow.opacity(0.15))
+                        .frame(width: 52, height: 52)
+                    Image(systemName: "applewatch")
+                        .font(.system(size: 22))
+                        .foregroundStyle(MindWaveTheme.accent)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Apple Watch / HealthKit")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(MindWaveTheme.textPrimary)
+                    Text("接続準備中")
+                        .font(.caption)
+                        .foregroundStyle(MindWaveTheme.textSecondary)
+                    Text("許可後、心拍数とHRVを読み取ります")
+                        .font(.caption2)
+                        .foregroundStyle(MindWaveTheme.textTertiary)
+                }
+
+                Spacer()
+
                 Circle()
-                    .fill(MindWaveTheme.accentGlow.opacity(0.15))
-                    .frame(width: 52, height: 52)
-                Image(systemName: "applewatch")
-                    .font(.system(size: 22))
-                    .foregroundStyle(MindWaveTheme.accent)
+                    .fill(Color.orange.opacity(0.85))
+                    .frame(width: 8, height: 8)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Apple Watch")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(MindWaveTheme.textPrimary)
-                Text("接続準備中")
-                    .font(.caption)
-                    .foregroundStyle(MindWaveTheme.textSecondary)
-                Text("フェーズ2でHealthKit連携予定")
-                    .font(.caption2)
-                    .foregroundStyle(MindWaveTheme.textTertiary)
+            Divider()
+                .background(Color.white.opacity(0.08))
+
+            // HealthKit許可ボタン
+            Button {
+                Task { await viewModel.requestHealthKitAuthorization() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "heart.text.square.fill")
+                        .font(.system(size: 14))
+                    Text("HealthKitを許可する")
+                        .font(.system(size: 14, weight: .medium))
+                }
+                .foregroundStyle(MindWaveTheme.accent)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(MindWaveTheme.accent.opacity(0.10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(MindWaveTheme.accent.opacity(0.30), lineWidth: 1)
+                        )
+                )
             }
+            .buttonStyle(.plain)
 
-            Spacer()
-
-            // 未接続インジケーター
-            Circle()
-                .fill(Color.orange.opacity(0.85))
-                .frame(width: 8, height: 8)
+            Text(viewModel.authorizationStatusMessage)
+                .font(.caption2)
+                .foregroundStyle(MindWaveTheme.textTertiary)
         }
         .padding(16)
         .darkCard()
@@ -138,5 +171,6 @@ private struct CheckItem: View {
 
 #Preview {
     HomeView(selectedTab: .constant(0))
+        .environmentObject(MindWaveViewModel())
         .preferredColorScheme(.dark)
 }

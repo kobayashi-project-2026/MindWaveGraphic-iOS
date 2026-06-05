@@ -9,28 +9,17 @@ import Combine
 // MARK: - Live Wave View
 
 struct LiveWaveView: View {
-    @State private var selectedIndex = 0
+    @EnvironmentObject var viewModel: MindWaveViewModel
     @State private var elapsed: Int = 0
+    @State private var showDebug = false
+    @State private var demoScenarioIndex = 0
 
     private let sessionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    private var scenario: MindSampleScenario {
-        MindSampleScenario.allScenarios[selectedIndex]
-    }
-
-    private var result: StressScoreResult {
-        StressScoreCalculator.calculate(
-            currentHeartRate: scenario.currentHeartRate,
-            averageHeartRate: scenario.averageHeartRate,
-            currentHRV: scenario.currentHRV,
-            averageHRV: scenario.averageHRV
-        )
-    }
-
+    private var result: StressScoreResult { viewModel.stressResult }
     private var stressColor: Color { MindWaveTheme.stressColor(score: result.stressScore) }
     private var stressLabel: String { MindWaveTheme.stressLabel(score: result.stressScore) }
 
-    // 波の振幅・速度をスコアに比例させる
     private var waveAmplitude: Double { 0.28 + (result.stressScore / 100.0) * 0.44 }
     private var waveSpeed: Double     { 0.55 + (result.stressScore / 100.0) * 0.55 }
 
@@ -41,28 +30,36 @@ struct LiveWaveView: View {
             VStack(spacing: 0) {
                 headerBar
 
+                // 推定の説明ラベル
+                statusSubtitle
+                    .padding(.bottom, 4)
+
                 // アニメーション波形
                 WaveCanvas(amplitude: waveAmplitude, speed: waveSpeed, color: stressColor)
-                    .frame(height: 160)
+                    .frame(height: 150)
 
-                Spacer(minLength: 12)
+                Spacer(minLength: 8)
 
                 // スコア・指標カード
                 scoreCard
                     .padding(.horizontal, 20)
 
-                Spacer(minLength: 16)
+                // データ元表示
+                dataSourceBadge
+                    .padding(.top, 8)
 
-                // シナリオ切り替え
-                scenarioPicker
+                Spacer(minLength: 4)
+
+                // Debug セクション（開発確認用）
+                debugSection
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 12)
             }
         }
         .onReceive(sessionTimer) { _ in elapsed += 1 }
     }
 
-    // MARK: Header
+    // MARK: - Header
 
     private var headerBar: some View {
         HStack {
@@ -96,49 +93,62 @@ struct LiveWaveView: View {
         String(format: "%02d:%02d", elapsed / 60, elapsed % 60)
     }
 
-    // MARK: Score Card
+    // MARK: - Status Subtitle
+
+    private var statusSubtitle: some View {
+        VStack(spacing: 3) {
+            Text("現在の状態")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(MindWaveTheme.textTertiary)
+                .tracking(1)
+                .textCase(.uppercase)
+            Text("Mind Waveが心拍とHRVの変化をもとに推定しています")
+                .font(.system(size: 11, weight: .light))
+                .foregroundStyle(MindWaveTheme.textTertiary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 20)
+    }
+
+    // MARK: - Score Card
 
     private var scoreCard: some View {
         VStack(spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
 
-                // 緊張不安定度
                 VStack(alignment: .leading, spacing: 4) {
                     Text("緊張不安定度")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(MindWaveTheme.textTertiary)
                         .tracking(0.5)
-
                     HStack(alignment: .firstTextBaseline, spacing: 3) {
                         Text(String(format: "%.0f", result.stressScore))
                             .font(.system(size: 50, weight: .thin, design: .rounded))
                             .foregroundStyle(stressColor)
                             .contentTransition(.numericText())
-                            .animation(.easeInOut(duration: 0.4), value: selectedIndex)
+                            .animation(.easeInOut(duration: 0.4), value: result.stressScore)
                         Text("/ 100")
                             .font(.caption)
                             .foregroundStyle(MindWaveTheme.textTertiary)
                             .padding(.bottom, 8)
                     }
-
                     Text(stressLabel)
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(stressColor)
-                        .animation(.easeInOut(duration: 0.3), value: selectedIndex)
+                        .animation(.easeInOut(duration: 0.3), value: result.stressScore)
                 }
 
                 Spacer()
 
-                // 心拍数・HRV
                 VStack(alignment: .trailing, spacing: 10) {
                     miniMetric(
                         label: "心拍数",
-                        value: String(format: "%.0f", scenario.currentHeartRate),
+                        value: String(format: "%.0f", viewModel.currentHeartRate),
                         unit: "bpm"
                     )
                     miniMetric(
                         label: "HRV（SDNN）",
-                        value: String(format: "%.0f", scenario.currentHRV),
+                        value: String(format: "%.0f", viewModel.currentHRV),
                         unit: "ms"
                     )
                 }
@@ -148,7 +158,6 @@ struct LiveWaveView: View {
             Divider()
                 .background(Color.white.opacity(0.08))
 
-            // 変化率（研究発表用）
             HStack(spacing: 0) {
                 rateCell(label: "心拍上昇率", value: result.heartRateIncreaseRate)
                 Spacer()
@@ -170,7 +179,7 @@ struct LiveWaveView: View {
                     .font(.system(size: 22, weight: .light))
                     .foregroundStyle(MindWaveTheme.textPrimary)
                     .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.4), value: selectedIndex)
+                    .animation(.easeInOut(duration: 0.4), value: result.stressScore)
                 Text(unit)
                     .font(.system(size: 10))
                     .foregroundStyle(MindWaveTheme.textSecondary)
@@ -191,32 +200,68 @@ struct LiveWaveView: View {
                     ? Color(red: 0.90, green: 0.40, blue: 0.40)
                     : MindWaveTheme.accent
                 )
-                .animation(.easeInOut(duration: 0.3), value: selectedIndex)
+                .animation(.easeInOut(duration: 0.3), value: result.stressScore)
         }
     }
 
-    // MARK: Scenario Picker
+    // MARK: - Data Source Badge
 
-    private var scenarioPicker: some View {
-        HStack(spacing: 8) {
-            ForEach(MindSampleScenario.allScenarios.indices, id: \.self) { i in
-                let isSelected = selectedIndex == i
-                Button {
-                    withAnimation(.easeInOut(duration: 0.3)) { selectedIndex = i }
-                } label: {
-                    Text(MindSampleScenario.allScenarios[i].name)
-                        .font(.system(size: 13, weight: isSelected ? .medium : .regular))
-                        .foregroundStyle(isSelected ? Color.black : MindWaveTheme.textSecondary)
-                        .padding(.vertical, 9)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(isSelected
-                                      ? MindWaveTheme.accent
-                                      : Color.white.opacity(0.07))
-                        )
+    private var dataSourceBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: viewModel.isUsingDemoData ? "info.circle" : "heart.fill")
+                .font(.system(size: 9))
+                .foregroundStyle(MindWaveTheme.textTertiary)
+            Text(viewModel.dataSourceLabel)
+                .font(.system(size: 10, weight: .light))
+                .foregroundStyle(MindWaveTheme.textTertiary)
+        }
+    }
+
+    // MARK: - Debug Section（開発確認用：デモデータ切り替え）
+
+    private var debugSection: some View {
+        VStack(spacing: 6) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { showDebug.toggle() }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9))
+                        .rotationEffect(.degrees(showDebug ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.2), value: showDebug)
+                    Text("Debug / デモデータ切り替え")
+                        .font(.system(size: 10, weight: .medium))
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(MindWaveTheme.textTertiary)
+            }
+            .buttonStyle(.plain)
+
+            if showDebug {
+                HStack(spacing: 6) {
+                    ForEach(MindSampleScenario.allScenarios.indices, id: \.self) { i in
+                        let isSelected = demoScenarioIndex == i
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                demoScenarioIndex = i
+                                viewModel.loadDemoScenario(index: i)
+                            }
+                        } label: {
+                            Text(MindSampleScenario.allScenarios[i].name)
+                                .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                                .foregroundStyle(isSelected ? Color.black : MindWaveTheme.textTertiary)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(isSelected
+                                              ? MindWaveTheme.accent.opacity(0.7)
+                                              : Color.white.opacity(0.06))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
     }
@@ -227,8 +272,8 @@ struct LiveWaveView: View {
 /// TimelineView(.animation) でフレームごとに位相を更新し、
 /// スコアに応じて振幅・速度が変化する3層の正弦波を描画する。
 struct WaveCanvas: View {
-    let amplitude: Double   // 0.28〜0.72（stressScoreで変化）
-    let speed: Double       // 0.55〜1.1（stressScoreで変化）
+    let amplitude: Double
+    let speed: Double
     let color: Color
 
     var body: some View {
@@ -246,7 +291,6 @@ struct WaveCanvas: View {
                     let lOpacity = 0.75 - Double(layer) * 0.20
                     let lineW    = layer == 0 ? 1.8 : 1.2
 
-                    // 波の塗りつぶし
                     var fill = Path()
                     fill.move(to: CGPoint(x: 0, y: h))
                     for x in stride(from: 0.0, through: w, by: 2.0) {
@@ -257,7 +301,6 @@ struct WaveCanvas: View {
                     fill.closeSubpath()
                     ctx.fill(fill, with: .color(color.opacity(lOpacity * 0.11)))
 
-                    // 波の線
                     var line = Path()
                     var first = true
                     for x in stride(from: 0.0, through: w, by: 2.0) {
@@ -276,5 +319,6 @@ struct WaveCanvas: View {
 
 #Preview {
     LiveWaveView()
+        .environmentObject(MindWaveViewModel())
         .preferredColorScheme(.dark)
 }

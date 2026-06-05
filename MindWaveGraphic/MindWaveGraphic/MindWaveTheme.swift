@@ -46,8 +46,8 @@ enum MindWaveTheme {
     static func stressLabel(score: Double) -> String {
         switch score {
         case 0..<40:  return "落ち着き"
-        case 40..<70: return "軽い緊張"
-        default:      return "強い緊張"
+        case 40..<70: return "やや高まり"
+        default:      return "高い緊張"
         }
     }
 }

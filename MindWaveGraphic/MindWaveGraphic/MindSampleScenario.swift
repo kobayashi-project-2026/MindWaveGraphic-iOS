@@ -5,7 +5,8 @@
 
 import Foundation
 
-/// HealthKit連携前の動作確認用ダミーシナリオ
+/// HealthKit連携前、またはHealthKitデータが取得できない場合に使うデモデータ。
+/// 本番UIには直接表示せず、ViewModelを経由して利用する。
 struct MindSampleScenario: Identifiable {
     let id = UUID()
     let name: String
