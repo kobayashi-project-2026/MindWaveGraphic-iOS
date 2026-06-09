@@ -39,6 +39,7 @@ struct HomeView: View {
                     preparationCard
 
                     // ─── ライブ波形へ移動ボタン ───────────────────
+                    // ライブ画面に入ったら「ライブ取得開始」で自動更新を開始できる。
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) { selectedTab = 1 }
                     } label: {

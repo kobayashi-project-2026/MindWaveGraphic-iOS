@@ -7,6 +7,25 @@ import Foundation
 import HealthKit
 
 // ─────────────────────────────────────────────────────────
+// HealthMetricFetchResult
+// HealthKitから1つの指標を取得した結果をまとめる構造体。
+// 取得成否・取得元（最新1件か平均か）・メッセージ・時刻を保持する。
+// ─────────────────────────────────────────────────────────
+struct HealthMetricFetchResult {
+    /// 取得できた値。取得失敗の場合は nil。
+    let value: Double?
+    /// どの方法で取得したかを示す文字列（例: "最新1件", "直近5分平均"）
+    let source: String
+    /// 診断表示・ログ用のメッセージ
+    let message: String
+    /// サンプルの取得時刻（未取得の場合は nil）
+    let sampleDate: Date?
+
+    /// 取得に成功したか
+    var isSuccess: Bool { value != nil }
+}
+
+// ─────────────────────────────────────────────────────────
 // HealthKitManager
 // HealthKitへの読み取り専用アクセスをまとめたクラス。
 // 書き込みは行わない。
@@ -35,7 +54,6 @@ final class HealthKitManager {
 
     /// このデバイスでHealthKitが利用可能か確認する。
     /// iOSシミュレータや非Apple端末ではfalseになる。
-    /// falseの場合はHealthKit関連の処理を全てスキップする。
     static var isAvailable: Bool {
         HKHealthStore.isHealthDataAvailable()
     }
@@ -55,75 +73,99 @@ final class HealthKitManager {
         print("[HealthKit] 権限リクエスト完了")
     }
 
-    // MARK: - Recent Heart Rate
+    // MARK: - Best Current Heart Rate（段階的フォールバック）
 
-    /// 直近 minutes 分間の平均心拍数（bpm）を取得する。
-    /// Apple Watchを装着・接続中であれば心拍数は数分おきに記録される。
-    /// 取得できない場合は (nil, 理由メッセージ) を返す。
-    func fetchRecentHeartRate(minutes: Int = 30) async -> (value: Double?, message: String) {
-        let result = await fetchRecentAverage(
-            type: heartRateType,
-            unit: HKUnit.count().unitDivided(by: .minute()),
-            minutes: minutes
-        )
-        if let v = result {
-            let msg = "直近\(minutes)分の平均: \(String(format: "%.1f", v)) bpm"
+    /// 現在の心拍数として使える最善の値を取得する。
+    ///
+    /// 取得優先順位：
+    ///   1. 最新の1サンプル（時刻問わず最新）
+    ///   2. 直近1分の平均
+    ///   3. 直近5分の平均
+    ///   4. 直近30分の平均
+    ///
+    /// 最新1件が取れない場合、Apple WatchからiPhoneへの同期が
+    /// まだ完了していない可能性がある。段階的にフォールバックする。
+    func fetchBestCurrentHeartRate() async -> HealthMetricFetchResult {
+        let unit = HKUnit.count().unitDivided(by: .minute())
+
+        // ① 最新の1サンプル（最もリアルタイムに近い）
+        if let v = await fetchLatest(type: heartRateType, unit: unit) {
+            let msg = "latest HR: \(String(format: "%.1f", v)) bpm"
             print("[HealthKit] \(msg)")
-            return (v, msg)
-        } else {
-            let msg = "直近\(minutes)分の心拍データなし（Apple Watch未装着・未同期の可能性）"
-            print("[HealthKit] \(msg)")
-            return (nil, msg)
+            return HealthMetricFetchResult(value: v, source: "最新1件", message: msg, sampleDate: Date())
         }
+
+        // ② 直近1分の平均（Apple Watchが直前に同期していれば取れる）
+        if let v = await fetchRecentAverage(type: heartRateType, unit: unit, minutes: 1) {
+            let msg = "HR 直近1分平均: \(String(format: "%.1f", v)) bpm"
+            print("[HealthKit] \(msg)")
+            return HealthMetricFetchResult(value: v, source: "直近1分平均", message: msg, sampleDate: Date())
+        }
+
+        // ③ 直近5分の平均
+        if let v = await fetchRecentAverage(type: heartRateType, unit: unit, minutes: 5) {
+            let msg = "HR 直近5分平均: \(String(format: "%.1f", v)) bpm"
+            print("[HealthKit] \(msg)")
+            return HealthMetricFetchResult(value: v, source: "直近5分平均", message: msg, sampleDate: Date())
+        }
+
+        // ④ 直近30分の平均
+        if let v = await fetchRecentAverage(type: heartRateType, unit: unit, minutes: 30) {
+            let msg = "HR 直近30分平均: \(String(format: "%.1f", v)) bpm"
+            print("[HealthKit] \(msg)")
+            return HealthMetricFetchResult(value: v, source: "直近30分平均", message: msg, sampleDate: Date())
+        }
+
+        // 全て失敗 → Apple Watch未装着か未同期の可能性が高い
+        let msg = "心拍取得失敗（Apple Watch未接続または未同期）"
+        print("[HealthKit] \(msg)")
+        return HealthMetricFetchResult(value: nil, source: "none", message: msg, sampleDate: nil)
     }
 
-    // MARK: - Recent HRV (段階的フォールバック)
+    // MARK: - Best Current HRV（段階的フォールバック）
 
-    /// Apple WatchのHRV（SDNN, ms）を取得する。
-    /// HRVはApple Watchの深呼吸セッションや睡眠中にしか記録されないことが多いため、
-    /// 直近30分 → 直近24時間 → 全期間最新値 の順にフォールバックして取得を試みる。
-    /// それでも取れない場合は (nil, 理由) を返す。アプリはクラッシュしない。
-    func fetchRecentHRV() async -> (value: Double?, message: String) {
-        // Step1: 直近30分のHRVを試みる
-        if let v = await fetchRecentAverage(
-            type: hrvType,
-            unit: .secondUnit(with: .milli),
-            minutes: 30
-        ) {
-            let msg = "直近30分: \(String(format: "%.1f", v)) ms"
-            print("[HealthKit] HRV（\(msg)）")
-            return (v, msg)
+    /// 現在のHRV（SDNN）として使える最善の値を取得する。
+    ///
+    /// 取得優先順位：
+    ///   1. 直近30分
+    ///   2. 直近24時間（睡眠中のHRVが入っていることが多い）
+    ///   3. 全期間の最新値
+    ///
+    /// Apple WatchのHRVは深呼吸セッションや睡眠中に記録されるため、
+    /// リアルタイム取得が難しい。最善の過去値を使う。
+    func fetchBestCurrentHRV() async -> HealthMetricFetchResult {
+        let unit = HKUnit.secondUnit(with: .milli)
+
+        // ① 直近30分（最もリアルタイムに近い）
+        if let v = await fetchRecentAverage(type: hrvType, unit: unit, minutes: 30) {
+            let msg = "HRV 直近30分: \(String(format: "%.1f", v)) ms"
+            print("[HealthKit] \(msg)")
+            return HealthMetricFetchResult(value: v, source: "直近30分", message: msg, sampleDate: Date())
         }
 
-        // Step2: 直近24時間を試みる（Apple WatchのHRVは睡眠中に記録されることが多い）
-        if let v = await fetchRecentAverage(
-            type: hrvType,
-            unit: .secondUnit(with: .milli),
-            minutes: 60 * 24
-        ) {
-            let msg = "直近24時間: \(String(format: "%.1f", v)) ms"
-            print("[HealthKit] HRV（\(msg)）")
-            return (v, msg)
+        // ② 直近24時間（睡眠中に記録されたHRVを捕捉）
+        if let v = await fetchRecentAverage(type: hrvType, unit: unit, minutes: 60 * 24) {
+            let msg = "HRV 直近24時間: \(String(format: "%.1f", v)) ms"
+            print("[HealthKit] \(msg)")
+            return HealthMetricFetchResult(value: v, source: "直近24時間", message: msg, sampleDate: Date())
         }
 
-        // Step3: 全期間で最新の1件を取得する
-        if let v = await fetchLatest(type: hrvType, unit: .secondUnit(with: .milli)) {
-            let msg = "最新記録: \(String(format: "%.1f", v)) ms"
-            print("[HealthKit] HRV（\(msg)）")
-            return (v, msg)
+        // ③ 全期間の最新1件
+        if let v = await fetchLatest(type: hrvType, unit: unit) {
+            let msg = "HRV 最新記録: \(String(format: "%.1f", v)) ms"
+            print("[HealthKit] \(msg)")
+            return HealthMetricFetchResult(value: v, source: "最新記録", message: msg, sampleDate: Date())
         }
 
-        // 全て失敗した場合 → HRVデータなし
         let msg = "HRVデータなし（Apple WatchのHRV測定が必要）"
         print("[HealthKit] \(msg)")
-        return (nil, msg)
+        return HealthMetricFetchResult(value: nil, source: "none", message: msg, sampleDate: nil)
     }
 
-    // MARK: - Average Heart Rate (個人ベースライン)
+    // MARK: - Average Heart Rate（個人ベースライン）
 
     /// 過去 days 日間の平均心拍数（bpm）を返す。
-    /// この値をスコア計算の個人ベースライン（averageHeartRate）として使用する。
-    /// 取得できない場合は nil。
+    /// スコア計算の個人ベースライン（averageHeartRate）として使用する。
     func fetchAverageHeartRate(days: Int = 7) async -> Double? {
         let result = await fetchAverage(
             type: heartRateType,
@@ -133,14 +175,15 @@ final class HealthKitManager {
         if let v = result {
             print("[HealthKit] \(days)日平均心拍数: \(String(format: "%.1f", v)) bpm")
         } else {
-            print("[HealthKit] \(days)日平均心拍数：データなし（HealthKitに記録がない可能性）")
+            print("[HealthKit] \(days)日平均心拍数：データなし")
         }
         return result
     }
 
+    // MARK: - Average HRV（個人ベースライン）
+
     /// 過去 days 日間の平均HRV・SDNN（ms）を返す。
-    /// この値をスコア計算の個人ベースライン（averageHRV）として使用する。
-    /// 取得できない場合は nil。
+    /// スコア計算の個人ベースライン（averageHRV）として使用する。
     func fetchAverageHRV(days: Int = 7) async -> Double? {
         let result = await fetchAverage(
             type: hrvType,
@@ -155,13 +198,11 @@ final class HealthKitManager {
         return result
     }
 
-    // MARK: - Private: 最新の1サンプルを取得
+    // MARK: - Private: 最新1サンプルを取得
 
-    /// HealthKitから最新の1サンプルを取得する汎用関数。
     private func fetchLatest(type: HKQuantityType, unit: HKUnit) async -> Double? {
         let store = self.store
         return await withCheckedContinuation { continuation in
-            // 開始日時の降順でソートし、最新の1件のみ取得する
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
             let query = HKSampleQuery(
                 sampleType: type,
@@ -184,7 +225,6 @@ final class HealthKitManager {
 
     // MARK: - Private: 直近N分の平均を取得
 
-    /// 直近 minutes 分間のサンプルを取得して平均を返す。
     private func fetchRecentAverage(type: HKQuantityType, unit: HKUnit, minutes: Int) async -> Double? {
         let now   = Date()
         let start = Calendar.current.date(byAdding: .minute, value: -minutes, to: now) ?? now
@@ -193,17 +233,14 @@ final class HealthKitManager {
 
     // MARK: - Private: 過去N日の平均を取得
 
-    /// 過去 days 日間のサンプルを取得して平均を返す。
     private func fetchAverage(type: HKQuantityType, unit: HKUnit, days: Int) async -> Double? {
         let now   = Date()
         let start = Calendar.current.date(byAdding: .day, value: -days, to: now) ?? now
         return await fetchAverageBetween(type: type, unit: unit, start: start, end: now)
     }
 
-    // MARK: - Private: 期間指定の平均取得（共通処理）
+    // MARK: - Private: 期間指定の平均（共通処理）
 
-    /// start〜end の期間に記録されたサンプルの平均値を返す。
-    /// サンプルが0件の場合は nil を返す。
     private func fetchAverageBetween(
         type: HKQuantityType,
         unit: HKUnit,
