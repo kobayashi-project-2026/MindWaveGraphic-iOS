@@ -217,10 +217,11 @@ struct LiveWaveView: View {
         }
     }
 
-    // MARK: - Debug Section（開発確認用：デモデータ切り替え）
+    // MARK: - Debug Section（開発確認用：データ取得状態 + デモデータ切り替え）
 
     private var debugSection: some View {
         VStack(spacing: 6) {
+            // 開閉ボタン
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { showDebug.toggle() }
             } label: {
@@ -229,7 +230,7 @@ struct LiveWaveView: View {
                         .font(.system(size: 9))
                         .rotationEffect(.degrees(showDebug ? 90 : 0))
                         .animation(.easeInOut(duration: 0.2), value: showDebug)
-                    Text("Debug / デモデータ切り替え")
+                    Text("Debug")
                         .font(.system(size: 10, weight: .medium))
                 }
                 .foregroundStyle(MindWaveTheme.textTertiary)
@@ -237,32 +238,86 @@ struct LiveWaveView: View {
             .buttonStyle(.plain)
 
             if showDebug {
-                HStack(spacing: 6) {
-                    ForEach(MindSampleScenario.allScenarios.indices, id: \.self) { i in
-                        let isSelected = demoScenarioIndex == i
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.3)) {
-                                demoScenarioIndex = i
-                                viewModel.loadDemoScenario(index: i)
-                            }
-                        } label: {
-                            Text(MindSampleScenario.allScenarios[i].name)
-                                .font(.system(size: 11, weight: isSelected ? .medium : .regular))
-                                .foregroundStyle(isSelected ? Color.black : MindWaveTheme.textTertiary)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: .infinity)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(isSelected
-                                              ? MindWaveTheme.accent.opacity(0.7)
-                                              : Color.white.opacity(0.06))
-                                )
+                VStack(spacing: 8) {
+                    // ─── 診断情報 ───────────────────────────────
+                    VStack(spacing: 4) {
+                        // HealthKit取得状況
+                        debugRow(label: "心拍数",
+                                 value: viewModel.didFetchHeartRate
+                                    ? String(format: "%.0f bpm ✓", viewModel.currentHeartRate)
+                                    : "未取得")
+                        debugRow(label: "HRV（SDNN）",
+                                 value: viewModel.didFetchHRV
+                                    ? String(format: "%.0f ms ✓", viewModel.currentHRV)
+                                    : "未取得")
+                        debugRow(label: "スコア",
+                                 value: String(format: "%.1f", result.stressScore))
+                        debugRow(label: "最終取得",
+                                 value: viewModel.lastFetchDate.map {
+                                    let f = DateFormatter()
+                                    f.dateFormat = "HH:mm:ss"
+                                    return f.string(from: $0)
+                                 } ?? "未取得")
+                        if !viewModel.lastFetchMessage.isEmpty {
+                            Text(viewModel.lastFetchMessage)
+                                .font(.system(size: 9, weight: .light))
+                                .foregroundStyle(MindWaveTheme.textTertiary)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .buttonStyle(.plain)
+                    }
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.white.opacity(0.04))
+                    )
+
+                    // ─── デモシナリオ切り替え ────────────────────
+                    Text("デモデータ切り替え")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(MindWaveTheme.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    HStack(spacing: 6) {
+                        ForEach(MindSampleScenario.allScenarios.indices, id: \.self) { i in
+                            let isSelected = demoScenarioIndex == i
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.3)) {
+                                    demoScenarioIndex = i
+                                    viewModel.loadDemoScenario(index: i)
+                                }
+                            } label: {
+                                Text(MindSampleScenario.allScenarios[i].name)
+                                    .font(.system(size: 11, weight: isSelected ? .medium : .regular))
+                                    .foregroundStyle(isSelected ? Color.black : MindWaveTheme.textTertiary)
+                                    .padding(.vertical, 6)
+                                    .frame(maxWidth: .infinity)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(isSelected
+                                                  ? MindWaveTheme.accent.opacity(0.7)
+                                                  : Color.white.opacity(0.06))
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+        }
+    }
+
+    /// Debug セクション内の1行ラベル＋値の表示
+    private func debugRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(MindWaveTheme.textTertiary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(MindWaveTheme.textSecondary)
         }
     }
 }

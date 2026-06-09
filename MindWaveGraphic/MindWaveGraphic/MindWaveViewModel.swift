@@ -6,25 +6,52 @@
 import Foundation
 import Combine
 
-/// HealthKit実データとデモデータを切り替えながら、スコア計算の入力値を管理する。
-/// UIはこのViewModelのみを参照し、データ元を意識しない。
+// ─────────────────────────────────────────────────────────
+// MindWaveViewModel
+// HealthKit実データとデモデータを切り替えながら、
+// スコア計算の入力値と画面表示状態を管理する。
+//
+// UIはこのViewModelのみを参照する。
+// データがHealthKitから来るかデモから来るかをUIは意識しない。
+// ─────────────────────────────────────────────────────────
 @MainActor
 final class MindWaveViewModel: ObservableObject {
 
-    // MARK: - Published（UIが参照する値）
+    // MARK: - Published: スコア計算の入力値
 
+    /// 現在（直近）の心拍数（bpm）
     @Published var currentHeartRate: Double = 58
+    /// 個人の平常時平均心拍数（bpm）。過去7日の平均をHealthKitから取得する。
     @Published var averageHeartRate: Double = 65
+    /// 現在（直近）のHRV・SDNN（ms）
     @Published var currentHRV: Double       = 52
+    /// 個人の平常時平均HRV（ms）。過去7日の平均をHealthKitから取得する。
     @Published var averageHRV: Double       = 45
 
-    @Published var isUsingDemoData: Bool      = true
-    @Published var dataSourceLabel: String    = "デモデータで表示中"
-    @Published var authorizationStatusMessage = "HealthKit：未許可"
+    // MARK: - Published: データ元・状態表示
 
-    // MARK: - Computed Score
+    /// デモデータで動作中か否か
+    @Published var isUsingDemoData: Bool = true
+    /// 画面下部に表示するデータ元ラベル
+    @Published var dataSourceLabel: String = "デモデータで表示中"
+    /// HealthKit接続状態ラベル（ホーム画面に表示）
+    @Published var healthKitStatusLabel: String = "HealthKit：未許可"
 
-    /// StressScoreCalculator を使って緊張不安定度を算出する
+    // MARK: - Published: 診断表示用
+
+    /// 最後にHealthKit取得を試みた結果のメッセージ
+    @Published var lastFetchMessage: String = "まだ取得していません"
+    /// 最後にHealthKit取得を試みた日時（nilは未取得）
+    @Published var lastFetchDate: Date? = nil
+    /// 心拍数が取得できたか
+    @Published var didFetchHeartRate: Bool = false
+    /// HRVが取得できたか
+    @Published var didFetchHRV: Bool = false
+
+    // MARK: - Computed: スコア計算
+
+    /// StressScoreCalculator を使って緊張不安定度（0〜100）を算出する。
+    /// 計算式は FORMULA.md 参照。
     var stressResult: StressScoreResult {
         StressScoreCalculator.calculate(
             currentHeartRate: currentHeartRate,
@@ -37,22 +64,26 @@ final class MindWaveViewModel: ObservableObject {
     // MARK: - Private
 
     // デモ優先フラグ
-    // true のとき HealthKit 許可後も実データを取得せず、デモデータで動作し続ける。
-    // iPhone 実機での波形・スコア確認が完了したら false に変更し、
-    // Apple Watch + HealthKit 実接続フェーズへ移行する。
-    private let forceDemoMode = true
+    // false: HealthKit実データを取得する（本番モード）
+    // true:  実データを取得せずデモデータで動作する（デモ安定確認用）
+    // iPhone実機での波形確認が完了したため false に設定している。
+    // 再度デモ固定に戻したい場合は true に変更する。
+    private let forceDemoMode = false
 
     private let hkManager = HealthKitManager()
 
     // MARK: - Init
 
     init() {
-        loadDemoScenario(index: 0)  // 起動時はデモデータ（平常時）を表示
+        // 起動時はデモデータ（平常時シナリオ）で表示する。
+        // HealthKit接続はユーザーが許可ボタンを押した後に行う。
+        loadDemoScenario(index: 0)
     }
 
     // MARK: - Demo Data
 
-    /// 開発確認用デモシナリオを読み込む。HealthKitデータが取れない場合のフォールバックにも使う。
+    /// デモシナリオを読み込む。
+    /// HealthKitデータが取れない場合のフォールバックにも使用する。
     func loadDemoScenario(index: Int) {
         guard index < MindSampleScenario.allScenarios.count else { return }
         let s = MindSampleScenario.allScenarios[index]
@@ -67,51 +98,111 @@ final class MindWaveViewModel: ObservableObject {
     // MARK: - HealthKit Authorization
 
     /// HealthKitの読み取り許可をリクエストする。
-    /// forceDemoMode = true の間は許可ダイアログを表示するが実データは取得しない。
-    /// 許可はデモ後フェーズに備えて事前取得する目的で呼ぶ。
+    /// 許可が得られた場合、forceDemoMode=false であれば即座にデータ取得を試みる。
     func requestHealthKitAuthorization() async {
         guard HealthKitManager.isAvailable else {
-            authorizationStatusMessage = "HealthKit：このデバイスでは利用不可"
+            // iOSシミュレータなどHealthKitが使えないデバイス
+            healthKitStatusLabel = "HealthKit：このデバイスでは利用不可"
+            print("[MindWave] HealthKit利用不可デバイス")
             return
         }
         do {
             try await hkManager.requestAuthorization()
+            print("[MindWave] HealthKit authorization requested")
             if forceDemoMode {
-                // デモモード中は実データを取得せずデモデータを維持する
-                authorizationStatusMessage = "HealthKit：許可済み（デモモード中）"
+                // デモモード中は許可だけ行い実データは取得しない
+                healthKitStatusLabel = "HealthKit：許可済み（デモモード）"
             } else {
-                authorizationStatusMessage = "HealthKit：許可済み"
+                healthKitStatusLabel = "HealthKit：許可済み"
+                // 許可取得直後にデータ取得を試みる
                 await fetchHealthKitData()
             }
         } catch {
-            authorizationStatusMessage = "HealthKit：リクエスト失敗"
+            healthKitStatusLabel = "HealthKit：許可リクエスト失敗"
+            print("[MindWave] authorization error: \(error)")
         }
     }
 
     // MARK: - HealthKit Fetch
 
-    /// HealthKitから心拍数・HRV（最新値と7日平均）を取得する。
-    /// いずれかの値が取れない場合はデモデータにフォールバックする。
+    /// HealthKitから心拍数とHRVを取得して波形に反映する。
+    ///
+    /// データの組み合わせに応じて以下のように動作する：
+    ///   心拍数○ + HRV○ → 完全HealthKitモード
+    ///   心拍数○ + HRV✗ → 心拍はリアル、HRVはデモ値を維持（部分接続）
+    ///   心拍数✗         → 完全デモフォールバック
+    ///
+    /// HealthKitのデータはApple Watchで記録され、iPhoneのヘルスケアアプリに
+    /// 同期されている必要がある。データが存在しない場合はデモに戻る。
     func fetchHealthKitData() async {
-        guard HealthKitManager.isAvailable else { return }
-
-        async let hrTask    = hkManager.fetchLatestHeartRate()
-        async let avgHRTask = hkManager.fetchAverageHeartRate(days: 7)
-        async let hrvTask   = hkManager.fetchLatestHRV()
-        async let avgHRVTask = hkManager.fetchAverageHRV(days: 7)
-
-        let (hr, avgHR, hrv, avgHRV) = await (hrTask, avgHRTask, hrvTask, avgHRVTask)
-
-        if let hr, let avgHR, let hrv, let avgHRV {
-            currentHeartRate = hr
-            averageHeartRate = avgHR
-            currentHRV       = hrv
-            averageHRV       = avgHRV
-            isUsingDemoData  = false
-            dataSourceLabel  = "HealthKitデータで表示中"
-        } else {
-            // Apple Watch未接続・データなしの場合はデモデータにフォールバック
-            loadDemoScenario(index: 0)
+        // HealthKit非対応デバイスでは何もしない
+        guard HealthKitManager.isAvailable else {
+            lastFetchMessage = "HealthKit利用不可"
+            return
         }
+        // デモモードフラグが立っている場合は取得しない
+        guard !forceDemoMode else {
+            lastFetchMessage = "デモモード中（forceDemoMode=true）"
+            return
+        }
+
+        print("[MindWave] HealthKit取得開始 ─────────────")
+
+        // 直近30分の平均心拍数（現在値として使用）
+        let hrResult    = await hkManager.fetchRecentHeartRate(minutes: 30)
+        // 過去7日の平均心拍数（個人ベースラインとして使用）
+        let avgHR       = await hkManager.fetchAverageHeartRate(days: 7)
+        // HRV: 直近30分→24時間→最新値 の順でフォールバック取得
+        let hrvResult   = await hkManager.fetchRecentHRV()
+        // 過去7日の平均HRV（個人ベースラインとして使用）
+        let avgHRV      = await hkManager.fetchAverageHRV(days: 7)
+
+        // 取得結果を診断用フラグに反映する
+        didFetchHeartRate = hrResult.value != nil
+        didFetchHRV       = hrvResult.value != nil
+        lastFetchDate     = Date()
+
+        print("[MindWave] 取得結果 HR:\(hrResult.value.map{String(format:"%.1f",$0)} ?? "nil") HRV:\(hrvResult.value.map{String(format:"%.1f",$0)} ?? "nil")")
+
+        // ──────────────────────────────────────────────
+        // 心拍数（現在値・平均）が取得できた場合
+        // ──────────────────────────────────────────────
+        if let hr = hrResult.value, let avg = avgHR {
+            currentHeartRate = hr
+            averageHeartRate = avg
+
+            if let hrv = hrvResult.value, let avgH = avgHRV {
+                // 心拍数・HRV 両方取得できた → 完全にHealthKitデータで動作
+                currentHRV      = hrv
+                averageHRV      = avgH
+                isUsingDemoData = false
+                dataSourceLabel = "HealthKitデータで表示中"
+                healthKitStatusLabel = "HealthKit：接続中"
+                lastFetchMessage = "心拍・HRV 取得成功"
+                print("[MindWave] Using HealthKit data ✓")
+
+            } else {
+                // HRVのみ取得できず → 心拍はリアル、HRVはデモ値を維持
+                // HRVはApple WatchのHRV測定がないと記録されないため取得できない場合がある
+                isUsingDemoData = false
+                dataSourceLabel = "心拍：HealthKit / HRV：デモ"
+                healthKitStatusLabel = "HealthKit：部分接続"
+                lastFetchMessage = "心拍: 成功 / HRV: \(hrvResult.message)"
+                print("[MindWave] Partial HealthKit - HRV fallback: \(hrvResult.message)")
+            }
+
+        } else {
+            // ──────────────────────────────────────────────
+            // 心拍数が取得できない → 完全デモデータにフォールバック
+            // HealthKitの心拍は Apple Watch → iPhone 同期が必要。
+            // 未装着・未同期の場合は取得できないためデモデータで継続する。
+            // ──────────────────────────────────────────────
+            loadDemoScenario(index: 0)
+            healthKitStatusLabel = "HealthKit：データなし"
+            lastFetchMessage = "心拍未取得: \(hrResult.message)"
+            print("[MindWave] Fallback to demo data: \(hrResult.message)")
+        }
+
+        print("[MindWave] ────────────── 取得完了")
     }
 }
