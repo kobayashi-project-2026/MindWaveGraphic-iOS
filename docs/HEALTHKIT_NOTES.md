@@ -26,6 +26,26 @@ RMSSDは副交感神経活動をより直接的に反映するとされ、スト
 
 ---
 
+## 現在の開発方針（デモ優先フェーズ）
+
+### USB未接続時の確認方法
+- xcodebuild + iOS Simulator でビルド・動作確認を行う
+- シミュレータでは HealthKit 実データは取得できない（仕様）
+- デモデータ（`MindSampleScenario`）でライブ波形・スコアの動作を確認する
+
+### 実機接続後の手順（フェーズ2.1）
+1. iPhone を USB 接続し Xcode から実機ビルドを実行する
+2. 起動後に「デモデータで表示中」の波形グラフィックが動くことを確認する
+3. 動作確認ができたら `MindWaveViewModel.forceDemoMode = false` に変更する
+4. Apple Watch のデータが HealthKit に蓄積されていることを確認してから実データ取得を試みる
+
+### デモで見せる内容（グラフィックMVP）
+- HealthKit 実データ取得前の「グラフィック MVP」として提示する
+- デモデータでも計算式・波形・スコア・状態ラベルは本番と同じロジックで動く
+- 「将来 Apple Watch のデータを繋げる構造は出来ている」ことを説明する
+
+---
+
 ## 実装状況（フェーズ2開始）
 
 HealthKit連携の土台を `HealthKitManager.swift` と `MindWaveViewModel.swift` として追加した。

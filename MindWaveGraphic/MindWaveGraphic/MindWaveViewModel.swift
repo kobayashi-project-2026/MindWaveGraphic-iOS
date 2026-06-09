@@ -36,6 +36,12 @@ final class MindWaveViewModel: ObservableObject {
 
     // MARK: - Private
 
+    // デモ優先フラグ
+    // true のとき HealthKit 許可後も実データを取得せず、デモデータで動作し続ける。
+    // iPhone 実機での波形・スコア確認が完了したら false に変更し、
+    // Apple Watch + HealthKit 実接続フェーズへ移行する。
+    private let forceDemoMode = true
+
     private let hkManager = HealthKitManager()
 
     // MARK: - Init
@@ -61,7 +67,8 @@ final class MindWaveViewModel: ObservableObject {
     // MARK: - HealthKit Authorization
 
     /// HealthKitの読み取り許可をリクエストする。
-    /// 許可が取れた場合はHealthKitデータの取得を試みる。
+    /// forceDemoMode = true の間は許可ダイアログを表示するが実データは取得しない。
+    /// 許可はデモ後フェーズに備えて事前取得する目的で呼ぶ。
     func requestHealthKitAuthorization() async {
         guard HealthKitManager.isAvailable else {
             authorizationStatusMessage = "HealthKit：このデバイスでは利用不可"
@@ -69,8 +76,13 @@ final class MindWaveViewModel: ObservableObject {
         }
         do {
             try await hkManager.requestAuthorization()
-            authorizationStatusMessage = "HealthKit：許可済み"
-            await fetchHealthKitData()
+            if forceDemoMode {
+                // デモモード中は実データを取得せずデモデータを維持する
+                authorizationStatusMessage = "HealthKit：許可済み（デモモード中）"
+            } else {
+                authorizationStatusMessage = "HealthKit：許可済み"
+                await fetchHealthKitData()
+            }
         } catch {
             authorizationStatusMessage = "HealthKit：リクエスト失敗"
         }
