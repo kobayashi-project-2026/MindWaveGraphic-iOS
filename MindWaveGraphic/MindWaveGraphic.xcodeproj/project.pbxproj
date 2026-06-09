@@ -252,6 +252,7 @@
 				CODE_SIGN_ENTITLEMENTS = MindWaveGraphic/MindWaveGraphic.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VX77SAQW4Q;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "心拍数と心拍変動を読み取り、心理状態のゆらぎを可視化するために使用します。";
@@ -285,6 +286,7 @@
 				CODE_SIGN_ENTITLEMENTS = MindWaveGraphic/MindWaveGraphic.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = VX77SAQW4Q;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "心拍数と心拍変動を読み取り、心理状態のゆらぎを可視化するために使用します。";
