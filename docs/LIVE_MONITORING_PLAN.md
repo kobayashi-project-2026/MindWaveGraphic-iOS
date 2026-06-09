@@ -27,6 +27,19 @@ Apple Watch → iPhoneのヘルスケアアプリ（HealthKit）← HealthKitMan
 
 ---
 
+## iPhone HealthKitポーリングの限界
+
+iPhone HealthKit ポーリングでは完全なリアルタイム心拍は難しい理由：
+- HealthKit は Push 型のリアルタイムストリームではない
+- Apple Watch がiPhoneに心拍を同期するタイミングはOSが制御する（安静時は数分間隔）
+- そのため 5秒ポーリングしても「前回と同じサンプル」が来ることが多い
+- `sampleIdentifier`（UUID）で前回と同じサンプルか判定できるようにした
+- 同じサンプルが続く場合は `sameSampleCount` が増え、Debug に「取得中：新規サンプルなし」と出る
+
+心拍を秒単位で取るには watchOS アプリが必要。
+
+---
+
 ## 次のフェーズ（フェーズ3：watchOSアプリ化）
 
 ### 目標
