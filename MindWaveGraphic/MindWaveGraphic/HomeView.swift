@@ -32,6 +32,9 @@ struct HomeView: View {
                     // ─── Apple Watch / HealthKit カード ──────────
                     watchConnectionCard
 
+                    // ─── Watch ライブ心拍 状態カード ──────────────
+                    watchLiveHeartRateCard
+
                     // ─── ライブ取得状態カード ─────────────────────
                     liveStatusCard
 
@@ -64,6 +67,60 @@ struct HomeView: View {
                 .padding(.horizontal, 20)
             }
         }
+    }
+
+    // MARK: - Watch ライブ心拍 状態カード
+
+    /// Apple Watch アプリから WatchConnectivity で受信した心拍数の状態を表示する。
+    private var watchLiveHeartRateCard: some View {
+        let wcManager = WatchConnectivityManager.shared
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "applewatch.watchface")
+                    .font(.system(size: 13))
+                    .foregroundStyle(MindWaveTheme.accent)
+                Text("Watch ライブ心拍")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MindWaveTheme.textTertiary)
+                    .tracking(1.2)
+                Spacer()
+                // Watchから受信があれば緑ドット
+                Circle()
+                    .fill(viewModel.latestWatchHeartRate != nil
+                          ? MindWaveTheme.accent : Color.gray.opacity(0.4))
+                    .frame(width: 6, height: 6)
+            }
+
+            statusRow("Watchライブ状態",
+                      value: viewModel.latestWatchHeartRate != nil ? "受信中" : "未受信",
+                      isOK: viewModel.latestWatchHeartRate != nil)
+            statusRow("Watch心拍数",
+                      value: viewModel.latestWatchHeartRate != nil
+                          ? String(format: "%.0f bpm", viewModel.latestWatchHeartRate!)
+                          : "---",
+                      isOK: viewModel.latestWatchHeartRate != nil)
+            statusRow("Watch受信回数",  value: "\(viewModel.watchMessageCount) 回",
+                      isOK: viewModel.watchMessageCount > 0)
+            statusRow("Watch最終受信",  value: formatTime(viewModel.latestWatchHeartRateDate))
+            statusRow("WCSession",     value: wcManager.watchConnectionStatusLabel,
+                      isOK: wcManager.watchConnectionStatusLabel == "接続済み")
+            statusRow("データ元",       value: viewModel.dataSourceLabel,
+                      isOK: !viewModel.isUsingDemoData)
+
+            // Watch未受信時の案内テキスト
+            if viewModel.latestWatchHeartRate == nil {
+                Text("Apple WatchでMind Waveアプリを開き「計測開始」を押してください。")
+                    .font(.system(size: 9, weight: .light))
+                    .foregroundStyle(MindWaveTheme.textTertiary)
+                    .multilineTextAlignment(.leading)
+            } else {
+                Text(viewModel.lastWatchMessage)
+                    .font(.system(size: 9, weight: .light))
+                    .foregroundStyle(MindWaveTheme.textTertiary)
+            }
+        }
+        .padding(16)
+        .darkCard()
     }
 
     // MARK: - Watch / HealthKit カード

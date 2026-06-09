@@ -16,7 +16,7 @@ import Combine
 final class MindWaveViewModel: ObservableObject {
 
     // MARK: - ビルド識別ラベル（実機で最新ビルドか確認するために使う）
-    let debugBuildLabel = "live-monitoring-v2"
+    let debugBuildLabel = "watch-live-hr-v1"
 
     // MARK: - スコア計算の入力値
 
@@ -61,6 +61,19 @@ final class MindWaveViewModel: ObservableObject {
     /// HealthKitのサンプリング特性の注意書き（画面に小さく表示する）
     let healthKitSamplingNote = "Apple Watchの記録・同期タイミングにより、値は数秒ごとに必ず変化するとは限りません。"
 
+    // MARK: - Watch ライブ心拍（WatchConnectivity受信）
+
+    /// Watchから受信した最新心拍数（nil = 未受信）
+    @Published var latestWatchHeartRate: Double?      = nil
+    /// 最新Watch心拍の記録時刻
+    @Published var latestWatchHeartRateDate: Date?    = nil
+    /// Watch心拍受信回数（増えていれば正常にWatch → iPhoneが通信している）
+    @Published var watchMessageCount: Int             = 0
+    /// WCSession接続状態ラベル
+    @Published var watchConnectionStatusLabel: String = "未接続"
+    /// 最後に受信したWatch心拍のサマリー
+    @Published var lastWatchMessage: String           = "---"
+
     // MARK: - Computed: スコア計算
 
     var stressResult: StressScoreResult {
@@ -86,6 +99,45 @@ final class MindWaveViewModel: ObservableObject {
 
     init() {
         loadDemoScenario(index: 0)
+        // WatchConnectivityManagerのコールバックを設定して、
+        // Watch心拍受信時に即時 applyWatchHeartRate を呼び出す。
+        subscribeToWatchHeartRate()
+    }
+
+    // MARK: - Watch ライブ心拍 コールバック登録
+
+    private func subscribeToWatchHeartRate() {
+        // WatchConnectivityManager（シングルトン）のコールバックにViewModelを接続する。
+        // Watch側から心拍が届くたびにこのクロージャが MainActor で呼ばれる。
+        WatchConnectivityManager.shared.onHeartRateReceived = { [weak self] hr, date in
+            self?.applyWatchHeartRate(hr, sampleDate: date)
+        }
+        // WCSession接続状態の変化を直接バインドする（Combineの代わりに手動同期）
+        // ※表示はHomeViewがWatchConnectivityManager.shared.watchConnectionStatusLabelを参照
+    }
+
+    // MARK: - Watch ライブ心拍 反映
+
+    /// Apple Watch側から WatchConnectivity 経由で心拍数を受信したときに呼ぶ。
+    /// currentHeartRate を即時更新し、波形パルスを発火する。
+    /// HealthKit ポーリングより優先される。
+    func applyWatchHeartRate(_ heartRate: Double, sampleDate: Date) {
+        currentHeartRate          = heartRate
+        latestHeartRateSampleDate = sampleDate
+        latestWatchHeartRate      = heartRate
+        latestWatchHeartRateDate  = sampleDate
+        watchMessageCount         = WatchConnectivityManager.shared.watchMessageCount
+        watchConnectionStatusLabel = WatchConnectivityManager.shared.watchConnectionStatusLabel
+        lastWatchMessage          = WatchConnectivityManager.shared.lastWatchMessage
+        isNewHeartRateSample      = true
+        sameSampleCount           = 0
+        livePulseTrigger         += 1
+        didFetchHeartRate         = true
+        isUsingDemoData           = false
+        dataSourceLabel           = "Watchライブ心拍 / HealthKit HRV"
+        lastFetchMessage          = "Watchライブ心拍を受信"
+        healthKitStatusLabel      = "Watch：ライブ計測中"
+        print("[MindWave] Watch心拍反映: \(String(format: "%.0f", heartRate)) bpm")
     }
 
     // MARK: - Demo Data

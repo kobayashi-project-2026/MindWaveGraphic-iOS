@@ -288,6 +288,16 @@ struct LiveWaveView: View {
                         debugRow("Build",      viewModel.debugBuildLabel)
                     }
 
+                    // ── Watch ライブ心拍 ──────────────────────────
+                    debugBlock {
+                        debugRow("Watch心拍",   viewModel.latestWatchHeartRate != nil
+                                               ? String(format: "%.0f bpm", viewModel.latestWatchHeartRate!)
+                                               : "未受信")
+                        debugRow("Watch受信数", "\(viewModel.watchMessageCount) 回")
+                        debugRow("Watch最終",   formatTime(viewModel.latestWatchHeartRateDate))
+                        debugRow("WCSession",   WatchConnectivityManager.shared.watchConnectionStatusLabel)
+                    }
+
                     // ── ライブ監視状態 ────────────────────────────
                     debugBlock {
                         debugRow("監視状態",    viewModel.liveMonitoringMessage)

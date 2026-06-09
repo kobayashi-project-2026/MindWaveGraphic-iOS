@@ -6,8 +6,38 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		43BF912E2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 43BF912D2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		43BF912F2FD8A08D00607844 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 43BF906A2FD280F400607844 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 43BF912C2FD8A08D00607844;
+			remoteInfo = "MindWaveGraphicWatch Watch App";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		43BF913B2FD8A08F00607844 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				43BF912E2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		43BF90722FD280F500607844 /* MindWaveGraphic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MindWaveGraphic.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		43BF91282FD8A08D00607844 /* MindWaveGraphicWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MindWaveGraphicWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		43BF912D2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MindWaveGraphicWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +46,22 @@
 			path = MindWaveGraphic;
 			sourceTree = "<group>";
 		};
+		43BF91312FD8A08D00607844 /* MindWaveGraphicWatch Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "MindWaveGraphicWatch Watch App";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		43BF906F2FD280F400607844 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		43BF912A2FD8A08D00607844 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +75,7 @@
 			isa = PBXGroup;
 			children = (
 				43BF90742FD280F500607844 /* MindWaveGraphic */,
+				43BF91312FD8A08D00607844 /* MindWaveGraphicWatch Watch App */,
 				43BF90732FD280F500607844 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +84,8 @@
 			isa = PBXGroup;
 			children = (
 				43BF90722FD280F500607844 /* MindWaveGraphic.app */,
+				43BF91282FD8A08D00607844 /* MindWaveGraphicWatch.app */,
+				43BF912D2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +115,47 @@
 			productReference = 43BF90722FD280F500607844 /* MindWaveGraphic.app */;
 			productType = "com.apple.product-type.application";
 		};
+		43BF91272FD8A08D00607844 /* MindWaveGraphicWatch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 43BF913C2FD8A08F00607844 /* Build configuration list for PBXNativeTarget "MindWaveGraphicWatch" */;
+			buildPhases = (
+				43BF91262FD8A08D00607844 /* Resources */,
+				43BF913B2FD8A08F00607844 /* Embed Watch Content */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				43BF91302FD8A08D00607844 /* PBXTargetDependency */,
+			);
+			name = MindWaveGraphicWatch;
+			packageProductDependencies = (
+			);
+			productName = MindWaveGraphicWatch;
+			productReference = 43BF91282FD8A08D00607844 /* MindWaveGraphicWatch.app */;
+			productType = "com.apple.product-type.application.watchapp2-container";
+		};
+		43BF912C2FD8A08D00607844 /* MindWaveGraphicWatch Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 43BF91382FD8A08F00607844 /* Build configuration list for PBXNativeTarget "MindWaveGraphicWatch Watch App" */;
+			buildPhases = (
+				43BF91292FD8A08D00607844 /* Sources */,
+				43BF912A2FD8A08D00607844 /* Frameworks */,
+				43BF912B2FD8A08D00607844 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				43BF91312FD8A08D00607844 /* MindWaveGraphicWatch Watch App */,
+			);
+			name = "MindWaveGraphicWatch Watch App";
+			packageProductDependencies = (
+			);
+			productName = "MindWaveGraphicWatch Watch App";
+			productReference = 43BF912D2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -81,6 +167,12 @@
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					43BF90712FD280F400607844 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					43BF91272FD8A08D00607844 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					43BF912C2FD8A08D00607844 = {
 						CreatedOnToolsVersion = 26.4.1;
 					};
 				};
@@ -100,12 +192,28 @@
 			projectRoot = "";
 			targets = (
 				43BF90712FD280F400607844 /* MindWaveGraphic */,
+				43BF91272FD8A08D00607844 /* MindWaveGraphicWatch */,
+				43BF912C2FD8A08D00607844 /* MindWaveGraphicWatch Watch App */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		43BF90702FD280F400607844 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		43BF91262FD8A08D00607844 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		43BF912B2FD8A08D00607844 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +230,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		43BF91292FD8A08D00607844 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		43BF91302FD8A08D00607844 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 43BF912C2FD8A08D00607844 /* MindWaveGraphicWatch Watch App */;
+			targetProxy = 43BF912F2FD8A08D00607844 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		43BF907B2FD280F600607844 /* Debug */ = {
@@ -312,6 +435,108 @@
 			};
 			name = Release;
 		};
+		43BF91392FD8A08F00607844 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "MindWaveGraphicWatch Watch App/MindWaveGraphicWatch.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = V39W86Q4G8;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = MindWaveGraphicWatch;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "心拍数をリアルタイムで計測し、Mind Waveアプリに送信するために使用します。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトセッションとして心拍数を記録するために使用します。";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKWatchOnly = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.takakikeita.MindWaveGraphicWatch.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.4;
+			};
+			name = Debug;
+		};
+		43BF913A2FD8A08F00607844 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "MindWaveGraphicWatch Watch App/MindWaveGraphicWatch.entitlements";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = V39W86Q4G8;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = MindWaveGraphicWatch;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "心拍数をリアルタイムで計測し、Mind Waveアプリに送信するために使用します。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "ワークアウトセッションとして心拍数を記録するために使用します。";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKWatchOnly = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.takakikeita.MindWaveGraphicWatch.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.4;
+			};
+			name = Release;
+		};
+		43BF913D2FD8A08F00607844 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_KEY_CFBundleDisplayName = MindWaveGraphicWatch;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.takakikeita.MindWaveGraphicWatch;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		43BF913E2FD8A08F00607844 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				INFOPLIST_KEY_CFBundleDisplayName = MindWaveGraphicWatch;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.takakikeita.MindWaveGraphicWatch;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -329,6 +554,24 @@
 			buildConfigurations = (
 				43BF907E2FD280F600607844 /* Debug */,
 				43BF907F2FD280F600607844 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		43BF91382FD8A08F00607844 /* Build configuration list for PBXNativeTarget "MindWaveGraphicWatch Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				43BF91392FD8A08F00607844 /* Debug */,
+				43BF913A2FD8A08F00607844 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		43BF913C2FD8A08F00607844 /* Build configuration list for PBXNativeTarget "MindWaveGraphicWatch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				43BF913D2FD8A08F00607844 /* Debug */,
+				43BF913E2FD8A08F00607844 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
