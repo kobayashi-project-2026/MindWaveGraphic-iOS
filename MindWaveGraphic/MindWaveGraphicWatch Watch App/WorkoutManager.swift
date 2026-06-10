@@ -5,21 +5,20 @@
 //  HKWorkoutSession + HKLiveWorkoutBuilder でWatch側から心拍数をリアルタイム取得し、
 //  WatchConnectivity 経由でiPhoneに送信する。
 //
+//  送信戦略:
+//    1. sendMessage（replyHandlerあり）→ iPhone起動中に低レイテンシ配信
+//    2. updateApplicationContext     → 常に実行、最も確実なチャネル
+//    3. transferUserInfo（fallback）  → sendMessage失敗時のキュー転送
+//
 
 import Foundation
+import Combine
 import HealthKit
 import WatchConnectivity
 
 // ─────────────────────────────────────────────────────────
 // WorkoutManager
-// Watch側の心拍ライブ取得の核。
-//
-// 流れ:
-//   1. requestAuthorization() → HealthKit権限を取得
-//   2. startWorkout()         → HKWorkoutSession開始 → HKLiveWorkoutBuilder開始
-//   3. workoutBuilder(_:didCollectDataOf:) コールバックで心拍数を受け取る
-//   4. sendHeartRateToiPhone() → WCSession.sendMessage or transferUserInfo
-//   5. stopWorkout()           → セッション終了・ワークアウト保存
+// Watch側の心拍ライブ取得の核。起動直後に WCSession もアクティベートする。
 // ─────────────────────────────────────────────────────────
 @MainActor
 final class WorkoutManager: NSObject, ObservableObject {
@@ -33,11 +32,17 @@ final class WorkoutManager: NSObject, ObservableObject {
     /// iPhone送信回数
     @Published var sendCount: Int            = 0
     /// 状態メッセージ（UIに表示する）
-    @Published var statusMessage: String     = "停止中"
+    @Published var statusMessage: String     = "起動中..."
     /// WCSession接続状態
-    @Published var wcStatus: String         = "未接続"
+    @Published var wcStatus: String         = "初期化中"
     /// HealthKit権限状態
     @Published var authStatus: String       = "未許可"
+    /// 最後に送信した心拍のサマリー（診断用）
+    @Published var lastSentHR: String       = "--"
+    /// 最後の送信エラー（診断用）
+    @Published var lastSendError: String    = ""
+    /// iPhoneへの到達可能状態
+    @Published var isWCReachable: Bool      = false
 
     // MARK: - Private
 
@@ -45,14 +50,42 @@ final class WorkoutManager: NSObject, ObservableObject {
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
 
+    // MARK: - 初期化（起動直後にWCSessionをアクティベートする）
+
+    override init() {
+        super.init()
+        // WCSession は可能な限り早くアクティベートする。
+        // onAppear 待ちではなく init() で呼ぶことで、計測開始前に接続が確立される。
+        activateWCSession()
+        statusMessage = "停止中"
+    }
+
+    // MARK: - WatchConnectivity アクティベート
+
+    /// WCSessionをアクティベートする。
+    /// init() から呼ばれる。setupWCSession() と同一処理。
+    private func activateWCSession() {
+        guard WCSession.isSupported() else {
+            wcStatus = "WC非対応"
+            print("[Watch WC] WatchConnectivity非対応デバイス")
+            return
+        }
+        WCSession.default.delegate = self
+        WCSession.default.activate()
+        print("[Watch WC] WCSession activate 開始 (from init)")
+    }
+
+    /// 外部から呼ぶ用のラッパー（onAppear などから呼んでも二重activateにはならない）
+    func setupWCSession() {
+        print("[Watch WC] setupWCSession 呼び出し (WCSession状態: \(WCSession.default.activationState.rawValue))")
+    }
+
     // MARK: - HealthKit 権限リクエスト
 
-    /// HealthKit権限をリクエストする。
-    /// HKWorkoutSession開始前に必ず呼ぶ。
+    /// HealthKit権限をリクエストする。HKWorkoutSession開始前に必ず呼ぶ。
     func requestAuthorization() async {
         // toShare: ワークアウト記録を保存するためにworkoutTypeが必要
         // read: 心拍数を読み取るためにheartRateが必要
-        // HKWorkoutType()はwatchOS 26.4で使用不可のため HKObjectType.workoutType() を使う
         let typesToShare: Set<HKSampleType> = [HKObjectType.workoutType()]
         let typesToRead:  Set<HKObjectType> = [HKQuantityType(.heartRate)]
 
@@ -62,7 +95,7 @@ final class WorkoutManager: NSObject, ObservableObject {
             print("[Watch HK] HealthKit権限取得完了")
         } catch {
             authStatus = "権限エラー"
-            statusMessage = "HealthKit権限エラー: \(error.localizedDescription)"
+            statusMessage = "HealthKit権限エラー"
             print("[Watch HK] 権限取得エラー: \(error.localizedDescription)")
         }
     }
@@ -74,10 +107,9 @@ final class WorkoutManager: NSObject, ObservableObject {
         guard !isRunning else { return }
 
         let config = HKWorkoutConfiguration()
-        // activityType = .other（汎用）でセッションを作成する。
-        // 心拍測定目的なので activiyType は何でもよい。
-        config.activityType  = .other
-        config.locationType  = .unknown
+        // activityType = .other（汎用）でセッションを作成する
+        config.activityType = .other
+        config.locationType = .unknown
 
         do {
             let newSession = try HKWorkoutSession(healthStore: store, configuration: config)
@@ -91,7 +123,7 @@ final class WorkoutManager: NSObject, ObservableObject {
             newBuilder.delegate = self
 
             // HKLiveWorkoutDataSource を設定すると、watchOS が自動で
-            // 設定された activityType に応じたデータ（心拍数など）を収集してくれる。
+            // activityType に応じたデータ（心拍数など）を収集してくれる。
             newBuilder.dataSource = HKLiveWorkoutDataSource(
                 healthStore: store,
                 workoutConfiguration: config
@@ -100,20 +132,18 @@ final class WorkoutManager: NSObject, ObservableObject {
             // セッション開始
             newSession.startActivity(with: Date())
 
-            // データ収集開始（コールバックベースをContinuationでラップする）
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            // データ収集開始（コールバックを Continuation でラップ）
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 newBuilder.beginCollection(withStart: Date()) { _, error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume()
-                    }
+                    if let error { cont.resume(throwing: error) }
+                    else         { cont.resume() }
                 }
             }
 
             isRunning     = true
             statusMessage = "計測中 ❤️"
             print("[Watch HK] ワークアウトセッション開始")
+            print("[Watch WC] 現在の isReachable: \(WCSession.default.isReachable)")
 
         } catch {
             statusMessage = "開始エラー: \(error.localizedDescription)"
@@ -141,47 +171,66 @@ final class WorkoutManager: NSObject, ObservableObject {
         }
     }
 
-    // MARK: - WatchConnectivity セットアップ
-
-    /// WCSessionをアクティベートする。
-    /// アプリ起動時に一度呼ぶ。
-    func setupWCSession() {
-        guard WCSession.isSupported() else {
-            wcStatus = "WC非対応"
-            return
-        }
-        WCSession.default.delegate = self
-        WCSession.default.activate()
-        print("[Watch WC] WCSession activate 開始")
-    }
-
-    // MARK: - iPhone へ心拍数送信
+    // MARK: - iPhone へ心拍数送信（3チャネル戦略）
 
     /// 心拍数をWatchConnectivity経由でiPhoneに送信する。
-    /// iPhoneが到達可能 → sendMessage（低レイテンシ）
-    /// 到達不可          → transferUserInfo（バックグラウンド転送）
+    ///
+    /// チャネル優先度:
+    ///   1. sendMessage (replyHandler付き) → リアルタイム、iPhoneが起動中に確実
+    ///   2. updateApplicationContext       → 常に実行、最も確実な補助チャネル
+    ///   3. transferUserInfo               → sendMessage失敗時のフォールバック
     private func sendHeartRateToiPhone(_ heartRate: Double) {
-        let message: [String: Any] = [
+        let now = Date().timeIntervalSince1970
+        let payload: [String: Any] = [
             "type":      "heartRate",
             "heartRate": heartRate,
-            "timestamp": Date().timeIntervalSince1970
+            "timestamp": now
         ]
 
-        if WCSession.default.isReachable {
-            // iPhoneアプリが起動中でリアルタイム送信できる
-            WCSession.default.sendMessage(message, replyHandler: nil) { error in
-                // sendMessageが失敗したらtransferUserInfoにフォールバックする
-                WCSession.default.transferUserInfo(message)
-                print("[Watch WC] sendMessage失敗 → transferUserInfo: \(error.localizedDescription)")
-            }
+        // isReachable を更新する
+        isWCReachable = WCSession.default.isReachable
+
+        print("[Watch WC] 送信試行: \(String(format: "%.0f", heartRate)) bpm | reachable=\(isWCReachable) | activationState=\(WCSession.default.activationState.rawValue)")
+
+        // ── チャネル1: sendMessage（replyHandlerあり = より確実な配信）──────
+        // replyHandlerをnilにすると watchOS で配信が不安定になるため非nilを使う。
+        if isWCReachable {
+            WCSession.default.sendMessage(payload, replyHandler: { reply in
+                // iPhone側からの返信を受け取った = 送信成功
+                print("[Watch WC] sendMessage 成功（reply: \(reply)）: \(String(format: "%.0f", heartRate)) bpm")
+                Task { @MainActor [weak self] in
+                    self?.lastSendError = ""
+                }
+            }, errorHandler: { [weak self] error in
+                // sendMessage 失敗 → transferUserInfo にフォールバック
+                print("[Watch WC] sendMessage 失敗 → transferUserInfo: \(error.localizedDescription)")
+                WCSession.default.transferUserInfo(payload)
+                Task { @MainActor [weak self] in
+                    self?.lastSendError = "SM: \(error.localizedDescription)"
+                }
+            })
         } else {
-            // iPhoneが到達不可のときはキューに入れて後送する
-            WCSession.default.transferUserInfo(message)
-            print("[Watch WC] iPhone到達不可 → transferUserInfo使用")
+            // iPhoneに到達不可 → transferUserInfo でキュー転送
+            print("[Watch WC] iPhone到達不可 → transferUserInfo")
+            WCSession.default.transferUserInfo(payload)
         }
 
+        // ── チャネル2: updateApplicationContext（常に実行・最も確実）─────────
+        // updateApplicationContext は最新値のみ保持するが、
+        // WCSession が established であれば iPhoneが次に起動したときに確実に届く。
+        do {
+            try WCSession.default.updateApplicationContext(payload)
+            print("[Watch WC] updateApplicationContext 成功: \(String(format: "%.0f", heartRate)) bpm")
+        } catch {
+            print("[Watch WC] updateApplicationContext 失敗: \(error.localizedDescription)")
+        }
+
+        // 送信カウンタ・表示を更新する
         sendCount    += 1
+        lastSentHR    = String(format: "%.0f bpm (送信#\(sendCount))", heartRate)
         statusMessage = String(format: "送信中: %.0f bpm（%d回）", heartRate, sendCount)
+
+        print("[Watch WC] sent heartRate: \(String(format: "%.0f", heartRate)) bpm (合計\(sendCount)回)")
     }
 }
 
@@ -189,7 +238,6 @@ final class WorkoutManager: NSObject, ObservableObject {
 
 extension WorkoutManager: HKWorkoutSessionDelegate {
 
-    /// セッション状態変化（開始・一時停止・終了など）
     nonisolated func workoutSession(
         _ workoutSession: HKWorkoutSession,
         didChangeTo toState: HKWorkoutSessionState,
@@ -198,15 +246,15 @@ extension WorkoutManager: HKWorkoutSessionDelegate {
     ) {
         let label: String
         switch toState {
-        case .running:   label = "計測中 ❤️"
-        case .ended:     label = "終了"
-        case .paused:    label = "一時停止"
-        case .stopped:   label = "停止"
+        case .running:    label = "計測中 ❤️"
+        case .ended:      label = "終了"
+        case .paused:     label = "一時停止"
+        case .stopped:    label = "停止"
         case .notStarted: label = "未開始"
-        case .prepared:  label = "準備中"
+        case .prepared:   label = "準備中"
         @unknown default: label = "不明"
         }
-        print("[Watch HK] セッション状態: \(label)")
+        print("[Watch HK] セッション状態変化: \(fromState.rawValue) → \(toState.rawValue) (\(label))")
         Task { @MainActor [self] in
             if toState == .ended || toState == .stopped {
                 isRunning     = false
@@ -215,7 +263,6 @@ extension WorkoutManager: HKWorkoutSessionDelegate {
         }
     }
 
-    /// セッションエラー
     nonisolated func workoutSession(
         _ workoutSession: HKWorkoutSession,
         didFailWithError error: Error
@@ -232,7 +279,6 @@ extension WorkoutManager: HKWorkoutSessionDelegate {
 
 extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
 
-    /// イベント収集（必須メソッドだが今回は使わない）
     nonisolated func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {}
 
     /// 新しいデータが届いたときに呼ばれる（心拍数更新の主役）
@@ -247,9 +293,12 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
         guard let stats = workoutBuilder.statistics(for: HKQuantityType(.heartRate)),
               let hr = stats.mostRecentQuantity()?.doubleValue(
                 for: HKUnit.count().unitDivided(by: .minute())
-              ) else { return }
+              ) else {
+            print("[Watch HK] 心拍統計取得失敗")
+            return
+        }
 
-        print("[Watch HK] 心拍受信: \(String(format: "%.0f", hr)) bpm")
+        print("[Watch HK] 心拍取得: \(String(format: "%.0f", hr)) bpm → iPhoneへ送信")
 
         // MainActor でUI更新 + iPhoneへ送信
         Task { @MainActor [self] in
@@ -275,7 +324,11 @@ extension WorkoutManager: WCSessionDelegate {
         case .notActivated: label = "未アクティブ"
         @unknown default:   label = "不明"
         }
-        print("[Watch WC] アクティベーション: \(label)")
+        if let error {
+            print("[Watch WC] アクティベーションエラー: \(error.localizedDescription)")
+        } else {
+            print("[Watch WC] アクティベーション完了: \(label)")
+        }
         Task { @MainActor [self] in
             wcStatus = label
         }

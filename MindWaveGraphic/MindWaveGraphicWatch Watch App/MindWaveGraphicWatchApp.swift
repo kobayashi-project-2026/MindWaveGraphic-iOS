@@ -2,28 +2,23 @@
 //  MindWaveGraphicWatchApp.swift
 //  MindWaveGraphicWatch Watch App
 //
+//  WorkoutManager は init() 内で WCSession を即座にアクティベートする。
+//  onAppear 待ちを排除して、起動直後から WatchConnectivity が動作するようにしている。
+//
 
 import SwiftUI
 
 @main
 struct MindWaveGraphicWatch_Watch_AppApp: App {
 
-    /// WorkoutManager をシングルソースとして管理し、
-    /// ContentView に environmentObject として注入する。
+    /// WorkoutManager をシングルソースとして管理し、ContentView に注入する。
+    /// @StateObject で生成される時点（init()）で WCSession がアクティベートされる。
     @StateObject private var workoutManager = WorkoutManager()
-
-    init() {
-        // アプリ起動時にWatchConnectivity（WCSession）をアクティベートする
-    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(workoutManager)
-                .onAppear {
-                    // WCSession はアプリ表示後にセットアップする
-                    workoutManager.setupWCSession()
-                }
         }
     }
 }

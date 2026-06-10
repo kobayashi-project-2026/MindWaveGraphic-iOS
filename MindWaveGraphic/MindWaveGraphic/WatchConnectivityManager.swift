@@ -5,6 +5,11 @@
 //  Apple WatchからWatchConnectivityで受信した心拍数をViewModelに橋渡しする。
 //  シングルトンとして使い、App起動時にactivateする。
 //
+//  受信チャネル:
+//    - didReceiveMessage          → Watch側 sendMessage（リアルタイム）
+//    - didReceiveUserInfo         → Watch側 transferUserInfo（キュー転送）
+//    - didReceiveApplicationContext → Watch側 updateApplicationContext（最確実）
+//
 
 import Foundation
 import Combine
@@ -28,17 +33,20 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     @Published var latestWatchHeartRate: Double?      = nil
     /// 最新心拍サンプルのWatch側記録時刻
     @Published var latestWatchHeartRateDate: Date?    = nil
-    /// 受信したメッセージ総数
+    /// 受信したメッセージ総数（全チャネル合計）
     @Published var watchMessageCount: Int             = 0
     /// WCSession接続状態ラベル
     @Published var watchConnectionStatusLabel: String = "未接続"
     /// 最後に受信したWatch心拍のサマリー
     @Published var lastWatchMessage: String           = "まだ受信していません"
+    /// 最後に受信したペイロードの診断テキスト（デバッグ表示用）
+    @Published var lastPayloadDebug: String           = "---"
+    /// 最後に受信したチャネル名
+    @Published var lastReceiveChannel: String         = "---"
 
     // MARK: - コールバック（ViewModelが受信して心拍を即時反映する）
 
     /// Watch心拍受信時に呼ばれる。引数: (heartRate bpm, sampleDate)
-    /// ViewController/ViewModelがこのクロージャを設定する。
     var onHeartRateReceived: ((Double, Date) -> Void)?
 
     // MARK: - 初期化
@@ -50,16 +58,15 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     // MARK: - セットアップ（App起動時に呼ぶ）
 
     /// WCSessionをアクティベートする。
-    /// このデバイスがWatchConnectivityに対応している場合のみ実行する。
     func setup() {
         guard WCSession.isSupported() else {
-            print("[WC iPhone] WatchConnectivity非対応デバイス")
+            print("[WatchConnectivity iPhone] WatchConnectivity非対応デバイス")
             watchConnectionStatusLabel = "WatchConnectivity非対応"
             return
         }
         WCSession.default.delegate = self
         WCSession.default.activate()
-        print("[WC iPhone] WCSession activate 開始")
+        print("[WatchConnectivity iPhone] WCSession activate 開始")
     }
 }
 
@@ -67,7 +74,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
 
 extension WatchConnectivityManager: WCSessionDelegate {
 
-    // アクティベーション完了
+    // ── アクティベーション完了 ─────────────────────────────────────────
     nonisolated func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,
@@ -81,73 +88,93 @@ extension WatchConnectivityManager: WCSessionDelegate {
         @unknown default:   label = "不明"
         }
         if let error {
-            print("[WC iPhone] アクティベーションエラー: \(error.localizedDescription)")
+            print("[WatchConnectivity iPhone] アクティベーションエラー: \(error.localizedDescription)")
         } else {
-            print("[WC iPhone] アクティベーション完了: \(label)")
+            print("[WatchConnectivity iPhone] アクティベーション完了: \(label) | isPaired=\(session.isPaired) | isWatchAppInstalled=\(session.isWatchAppInstalled)")
         }
         Task { @MainActor [self] in
             watchConnectionStatusLabel = label
         }
     }
 
-    // iOSのみ必須: セッションが非アクティブになった
+    // ── iOSのみ必須: セッション非アクティブ ────────────────────────────
     nonisolated func sessionDidBecomeInactive(_ session: WCSession) {
-        print("[WC iPhone] セッション非アクティブ")
+        print("[WatchConnectivity iPhone] セッション非アクティブ")
         Task { @MainActor [self] in
             watchConnectionStatusLabel = "非アクティブ"
         }
     }
 
-    // iOSのみ必須: セッションが非アクティブ化した（Watch切替後などに再アクティベートが必要）
+    // ── iOSのみ必須: セッション非アクティブ化（Watch切替後などに再activate）
     nonisolated func sessionDidDeactivate(_ session: WCSession) {
-        print("[WC iPhone] セッション非アクティブ化 → 再アクティベート")
+        print("[WatchConnectivity iPhone] セッション非アクティブ化 → 再activate")
         WCSession.default.activate()
         Task { @MainActor [self] in
             watchConnectionStatusLabel = "再アクティブ化中"
         }
     }
 
-    // リアルタイムメッセージ受信（Watch側が sendMessage で送った場合）
+    // ── リアルタイムメッセージ受信（Watch側 sendMessage, replyHandler: nil）
     nonisolated func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any]
     ) {
-        handleIncomingMessage(message)
+        print("[WatchConnectivity iPhone] didReceiveMessage（replyHandlerなし）")
+        handleIncomingMessage(message, channel: "sendMessage")
     }
 
-    // リアルタイムメッセージ受信（reply必須バージョン）
+    // ── リアルタイムメッセージ受信（Watch側 sendMessage, replyHandlerあり）
     nonisolated func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        handleIncomingMessage(message)
-        replyHandler(["status": "ok"])
+        print("[WatchConnectivity iPhone] didReceiveMessage（replyHandlerあり）")
+        handleIncomingMessage(message, channel: "sendMessage+reply")
+        replyHandler(["status": "ok", "received": true])
     }
 
-    // バックグラウンド転送受信（Watch側が transferUserInfo で送った場合）
+    // ── バックグラウンド転送受信（Watch側 transferUserInfo）
     nonisolated func session(
         _ session: WCSession,
         didReceiveUserInfo userInfo: [String: Any] = [:]
     ) {
-        handleIncomingMessage(userInfo)
+        print("[WatchConnectivity iPhone] didReceiveUserInfo")
+        handleIncomingMessage(userInfo, channel: "transferUserInfo")
+    }
+
+    // ── アプリコンテキスト受信（Watch側 updateApplicationContext）
+    // これが最も確実なチャネル。Watch側が updateApplicationContext を呼ぶと
+    // iPhone側のこのデリゲートが呼ばれる。
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveApplicationContext applicationContext: [String: Any]
+    ) {
+        print("[WatchConnectivity iPhone] didReceiveApplicationContext")
+        handleIncomingMessage(applicationContext, channel: "appContext")
     }
 
     // MARK: - 共通メッセージ処理
 
     /// Watch から届いたメッセージを解析し、心拍数をコールバック経由でViewModelへ渡す。
-    private nonisolated func handleIncomingMessage(_ message: [String: Any]) {
+    private nonisolated func handleIncomingMessage(
+        _ message: [String: Any],
+        channel: String
+    ) {
         // type: "heartRate" のメッセージのみ処理する
-        guard let type = message["type"] as? String, type == "heartRate",
-              let hr = message["heartRate"] as? Double,
+        guard let type      = message["type"] as? String, type == "heartRate",
+              let hr        = message["heartRate"] as? Double,
               let timestamp = message["timestamp"] as? TimeInterval else {
-            print("[WC iPhone] 未知のメッセージ形式: \(message.keys.joined(separator: ", "))")
+            print("[WatchConnectivity iPhone] 未知フォーマット (\(channel)): keys=\(message.keys.joined(separator: ","))")
             return
         }
 
         let sampleDate = Date(timeIntervalSince1970: timestamp)
-        let summary    = String(format: "Watch → %.0f bpm", hr)
-        print("[WC iPhone] 心拍受信: \(summary) (at \(formatTime(sampleDate)))")
+        let summary    = String(format: "%.0f bpm", hr)
+        let debugText  = String(format: "%.0f bpm | %@ | %@", hr, channel, formatTime(sampleDate))
+
+        // このログが必ず出ることを確認する
+        print("[WatchConnectivity] received heartRate: \(summary) via \(channel) at \(formatTime(sampleDate))")
 
         // MainActor でUIプロパティを更新し、ViewModelのコールバックを呼ぶ
         Task { @MainActor [self] in
@@ -155,6 +182,8 @@ extension WatchConnectivityManager: WCSessionDelegate {
             latestWatchHeartRateDate = sampleDate
             watchMessageCount       += 1
             lastWatchMessage         = summary
+            lastPayloadDebug         = debugText
+            lastReceiveChannel       = channel
             onHeartRateReceived?(hr, sampleDate)
         }
     }

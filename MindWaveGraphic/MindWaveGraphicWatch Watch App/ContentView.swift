@@ -117,8 +117,14 @@ struct ContentView: View {
         VStack(spacing: 6) {
             infoRow("状態",         workoutManager.statusMessage)
             infoRow("iPhone送信",   "\(workoutManager.sendCount) 回")
+            infoRow("最終送信HR",   workoutManager.lastSentHR)
+            infoRow("到達可能",     workoutManager.isWCReachable ? "YES ✓" : "NO")
             infoRow("WCSession",    workoutManager.wcStatus)
             infoRow("HealthKit",    workoutManager.authStatus)
+            // 送信エラーが発生した場合のみ表示する
+            if !workoutManager.lastSendError.isEmpty {
+                infoRow("送信エラー", workoutManager.lastSendError)
+            }
         }
         .padding(8)
         .background(

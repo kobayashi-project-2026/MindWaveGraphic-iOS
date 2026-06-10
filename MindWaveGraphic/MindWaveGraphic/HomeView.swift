@@ -92,7 +92,7 @@ struct HomeView: View {
             }
 
             statusRow("Watchライブ状態",
-                      value: viewModel.latestWatchHeartRate != nil ? "受信中" : "未受信",
+                      value: viewModel.latestWatchHeartRate != nil ? "受信中 ✓" : "未受信",
                       isOK: viewModel.latestWatchHeartRate != nil)
             statusRow("Watch心拍数",
                       value: viewModel.latestWatchHeartRate != nil
@@ -104,8 +104,21 @@ struct HomeView: View {
             statusRow("Watch最終受信",  value: formatTime(viewModel.latestWatchHeartRateDate))
             statusRow("WCSession",     value: wcManager.watchConnectionStatusLabel,
                       isOK: wcManager.watchConnectionStatusLabel == "接続済み")
+            statusRow("受信チャネル",   value: wcManager.lastReceiveChannel)
             statusRow("データ元",       value: viewModel.dataSourceLabel,
                       isOK: !viewModel.isUsingDemoData)
+
+            // 診断用: 最後に受信した生ペイロードの内容
+            Divider().background(Color.white.opacity(0.08))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("最終受信ペイロード（診断）")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(MindWaveTheme.textTertiary)
+                Text(wcManager.lastPayloadDebug)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(viewModel.latestWatchHeartRate != nil
+                                     ? MindWaveTheme.accent : Color.orange.opacity(0.8))
+            }
 
             // Watch未受信時の案内テキスト
             if viewModel.latestWatchHeartRate == nil {
