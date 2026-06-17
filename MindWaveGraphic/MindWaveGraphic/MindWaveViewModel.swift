@@ -8,24 +8,26 @@ import Combine
 
 // ─────────────────────────────────────────────────────────
 // MindWaveViewModel
-// HealthKit実データとデモデータを切り替えながら、
-// スコア計算・波形制御・取得状態をすべて管理する。
-// UIはこのViewModelのみを参照する。
+// 全データ経路の統括。Watch / HealthKit / Mock いずれも
+// ingest(_ sample:) を経由して GraphicInput を更新する。
+// グラフィック層は GraphicInput だけを参照し、ViewModel
+// 内部構造・HealthKit・WatchConnectivity には触らない。
 // ─────────────────────────────────────────────────────────
 @MainActor
 final class MindWaveViewModel: ObservableObject {
 
-    // MARK: - ビルド識別ラベル（実機で最新ビルドか確認するために使う）
-    let debugBuildLabel = "watch-live-hr-v1"
+    // MARK: - ビルド識別ラベル
 
-    // MARK: - スコア計算の入力値
+    let debugBuildLabel = "graphic-pipeline-v1"
+
+    // MARK: - スコア計算の入力値（診断表示用）
 
     @Published var currentHeartRate: Double = 58
     @Published var averageHeartRate: Double = 65
     @Published var currentHRV: Double       = 52
     @Published var averageHRV: Double       = 45
 
-    // MARK: - データ元・状態表示
+    // MARK: - データ元・状態表示（診断用）
 
     @Published var isUsingDemoData: Bool        = true
     @Published var dataSourceLabel: String      = "デモデータで表示中"
@@ -35,22 +37,16 @@ final class MindWaveViewModel: ObservableObject {
     @Published var didFetchHeartRate: Bool      = false
     @Published var didFetchHRV: Bool            = false
 
-    // MARK: - 新規サンプル判定（サンプルUUIDで比較する）
+    // MARK: - 新規サンプル判定（診断用）
 
-    /// 最新心拍サンプルの記録時刻（HealthKit内のサンプル自体の時刻）
     @Published var latestHeartRateSampleDate: Date? = nil
-    /// 最新HRVサンプルの記録時刻
     @Published var latestHRVSampleDate: Date?       = nil
-    /// 前回と比べて新しい心拍サンプルが来たか
     @Published var isNewHeartRateSample: Bool       = false
-    /// 前回と比べて新しいHRVサンプルが来たか
     @Published var isNewHRVSample: Bool             = false
-    /// 同じサンプルが連続して来た回数（HealthKitに新規データがない証拠）
     @Published var sameSampleCount: Int             = 0
-    /// 新規サンプルが来るたびにインクリメントする。LiveWaveViewの波形パルスに使う。
     @Published var livePulseTrigger: Int            = 0
 
-    // MARK: - ライブ監視状態
+    // MARK: - ライブ監視状態（診断用）
 
     @Published var isLiveMonitoring: Bool          = false
     @Published var liveUpdateInterval: TimeInterval = 5
@@ -58,23 +54,35 @@ final class MindWaveViewModel: ObservableObject {
     @Published var liveUpdateCount: Int             = 0
     @Published var liveMonitoringMessage: String    = "停止中"
 
-    /// HealthKitのサンプリング特性の注意書き（画面に小さく表示する）
     let healthKitSamplingNote = "Apple Watchの記録・同期タイミングにより、値は数秒ごとに必ず変化するとは限りません。"
 
-    // MARK: - Watch ライブ心拍（WatchConnectivity受信）
+    // MARK: - Watch ライブ心拍（診断用）
 
-    /// Watchから受信した最新心拍数（nil = 未受信）
     @Published var latestWatchHeartRate: Double?      = nil
-    /// 最新Watch心拍の記録時刻
     @Published var latestWatchHeartRateDate: Date?    = nil
-    /// Watch心拍受信回数（増えていれば正常にWatch → iPhoneが通信している）
     @Published var watchMessageCount: Int             = 0
-    /// WCSession接続状態ラベル
     @Published var watchConnectionStatusLabel: String = "未接続"
-    /// 最後に受信したWatch心拍のサマリー
     @Published var lastWatchMessage: String           = "---"
 
-    // MARK: - Computed: スコア計算
+    // MARK: - グラフィックパイプライン
+
+    /// グラフィックチームへ渡す唯一の入力。ingest() 経由でのみ更新される。
+    @Published var graphicInput: GraphicInput = .neutral
+    /// 最新の解析結果（診断用）
+    @Published var lastAnalysisResult: MindAnalysisResult? = nil
+
+    // MARK: - Mockモード
+
+    /// MockモードON時はWatch・HealthKit入力でgraphicInputを上書きしない。
+    @Published var isMockMode: Bool    = true
+    @Published var mockScore: Double   = 50
+    @Published var mockConfidence: Double = 0.8
+    @Published var isMockAutoUpdate: Bool = false
+
+    // Watchライブデータの有効期限（秒）。1か所で管理する。
+    static let watchLiveExpirySeconds: TimeInterval = 15
+
+    // MARK: - Computed: スコア計算（診断表示用）
 
     var stressResult: StressScoreResult {
         StressScoreCalculator.calculate(
@@ -90,8 +98,8 @@ final class MindWaveViewModel: ObservableObject {
     private let forceDemoMode = false
     private let hkManager = HealthKitManager()
     private var liveMonitoringTask: Task<Void, Never>?
+    private var mockAutoUpdateTask: Task<Void, Never>?
 
-    // 前回の心拍・HRVサンプルのUUID（新旧判定のために保持する）
     private var lastHeartRateSampleIdentifier: String? = nil
     private var lastHRVSampleIdentifier: String?       = nil
 
@@ -99,36 +107,122 @@ final class MindWaveViewModel: ObservableObject {
 
     init() {
         loadDemoScenario(index: 0)
-        // WatchConnectivityManagerのコールバックを設定して、
-        // Watch心拍受信時に即時 applyWatchHeartRate を呼び出す。
         subscribeToWatchHeartRate()
+    }
+
+    // MARK: - ▼ ingest: 全データ経路の共通入口 ▼
+
+    /// Watch / HealthKit / Mock いずれのデータもここを通す。
+    /// 1. Mockモード優先判定
+    /// 2. 生体データ更新
+    /// 3. StressScoreCalculator実行（contextScore未設定時）
+    /// 4. MindAnalysisResult生成
+    /// 5. GraphicInput更新
+    /// グラフィックViewからこのメソッドを呼ばないこと。
+    func ingest(_ sample: MindWaveSample) {
+        // MockモードON時：Mockサンプルだけ通す。Watch・HealthKitはブロック。
+        guard sample.source == .mock || !isMockMode else { return }
+
+        // 生体データを更新（nil でない値だけ上書き）
+        if let hr  = sample.heartRate { currentHeartRate = hr }
+        if let hrv = sample.hrv       { currentHRV       = hrv }
+
+        // 緊張スコア決定
+        let rawScore: Double
+        if let ctx = sample.contextScore {
+            // contextScore がある場合はそのまま使用（Mockスライダー等）
+            rawScore = ctx
+        } else {
+            rawScore = StressScoreCalculator.calculate(
+                currentHeartRate: currentHeartRate,
+                averageHeartRate: averageHeartRate,
+                currentHRV: currentHRV,
+                averageHRV: averageHRV
+            ).stressScore
+        }
+        let tensionScore = min(100, max(0, rawScore))
+        let confidence   = min(1,   max(0, computeConfidence(sample: sample)))
+        let state        = MindState.from(score: tensionScore)
+
+        let analysis = MindAnalysisResult(
+            tensionScore: tensionScore,
+            confidence: confidence,
+            state: state,
+            timestamp: sample.timestamp
+        )
+        lastAnalysisResult = analysis
+        graphicInput = GraphicInput(
+            score: analysis.tensionScore,
+            confidence: analysis.confidence,
+            state: analysis.state
+        )
+    }
+
+    // MARK: - Mockモード操作
+
+    /// Mockモードのスコアを設定し ingest を通す。
+    func sendMockSample() {
+        let sample = MindWaveSample(
+            heartRate: nil,
+            hrv: nil,
+            contextScore: mockScore,
+            source: .mock,
+            timestamp: Date()
+        )
+        ingest(sample)
+    }
+
+    func setMockMode(_ enabled: Bool) {
+        isMockMode = enabled
+        if enabled { sendMockSample() }
+    }
+
+    func toggleMockAutoUpdate() {
+        isMockAutoUpdate ? stopMockAutoUpdate() : startMockAutoUpdate()
+    }
+
+    private func startMockAutoUpdate() {
+        guard isMockMode else { return }
+        isMockAutoUpdate = true
+        mockAutoUpdateTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch { break }
+                self?.sendMockSample()
+            }
+        }
+    }
+
+    private func stopMockAutoUpdate() {
+        mockAutoUpdateTask?.cancel()
+        mockAutoUpdateTask = nil
+        isMockAutoUpdate   = false
     }
 
     // MARK: - Watch ライブ心拍 コールバック登録
 
     private func subscribeToWatchHeartRate() {
-        // WatchConnectivityManager（シングルトン）のコールバックにViewModelを接続する。
-        // Watch側から心拍が届くたびにこのクロージャが MainActor で呼ばれる。
         WatchConnectivityManager.shared.onHeartRateReceived = { [weak self] hr, date in
             self?.applyWatchHeartRate(hr, sampleDate: date)
         }
-        // WCSession接続状態の変化を直接バインドする（Combineの代わりに手動同期）
-        // ※表示はHomeViewがWatchConnectivityManager.shared.watchConnectionStatusLabelを参照
     }
 
     // MARK: - Watch ライブ心拍 反映
 
-    /// Apple Watch側から WatchConnectivity 経由で心拍数を受信したときに呼ぶ。
-    /// currentHeartRate を即時更新し、波形パルスを発火する。
-    /// HealthKit ポーリングより優先される。
     func applyWatchHeartRate(_ heartRate: Double, sampleDate: Date) {
+        // 常に更新：Watch受信診断情報（Mockモードでも記録する）
+        latestWatchHeartRate       = heartRate
+        latestWatchHeartRateDate   = sampleDate
+        watchMessageCount          = WatchConnectivityManager.shared.watchMessageCount
+        watchConnectionStatusLabel = WatchConnectivityManager.shared.watchConnectionStatusLabel
+        lastWatchMessage           = WatchConnectivityManager.shared.lastWatchMessage
+
+        // MockモードON：診断のみ記録し、表示・スコアは更新しない
+        guard !isMockMode else { return }
+
         currentHeartRate          = heartRate
         latestHeartRateSampleDate = sampleDate
-        latestWatchHeartRate      = heartRate
-        latestWatchHeartRateDate  = sampleDate
-        watchMessageCount         = WatchConnectivityManager.shared.watchMessageCount
-        watchConnectionStatusLabel = WatchConnectivityManager.shared.watchConnectionStatusLabel
-        lastWatchMessage          = WatchConnectivityManager.shared.lastWatchMessage
         isNewHeartRateSample      = true
         sameSampleCount           = 0
         livePulseTrigger         += 1
@@ -138,6 +232,14 @@ final class MindWaveViewModel: ObservableObject {
         lastFetchMessage          = "Watchライブ心拍を受信"
         healthKitStatusLabel      = "Watch：ライブ計測中"
         print("[MindWave] Watch心拍反映: \(String(format: "%.0f", heartRate)) bpm")
+
+        ingest(MindWaveSample(
+            heartRate: heartRate,
+            hrv: currentHRV > 0 ? currentHRV : nil,
+            contextScore: nil,
+            source: .watchLive,
+            timestamp: sampleDate
+        ))
     }
 
     // MARK: - Demo Data
@@ -151,6 +253,14 @@ final class MindWaveViewModel: ObservableObject {
         averageHRV       = s.averageHRV
         isUsingDemoData  = true
         dataSourceLabel  = "デモデータで表示中"
+        // シナリオ値で StressScoreCalculator を通して graphicInput を更新する
+        ingest(MindWaveSample(
+            heartRate: s.currentHeartRate,
+            hrv: s.currentHRV,
+            contextScore: nil,
+            source: .mock,
+            timestamp: Date()
+        ))
     }
 
     // MARK: - HealthKit Authorization
@@ -171,7 +281,7 @@ final class MindWaveViewModel: ObservableObject {
         }
     }
 
-    // MARK: - HealthKit 単発取得（1回だけ）
+    // MARK: - HealthKit 単発取得
 
     func fetchHealthKitData() async {
         guard HealthKitManager.isAvailable, !forceDemoMode else { return }
@@ -191,8 +301,6 @@ final class MindWaveViewModel: ObservableObject {
 
     // MARK: - ライブ監視 開始 / 停止 / トグル
 
-    /// HealthKitを5秒ごとに再取得するライブ監視を開始する。
-    /// 二重起動を防ぐ。タブを移動しても停止しない（明示的に停止が必要）。
     func startLiveMonitoring() {
         guard !isLiveMonitoring else { return }
         guard HealthKitManager.isAvailable else {
@@ -235,7 +343,7 @@ final class MindWaveViewModel: ObservableObject {
             do {
                 try await Task.sleep(for: .seconds(liveUpdateInterval))
             } catch {
-                break  // CancellationErrorでループ終了
+                break
             }
         }
     }
@@ -256,7 +364,7 @@ final class MindWaveViewModel: ObservableObject {
                            hrvResult: hrvResult, avgHRV: avgHRV)
     }
 
-    // MARK: - Private: 取得値をViewModelに反映する共通処理
+    // MARK: - Private: HealthKit取得値を反映
 
     private func applyFetchedValues(
         hrResult: HealthMetricFetchResult,
@@ -265,22 +373,18 @@ final class MindWaveViewModel: ObservableObject {
         avgHRV: Double?
     ) {
         // ── 心拍サンプルの新旧判定 ──────────────────────────────────
-        // UUID（sampleIdentifier）を比較して「前回と同じサンプルか」を判定する。
-        // UUIDがない（平均値の場合）は値で比較する。
         if hrResult.isSuccess {
             let newId = hrResult.sampleIdentifier
             if let newId, newId == lastHeartRateSampleIdentifier {
-                // 同じUUID = 同じサンプルを再読み → HealthKitに新規サンプルなし
                 isNewHeartRateSample  = false
                 sameSampleCount      += 1
                 liveMonitoringMessage = "取得中：HealthKitに新規サンプルなし（\(sameSampleCount)回連続）"
                 print("[Live] no new HealthKit sample (same UUID, count: \(sameSampleCount))")
             } else {
-                // 新しいUUID または 初回 = 新規サンプル到着
                 isNewHeartRateSample         = true
                 sameSampleCount              = 0
                 lastHeartRateSampleIdentifier = newId
-                livePulseTrigger            += 1  // 波形パルスを発火する
+                livePulseTrigger            += 1
                 liveMonitoringMessage         = "新しい心拍データを取得"
                 print("[Live] new HealthKit sample! HR: \(String(format: "%.1f", hrResult.value ?? 0))")
             }
@@ -290,13 +394,12 @@ final class MindWaveViewModel: ObservableObject {
             liveMonitoringMessage = "心拍データ未取得"
         }
 
-        // ── HRVサンプルの新旧判定 ────────────────────────────────────
         if hrvResult.isSuccess {
             let newHrvId = hrvResult.sampleIdentifier
             if let newHrvId, newHrvId == lastHRVSampleIdentifier {
                 isNewHRVSample = false
             } else {
-                isNewHRVSample       = true
+                isNewHRVSample          = true
                 lastHRVSampleIdentifier = newHrvId
             }
             latestHRVSampleDate = hrvResult.sampleDate
@@ -304,36 +407,55 @@ final class MindWaveViewModel: ObservableObject {
             isNewHRVSample = false
         }
 
-        // ── 値をViewModelに反映する ──────────────────────────────────
+        // ── 値をViewModelに反映し ingest パイプラインへ流す ─────────
         if let hr = hrResult.value, let avg = avgHR {
             currentHeartRate = hr
             averageHeartRate = avg
 
             if let hrv = hrvResult.value, let avgH = avgHRV {
-                // 心拍・HRV 両方取得 → 完全HealthKitモード
                 currentHRV           = hrv
                 averageHRV           = avgH
                 isUsingDemoData      = false
                 dataSourceLabel      = "HealthKitデータで表示中"
                 healthKitStatusLabel = "HealthKit：接続中"
                 lastFetchMessage     = "心拍・HRV 取得成功"
-                let score = stressResult.stressScore
-                print("[MindWave] score updated: \(String(format: "%.1f", score))")
+                print("[MindWave] HealthKit HR+HRV 取得: \(String(format: "%.1f", hr)) / \(String(format: "%.1f", hrv))")
             } else {
-                // 心拍のみ → 部分接続モード
                 isUsingDemoData      = false
                 dataSourceLabel      = "心拍：HealthKit / HRV：デモ"
                 healthKitStatusLabel = "HealthKit：部分接続"
                 lastFetchMessage     = "心拍: 成功 / HRV: \(hrvResult.message)"
             }
+            // HealthKit データを ingest パイプラインへ
+            ingest(MindWaveSample(
+                heartRate: hr,
+                hrv: hrvResult.value,
+                contextScore: nil,
+                source: .healthKit,
+                timestamp: hrResult.sampleDate ?? Date()
+            ))
         } else {
-            // 心拍取得失敗 → デモフォールバック
-            // HealthKitの心拍は Apple Watch → iPhone 同期が必要。
-            // 未装着・未同期の場合は取得できないためデモデータで継続する。
+            // HealthKit取得失敗 → デモデータフォールバック
             loadDemoScenario(index: 0)
             healthKitStatusLabel = "HealthKit：データなし"
             lastFetchMessage     = "心拍未取得: \(hrResult.message)"
             print("[MindWave] Fallback to demo data: \(hrResult.message)")
+        }
+    }
+
+    // MARK: - Private: confidence 計算
+
+    private func computeConfidence(sample: MindWaveSample) -> Double {
+        switch sample.source {
+        case .mock:
+            return mockConfidence
+        case .watchLive:
+            // Watchライブ心拍＋HealthKit HRVがある場合は高め
+            return currentHRV > 0 ? 0.75 : 0.50
+        case .healthKit:
+            return sample.hrv != nil ? 0.65 : 0.40
+        case .unavailable:
+            return 0.0
         }
     }
 }

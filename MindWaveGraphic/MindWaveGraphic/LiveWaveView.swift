@@ -8,29 +8,22 @@ import Combine
 
 struct LiveWaveView: View {
     @EnvironmentObject var viewModel: MindWaveViewModel
-    @State private var elapsed: Int          = 0
-    @State private var showDebug             = false
-    @State private var demoScenarioIndex     = 0
+    @State private var elapsed: Int       = 0
+    @State private var showDebug          = false
+    @State private var demoScenarioIndex  = 0
 
-    // displayedScore: 実スコアを滑らかに補間するUI表示用スコア。
-    // HealthKitの値が数秒おきに変化しても波形が急に跳ぶのを防ぐ。
+    // displayedScore: graphicInput.score を滑らかに補間するUI表示用スコア。
+    // スコアが急変しても数値・色が跳ばないように 1.5秒でアニメーションする。
     @State private var displayedScore: Double = 50
 
-    // pulseBoost: 新規サンプルが来た瞬間に波振幅を一瞬だけ上乗せする。
-    // livePulseTrigger が増えた時に発火し、短時間で元に戻る。
-    @State private var pulseBoost: Double    = 0
-
     // LIVEドットの点滅用
-    @State private var liveDotVisible: Bool  = true
+    @State private var liveDotVisible: Bool = true
 
     private let sessionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     private let blinkTimer   = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
 
-    // displayedScore + pulseBoost で波パラメータを決める
-    private var waveAmplitude: Double { 0.28 + (displayedScore / 100.0) * 0.44 + pulseBoost }
-    private var waveSpeed: Double     { 0.55 + (displayedScore / 100.0) * 0.55 }
-    private var stressColor: Color    { MindWaveTheme.stressColor(score: displayedScore) }
-    private var stressLabel: String   { MindWaveTheme.stressLabel(score: displayedScore) }
+    private var stressColor: Color  { MindWaveTheme.stressColor(score: displayedScore) }
+    private var stressLabel: String { MindWaveTheme.stressLabel(score: displayedScore) }
 
     var body: some View {
         ZStack {
@@ -40,21 +33,14 @@ struct LiveWaveView: View {
                 headerBar
                 statusSubtitle.padding(.bottom, 4)
 
-                // 波形（displayedScore + pulseBoost で滑らかに変化する）
-                WaveCanvas(amplitude: waveAmplitude, speed: waveSpeed, color: stressColor)
+                // ── グラフィック差し込み口 ────────────────────────────
+                // GraphicPlugin.swift の登録1行を変えるだけで差し替えられる。
+                // GraphicHostView はデータ取得・スコア計算を行わない。
+                GraphicHostView(input: viewModel.graphicInput)
                     .frame(height: 150)
-                    // スコアが変化したら displayedScore を 1.5秒で追従させる
-                    .onChange(of: viewModel.stressResult.stressScore) { _, newScore in
+                    .onChange(of: viewModel.graphicInput.score) { _, newScore in
                         withAnimation(.easeInOut(duration: 1.5)) {
                             displayedScore = newScore
-                        }
-                    }
-                    // 新規サンプルが来たら波形を一瞬だけ大きく反応させる
-                    .onChange(of: viewModel.livePulseTrigger) { _, _ in
-                        withAnimation(.easeOut(duration: 0.25)) { pulseBoost = 0.12 }
-                        Task {
-                            try? await Task.sleep(for: .seconds(0.35))
-                            withAnimation(.easeInOut(duration: 0.9)) { pulseBoost = 0 }
                         }
                     }
 
@@ -72,13 +58,10 @@ struct LiveWaveView: View {
             }
         }
         .onAppear {
-            // 画面表示時に displayedScore を現在値に合わせる
-            displayedScore = viewModel.stressResult.stressScore
+            displayedScore = viewModel.graphicInput.score
         }
-        // onDisappear では停止しない。ホームとライブを行き来しても取得を継続する。
         .onReceive(sessionTimer) { _ in elapsed += 1 }
         .onReceive(blinkTimer) { _ in
-            // LIVE ドットの点滅（監視中のみ）
             if viewModel.isLiveMonitoring { liveDotVisible.toggle() }
             else { liveDotVisible = true }
         }
@@ -99,7 +82,6 @@ struct LiveWaveView: View {
             }
             Spacer()
             HStack(spacing: 6) {
-                // LIVE ドット：監視中は点滅、停止中は薄く表示
                 Circle()
                     .fill(viewModel.isLiveMonitoring ? MindWaveTheme.accent : MindWaveTheme.textTertiary)
                     .opacity(viewModel.isLiveMonitoring ? (liveDotVisible ? 1.0 : 0.25) : 0.4)
@@ -131,7 +113,7 @@ struct LiveWaveView: View {
             .padding(.horizontal, 20)
     }
 
-    // MARK: - Score Card（グラフィック主体、数値は控えめ）
+    // MARK: - Score Card
 
     private var scoreCard: some View {
         VStack(spacing: 14) {
@@ -176,14 +158,13 @@ struct LiveWaveView: View {
             HStack(spacing: 0) {
                 rateCell(label: "心拍上昇率", value: viewModel.stressResult.heartRateIncreaseRate)
                 Spacer()
-                rateCell(label: "HRV低下率",  value: viewModel.stressResult.hrvDecreaseRate, alignTrailing: true)
+                rateCell(label: "HRV低下率", value: viewModel.stressResult.hrvDecreaseRate, alignTrailing: true)
             }
         }
         .padding(16)
         .darkCard()
     }
 
-    // isNew = true のとき、新規サンプル到着を示す小さなドットを表示する
     private func miniMetric(label: String, value: String, unit: String, isNew: Bool = false) -> some View {
         VStack(alignment: .trailing, spacing: 2) {
             HStack(spacing: 3) {
@@ -230,7 +211,7 @@ struct LiveWaveView: View {
     private var liveControlBar: some View {
         HStack(spacing: 12) {
             HStack(spacing: 4) {
-                Image(systemName: viewModel.isUsingDemoData ? "info.circle" : "heart.fill")
+                Image(systemName: viewModel.isMockMode ? "sparkles" : "heart.fill")
                     .font(.system(size: 9))
                     .foregroundStyle(MindWaveTheme.textTertiary)
                 Text(viewModel.dataSourceLabel)
@@ -283,30 +264,45 @@ struct LiveWaveView: View {
 
             if showDebug {
                 VStack(spacing: 6) {
-                    // ── ビルド識別 ───────────────────────────────
+                    // ── ビルド識別 ─────────────────────────────────────
                     debugBlock {
-                        debugRow("Build",      viewModel.debugBuildLabel)
+                        debugRow("Build", viewModel.debugBuildLabel)
                     }
 
-                    // ── Watch ライブ心拍 ──────────────────────────
+#if DEBUG
+                    // ── Mockモード（DEBUGビルド限定） ───────────────────
+                    mockControlSection
+#endif
+
+                    // ── GraphicInput（パイプライン出力） ────────────────
                     debugBlock {
-                        debugRow("Watch心拍",   viewModel.latestWatchHeartRate != nil
-                                               ? String(format: "%.0f bpm", viewModel.latestWatchHeartRate!)
-                                               : "未受信")
+                        debugRow("GraphicInput.score",
+                                 String(format: "%.1f", viewModel.graphicInput.score))
+                        debugRow("GraphicInput.confidence",
+                                 String(format: "%.2f", viewModel.graphicInput.confidence))
+                        debugRow("GraphicInput.state",
+                                 viewModel.graphicInput.state.displayName)
+                    }
+
+                    // ── Watch ライブ心拍 ────────────────────────────────
+                    debugBlock {
+                        debugRow("Watch心拍",  viewModel.latestWatchHeartRate != nil
+                                              ? String(format: "%.0f bpm", viewModel.latestWatchHeartRate!)
+                                              : "未受信")
                         debugRow("Watch受信数", "\(viewModel.watchMessageCount) 回")
                         debugRow("Watch最終",   formatTime(viewModel.latestWatchHeartRateDate))
                         debugRow("WCSession",   WatchConnectivityManager.shared.watchConnectionStatusLabel)
                     }
 
-                    // ── ライブ監視状態 ────────────────────────────
+                    // ── ライブ監視状態 ──────────────────────────────────
                     debugBlock {
-                        debugRow("監視状態",    viewModel.liveMonitoringMessage)
-                        debugRow("更新回数",    "\(viewModel.liveUpdateCount) 回")
-                        debugRow("取得間隔",    "\(Int(viewModel.liveUpdateInterval)) 秒")
-                        debugRow("最終取得",    formatTime(viewModel.lastLiveUpdateDate))
+                        debugRow("監視状態",  viewModel.liveMonitoringMessage)
+                        debugRow("更新回数",  "\(viewModel.liveUpdateCount) 回")
+                        debugRow("取得間隔",  "\(Int(viewModel.liveUpdateInterval)) 秒")
+                        debugRow("最終取得",  formatTime(viewModel.lastLiveUpdateDate))
                     }
 
-                    // ── 心拍サンプル ──────────────────────────────
+                    // ── 心拍・HRVサンプル ───────────────────────────────
                     debugBlock {
                         debugRow("心拍数", viewModel.didFetchHeartRate
                                  ? String(format: "%.0f bpm", viewModel.currentHeartRate)
@@ -317,29 +313,28 @@ struct LiveWaveView: View {
                         debugRow("HRV（SDNN）", viewModel.didFetchHRV
                                  ? String(format: "%.0f ms", viewModel.currentHRV)
                                  : "未取得")
-                        debugRow("HRVサンプル時刻",   formatTime(viewModel.latestHRVSampleDate))
-                        debugRow("HRVサンプル更新",   viewModel.isNewHRVSample ? "新規 ✓" : "同じ")
+                        debugRow("HRVサンプル時刻",  formatTime(viewModel.latestHRVSampleDate))
+                        debugRow("HRVサンプル更新",  viewModel.isNewHRVSample ? "新規 ✓" : "同じ")
                     }
 
-                    // ── スコア・波形 ──────────────────────────────
+                    // ── スコア ─────────────────────────────────────────
                     debugBlock {
                         debugRow("スコア（計算値）", String(format: "%.1f", viewModel.stressResult.stressScore))
                         debugRow("スコア（表示値）", String(format: "%.1f", displayedScore))
-                        debugRow("pulseBoost",      String(format: "%.3f", pulseBoost))
                         debugRow("livePulseTrigger", "\(viewModel.livePulseTrigger)")
-                        debugRow("データ元",         viewModel.dataSourceLabel)
-                        debugRow("メッセージ",        viewModel.lastFetchMessage)
+                        debugRow("データ元",          viewModel.dataSourceLabel)
+                        debugRow("メッセージ",         viewModel.lastFetchMessage)
                     }
 
-                    // ── サンプリング注記 ──────────────────────────
+                    // ── サンプリング注記 ────────────────────────────────
                     Text(viewModel.healthKitSamplingNote)
                         .font(.system(size: 9, weight: .light))
                         .foregroundStyle(MindWaveTheme.textTertiary)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // ── デモシナリオ切り替え ──────────────────────
-                    Text("デモデータ切り替え")
+                    // ── デモシナリオ切り替え ─────────────────────────────
+                    Text("デモシナリオ（StressScoreCalculator経由）")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(MindWaveTheme.textTertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -374,7 +369,125 @@ struct LiveWaveView: View {
         }
     }
 
-    // Debug の枠ブロック
+    // MARK: - Mock Control Section（DEBUGビルド限定）
+
+    private var mockControlSection: some View {
+        VStack(spacing: 6) {
+            // ヘッダー行
+            HStack {
+                Text("Mockモード")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(MindWaveTheme.textTertiary)
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { viewModel.isMockMode },
+                    set: { viewModel.setMockMode($0) }
+                ))
+                .labelsHidden()
+                .scaleEffect(0.7)
+                .tint(MindWaveTheme.accent)
+            }
+
+            if viewModel.isMockMode {
+                // 3状態ボタン
+                HStack(spacing: 4) {
+                    ForEach(MindState.allCases, id: \.self) { state in
+                        let scores: [MindState: Double] = [
+                            .underAroused: 15, .optimalTension: 50, .overTense: 85
+                        ]
+                        let isSelected = viewModel.graphicInput.state == state
+                        Button {
+                            viewModel.mockScore = scores[state] ?? 50
+                            viewModel.sendMockSample()
+                        } label: {
+                            Text(state.displayName)
+                                .font(.system(size: 9, weight: isSelected ? .medium : .regular))
+                                .foregroundStyle(isSelected ? Color.black : MindWaveTheme.textTertiary)
+                                .padding(.vertical, 5)
+                                .frame(maxWidth: .infinity)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(isSelected
+                                              ? MindWaveTheme.accent.opacity(0.7)
+                                              : Color.white.opacity(0.06))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
+                // Score スライダー
+                VStack(spacing: 2) {
+                    HStack {
+                        Text("Score")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(MindWaveTheme.textTertiary)
+                        Spacer()
+                        Text(String(format: "%.0f", viewModel.mockScore))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(MindWaveTheme.textSecondary)
+                    }
+                    Slider(value: Binding(
+                        get: { viewModel.mockScore },
+                        set: { viewModel.mockScore = $0; viewModel.sendMockSample() }
+                    ), in: 0...100)
+                    .tint(MindWaveTheme.accent)
+                }
+
+                // Confidence スライダー
+                VStack(spacing: 2) {
+                    HStack {
+                        Text("Confidence")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(MindWaveTheme.textTertiary)
+                        Spacer()
+                        Text(String(format: "%.2f", viewModel.mockConfidence))
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(MindWaveTheme.textSecondary)
+                    }
+                    Slider(value: Binding(
+                        get: { viewModel.mockConfidence },
+                        set: { viewModel.mockConfidence = $0; viewModel.sendMockSample() }
+                    ), in: 0...1)
+                    .tint(MindWaveTheme.accent)
+                }
+
+                // 5秒ごと自動更新
+                Button {
+                    viewModel.toggleMockAutoUpdate()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: viewModel.isMockAutoUpdate ? "stop.circle.fill" : "arrow.clockwise.circle")
+                            .font(.system(size: 9))
+                        Text(viewModel.isMockAutoUpdate ? "自動更新停止" : "5秒ごと自動更新")
+                            .font(.system(size: 9, weight: .medium))
+                    }
+                    .foregroundStyle(viewModel.isMockAutoUpdate ? Color.orange.opacity(0.8) : MindWaveTheme.accent)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(viewModel.isMockAutoUpdate
+                                  ? Color.orange.opacity(0.10)
+                                  : MindWaveTheme.accent.opacity(0.10))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(MindWaveTheme.accent.opacity(0.20), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Debug Helpers
+
     private func debugBlock<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 4) { content() }
             .padding(8)
@@ -404,10 +517,10 @@ struct LiveWaveView: View {
     }
 }
 
-// MARK: - Wave Canvas
+// MARK: - Wave Canvas（既存グラフィック実装、将来参照用に保持）
 
-/// TimelineView(.animation) で 60fps 更新し、
-/// amplitude（振幅）・speed（速度）・color（色）をスコアに連動させる3層波形。
+/// TimelineView(.animation) で 60fps 更新する3層波形。
+/// GraphicHostViewへの移行後も削除せず保持する。
 struct WaveCanvas: View {
     let amplitude: Double
     let speed: Double
