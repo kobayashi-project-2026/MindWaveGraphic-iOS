@@ -269,6 +269,18 @@ struct LiveWaveView: View {
                         debugRow("Build", viewModel.debugBuildLabel)
                     }
 
+                    // ── データソース仲裁 ────────────────────────────────
+                    debugBlock {
+                        debugRow("Active Source", viewModel.activeDataSource.rawValue)
+                        debugRow("Graphic更新時刻", formatTime(viewModel.lastGraphicUpdateDate))
+                        debugRow("Watch経過秒",
+                                 viewModel.watchSampleAge.map { String(format: "%.0f秒", $0) } ?? "---")
+                        debugRow("Watch鮮度",
+                                 viewModel.watchSampleAge == nil ? "未受信"
+                                 : viewModel.isWatchSampleFresh ? "Fresh ✓" : "Expired")
+                        debugRow("Mock", viewModel.isMockMode ? "ON" : "OFF")
+                    }
+
 #if DEBUG
                     // ── Mockモード（DEBUGビルド限定） ───────────────────
                     mockControlSection
