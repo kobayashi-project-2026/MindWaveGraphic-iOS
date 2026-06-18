@@ -15,10 +15,7 @@ import Combine
 import WatchConnectivity
 
 // ─────────────────────────────────────────────────────────
-// WatchConnectivityManager
-// WCSessionのDelegate。Watch → iPhone の心拍メッセージを3チャネルで受信し、
-// デコード後に onHeartRateReceived コールバック経由でViewModelへ通知する。
-// シングルトン。App起動時に setup() を呼ぶことでセッションが確立される。
+// WatchConnectivityManager: シングルトン。setup() でセッション確立。
 // ─────────────────────────────────────────────────────────
 @MainActor
 final class WatchConnectivityManager: NSObject, ObservableObject {

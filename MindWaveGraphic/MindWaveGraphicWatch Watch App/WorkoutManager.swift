@@ -12,14 +12,7 @@
 //   HKLiveWorkoutBuilder → workoutBuilder(_:didCollectDataOf:) で心拍受信
 //   → sendHeartRateToiPhone() で WatchConnectivity 3チャネル送信
 //
-// 送信戦略:
-//   1. sendMessage（replyHandlerあり）
-//      iPhone が到達可能な場合の低遅延経路。reply が届けば送信確認できる。
-//   2. updateApplicationContext
-//      常に実行する。最新値を1件保持し、iPhone 次回起動時にも届く。
-//   3. transferUserInfo（フォールバック）
-//      sendMessage 失敗時、または iPhone 到達不可時のキュー転送。
-//      キューに積まれ、iPhone が次に起動したときに届く。
+// 送信戦略: sendHeartRateToiPhone の3チャネル（詳細はその関数コメント参照）。
 //
 // 計測停止:
 //   stopWorkout() が HKWorkoutSession を終了し、HealthKit へデータを保存する。
@@ -36,7 +29,6 @@ import WatchConnectivity
 
 // ─────────────────────────────────────────────────────────
 // WorkoutManager
-// Watch側の心拍ライブ取得の核。起動直後に WCSession もアクティベートする。
 // ─────────────────────────────────────────────────────────
 @MainActor
 final class WorkoutManager: NSObject, ObservableObject {
@@ -130,7 +122,6 @@ final class WorkoutManager: NSObject, ObservableObject {
         WatchDebugLogger.log("WORKOUT", "start requested")
 
         let config = HKWorkoutConfiguration()
-        // activityType = .other（汎用）でセッションを作成する
         config.activityType = .other
         config.locationType = .unknown
 
@@ -151,7 +142,6 @@ final class WorkoutManager: NSObject, ObservableObject {
                 workoutConfiguration: config
             )
 
-            // セッション開始
             newSession.startActivity(with: Date())
 
             // データ収集開始（コールバックを Continuation でラップ）
