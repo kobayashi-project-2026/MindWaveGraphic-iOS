@@ -244,17 +244,26 @@ final class MindWaveViewModel: ObservableObject {
 
         let rawScore: Double
         if let ctx = sample.contextScore {
+            // Mock: contextScore を直接使用（デモ値として明示）
             rawScore = ctx
         } else {
+            // 非Mock: sample.hrv が nil の場合は実測HRVなし。
+            // avgHRV=0 を渡すと StressScoreCalculator の guard averageHRV > 0 が失敗し
+            // stressScore=50（中立）が返る。架空の currentHRV を使用しない。
             rawScore = StressScoreCalculator.calculate(
                 currentHeartRate: currentHeartRate,
                 averageHeartRate: averageHeartRate,
-                currentHRV: currentHRV,
-                averageHRV: averageHRV
+                currentHRV:    sample.hrv ?? 0.0,
+                averageHRV:    sample.hrv != nil ? averageHRV : 0.0
             ).stressScore
         }
         let tensionScore = min(100, max(0, rawScore))
         let confidence   = min(1,   max(0, computeConfidence(sample: sample)))
+        MindWaveDebugLogger.log(.pipeline,
+            "rebuild trigger=\(lastGraphicUpdateTrigger) " +
+            "hr=\(sample.heartRate.map { String(format: "%.0f", $0) } ?? "nil") " +
+            "hrv=\(sample.hrv.map { String(format: "%.0f", $0) } ?? "nil") " +
+            "score=\(String(format: "%.1f", tensionScore))")
         let state        = MindState.from(score: tensionScore)
 
         #if DEBUG
@@ -299,7 +308,7 @@ final class MindWaveViewModel: ObservableObject {
             MindWaveDebugLogger.log(.source, "active source changed \(previousSource.rawValue) -> \(sample.source.rawValue)")
         }
         MindWaveDebugLogger.log(.analysis, "score=\(String(format: "%.1f", tensionScore)) confidence=\(String(format: "%.2f", confidence)) state=\(state.rawValue)")
-        MindWaveDebugLogger.log(.graphic, "input updated score=\(String(format: "%.1f", tensionScore)) confidence=\(String(format: "%.2f", confidence)) state=\(state.rawValue)")
+        MindWaveDebugLogger.log(.graphic, "input updated trigger=\(lastGraphicUpdateTrigger) score=\(String(format: "%.1f", tensionScore)) confidence=\(String(format: "%.2f", confidence)) state=\(state.rawValue)")
     }
 
     // MARK: - ▼ scheduleWatchExpiry: Watch有効期限の自動再評価 ▼
@@ -425,7 +434,7 @@ final class MindWaveViewModel: ObservableObject {
         // UUID重複チェック（両経路で共有する lastHRVSampleIdentifier を使用）
         if let newId = result.sampleIdentifier, newId == lastHRVSampleIdentifier {
             MindWaveDebugLogger.log(.healthKit,
-                "HRV update: same sample skipped id=\(newId.prefix(8))")
+                "duplicate HRV sample skipped id=\(newId.prefix(8))")
             isNewHRVSample = false
             return false
         }
@@ -458,9 +467,11 @@ final class MindWaveViewModel: ObservableObject {
             let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f.string(from: d)
         } ?? "?"
         MindWaveDebugLogger.log(.healthKit,
-            "HRV \(isFromObserver ? "observer" : "fetch"): " +
-            "value=\(String(format: "%.1f", newValue))ms date=\(dateStr) " +
-            "id=\(result.sampleIdentifier?.prefix(8) ?? "nil")")
+            "\(isFromObserver ? "new HRV sample" : "initial HRV loaded") " +
+            "value=\(String(format: "%.1f", newValue))ms " +
+            "sampleDate=\(dateStr) " +
+            "id=\(result.sampleIdentifier?.prefix(8) ?? "nil") " +
+            "source=\(result.source)")
 
         return true
     }
@@ -699,6 +710,7 @@ final class MindWaveViewModel: ObservableObject {
             updateHRVState(result: hrvResult, isFromObserver: false)
         } else {
             isNewHRVSample = false
+            MindWaveDebugLogger.log(.healthKit, "initial HRV unavailable: \(hrvResult.message)")
         }
 
         // ── HealthKit値をingestパイプラインへ ─────────────────────
@@ -736,10 +748,13 @@ final class MindWaveViewModel: ObservableObject {
 
     /// データソース種別に応じた推定確からしさ（0〜1）を返す。
     /// Mock: mockConfidence スライダー値、Watch: HRVあり0.75/なし0.50、HealthKit: HRVあり0.65/なし0.40。
+    /// データソース種別に応じた推定確からしさ（0〜1）を返す。
+    /// watchLive: sample.hrv が実測値ありなら0.75、なし（HRV未取得）なら0.50。
+    /// currentHRV（デモ初期値含む）は使用しない。
     private func computeConfidence(sample: MindWaveSample) -> Double {
         switch sample.source {
         case .mock:        return mockConfidence
-        case .watchLive:   return currentHRV > 0 ? 0.75 : 0.50
+        case .watchLive:   return sample.hrv != nil ? 0.75 : 0.50
         case .healthKit:   return sample.hrv != nil ? 0.65 : 0.40
         case .unavailable: return 0.0
         }

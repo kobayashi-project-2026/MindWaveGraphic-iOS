@@ -146,9 +146,11 @@ struct LiveWaveView: View {
                                unit: "bpm",
                                isNew: viewModel.isNewHeartRateSample)
                     miniMetric(label: "HRV（SDNN）",
-                               value: String(format: "%.0f", viewModel.currentHRV),
-                               unit: "ms",
-                               isNew: viewModel.isNewHRVSample)
+                               value: viewModel.didFetchHRV
+                                   ? String(format: "%.0f", viewModel.currentHRV)
+                                   : "---",
+                               unit: viewModel.didFetchHRV ? "ms" : "",
+                               isNew: viewModel.isNewHRVSample && viewModel.didFetchHRV)
                 }
                 .padding(.top, 4)
             }
@@ -332,6 +334,7 @@ struct LiveWaveView: View {
                     // ── HRV Observer ──────────────────────────────────
                     debugBlock {
                         debugRow("HRV監視",     viewModel.isHRVObserverActive ? "稼働中 ●" : "停止中")
+                        debugRow("HRV実測取得", viewModel.didFetchHRV ? "済 ✓" : "未取得")
                         debugRow("HRV取得元",   viewModel.lastHRVFetchSource)
                         debugRow("HRV新規受信", "\(viewModel.hrvObserverUpdateCount) 回")
                         debugRow("HRV最終通知", formatTime(viewModel.lastHRVObserverDate))
