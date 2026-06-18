@@ -196,9 +196,12 @@ final class MindWaveViewModel: ObservableObject {
 
     private func reevaluateActiveSource(now: Date) {
         guard let sample = selectActiveSample(now: now) else {
-            activeDataSource = .unavailable
-            dataSourceLabel  = "データなし"
-            isUsingDemoData  = false
+            activeDataSource      = .unavailable
+            graphicInput          = .neutral
+            lastAnalysisResult    = nil
+            lastGraphicUpdateDate = now
+            dataSourceLabel       = "データなし"
+            isUsingDemoData       = false
             print("[Arbiter] source=unavailable")
             return
         }
