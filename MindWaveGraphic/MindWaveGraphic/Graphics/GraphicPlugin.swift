@@ -10,6 +10,6 @@ enum GraphicPlugin {
     //   変更前: AnyView(PlaceholderGraphicView(input: input))
     //   変更後: AnyView(TeamGraphicView(input: input))
     static let current: GraphicRenderer = { input in
-        AnyView(PlaceholderGraphicView(input: input))
+        AnyView(TeamGraphicView(input: input))
     }
 }

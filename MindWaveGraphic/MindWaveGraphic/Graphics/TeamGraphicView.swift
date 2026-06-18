@@ -36,11 +36,7 @@ struct TeamGraphicView: View {
     let input: GraphicInput
 
     var body: some View {
-        ZStack {
-            // ここにグラフィックを実装してください
-            Text("TeamGraphicView: 未実装")
-                .foregroundStyle(.secondary)
-        }
+        StarfieldGraphicView(input: input)
     }
 }
 
