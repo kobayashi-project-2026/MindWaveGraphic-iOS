@@ -56,11 +56,13 @@ final class MindWaveViewModel: ObservableObject {
     @Published var sameSampleCount: Int             = 0
     @Published var livePulseTrigger: Int            = 0
 
-    // MARK: - HRV Observer 状態（診断用）
+    // MARK: - HRV 状態（診断用）— HealthKit取得とObserver受信を統一管理
 
     @Published private(set) var isHRVObserverActive: Bool   = false
     @Published private(set) var lastHRVObserverDate: Date?  = nil
     @Published private(set) var hrvObserverUpdateCount: Int = 0
+    /// 最後にHRV状態を更新した経路。"HealthKit取得" または "Observer受信"
+    @Published private(set) var lastHRVFetchSource: String  = "---"
     /// GraphicInputを最後に更新したデータ経路（"heartRate" / "hrv" / "healthKit" / "mock"）
     @Published private(set) var lastGraphicUpdateTrigger: String = "---"
 
@@ -404,6 +406,65 @@ final class MindWaveViewModel: ObservableObject {
         MindWaveDebugLogger.log(.healthKit, "HRV observer stopped from ViewModel")
     }
 
+    // MARK: - HRV状態の統一更新
+
+    /// HRV値・サンプル時刻・UUID・latestHealthKitSample.hrv をひとつの経路で更新する共通処理。
+    /// HealthKit取得（applyFetchedValues）とHRV Observer（applyNewHRVSample）の両方から呼ぶ。
+    ///
+    /// - Parameters:
+    ///   - result: HealthKitから得たHRV結果
+    ///   - isFromObserver: Observer経由の場合 true、初回取得・ポーリングは false
+    /// - Returns: 状態を実際に更新した場合 true（重複UUIDはスキップして false）
+    @discardableResult
+    private func updateHRVState(result: HealthMetricFetchResult, isFromObserver: Bool) -> Bool {
+        guard let newValue = result.value else {
+            MindWaveDebugLogger.log(.healthKit, "HRV update: no value")
+            return false
+        }
+
+        // UUID重複チェック（両経路で共有する lastHRVSampleIdentifier を使用）
+        if let newId = result.sampleIdentifier, newId == lastHRVSampleIdentifier {
+            MindWaveDebugLogger.log(.healthKit,
+                "HRV update: same sample skipped id=\(newId.prefix(8))")
+            isNewHRVSample = false
+            return false
+        }
+
+        // ── HRV状態を統一更新 ───────────────────────────────────────
+        lastHRVSampleIdentifier = result.sampleIdentifier
+        latestHRVSampleDate     = result.sampleDate
+        isNewHRVSample          = true
+        didFetchHRV             = true
+        currentHRV              = newValue
+        lastHRVFetchSource      = isFromObserver ? "Observer受信" : "HealthKit取得"
+
+        // latestHealthKitSample.hrv を直接更新する。
+        // HR取得の有無に依存せず selectActiveSample の Watch+HRV補完ロジックが使用する。
+        latestHealthKitSample = MindWaveSample(
+            heartRate: latestHealthKitSample?.heartRate,
+            hrv: newValue,
+            contextScore: nil,
+            source: .healthKit,
+            timestamp: result.sampleDate ?? Date()
+        )
+
+        // Observer固有の更新（初回取得・ポーリングでは更新しない）
+        if isFromObserver {
+            lastHRVObserverDate     = Date()
+            hrvObserverUpdateCount += 1
+        }
+
+        let dateStr = result.sampleDate.map { d in
+            let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f.string(from: d)
+        } ?? "?"
+        MindWaveDebugLogger.log(.healthKit,
+            "HRV \(isFromObserver ? "observer" : "fetch"): " +
+            "value=\(String(format: "%.1f", newValue))ms date=\(dateStr) " +
+            "id=\(result.sampleIdentifier?.prefix(8) ?? "nil")")
+
+        return true
+    }
+
     /// HealthKit に新しい HRV サンプルが保存されたときに呼ばれる（MainActor）。
     ///
     /// - 同一UUIDのサンプルは重複処理しない
@@ -413,43 +474,13 @@ final class MindWaveViewModel: ObservableObject {
     ///   最新Watch心拍（latestWatchSample.heartRate）と最新HRVを結合する
     /// - reevaluateActiveSource を直接呼んで GraphicInput を再計算する
     func applyNewHRVSample(_ result: HealthMetricFetchResult) {
-        guard let newValue = result.value else {
+        guard result.value != nil else {
             MindWaveDebugLogger.log(.healthKit, "HRV observer fired but no value")
             return
         }
-
-        // 重複チェック：同じ UUID のサンプルは処理しない
-        if let newId = result.sampleIdentifier, newId == lastHRVSampleIdentifier {
-            MindWaveDebugLogger.log(.healthKit, "HRV observer: same sample skipped id=\(newId.prefix(8))")
-            return
-        }
-
-        // 新しいHRVサンプルを記録（latestWatchSampleは変更しない）
-        lastHRVSampleIdentifier = result.sampleIdentifier
-        isNewHRVSample          = true
-        latestHRVSampleDate     = result.sampleDate
-        lastHRVObserverDate     = Date()
-        hrvObserverUpdateCount += 1
-        currentHRV              = newValue
-        didFetchHRV             = true
-
-        let dateStr = result.sampleDate.map { d in
-            let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f.string(from: d)
-        } ?? "?"
-        MindWaveDebugLogger.log(.healthKit,
-            "HRV observer: new sample value=\(String(format: "%.1f", newValue))ms " +
-            "date=\(dateStr) id=\(result.sampleIdentifier?.prefix(8) ?? "nil")")
-
-        // latestHealthKitSample の HRV だけを更新する。
-        // selectActiveSample が Watch(fresh) + HK.hrv を補完結合する。
-        // Watch が新鮮かどうかは selectActiveSample 内で判定する（ここでは変更しない）。
-        latestHealthKitSample = MindWaveSample(
-            heartRate: latestHealthKitSample?.heartRate,
-            hrv: newValue,
-            contextScore: nil,
-            source: .healthKit,
-            timestamp: result.sampleDate ?? Date()
-        )
+        // 共通HRV状態更新（dedup・latestHealthKitSample.hrv更新・currentHRV更新を含む）
+        let updated = updateHRVState(result: result, isFromObserver: true)
+        guard updated else { return }
 
         MindWaveDebugLogger.log(.healthKit,
             "HRV observer: re-evaluating source watchFresh=\(isWatchSampleFresh)")
@@ -663,20 +694,15 @@ final class MindWaveViewModel: ObservableObject {
             liveMonitoringMessage = "心拍データ未取得"
         }
 
+        // HRV状態を統一経路で更新（latestHealthKitSample.hrv・currentHRV・診断変数を一括更新）
         if hrvResult.isSuccess {
-            let newHrvId = hrvResult.sampleIdentifier
-            if let newHrvId, newHrvId == lastHRVSampleIdentifier {
-                isNewHRVSample = false
-            } else {
-                isNewHRVSample          = true
-                lastHRVSampleIdentifier = newHrvId
-            }
-            latestHRVSampleDate = hrvResult.sampleDate
+            updateHRVState(result: hrvResult, isFromObserver: false)
         } else {
             isNewHRVSample = false
         }
 
         // ── HealthKit値をingestパイプラインへ ─────────────────────
+        // HR+HRV合算サンプルをingestする。HR取得失敗時はHRV単体更新のみ（上で実施済み）。
         lastGraphicUpdateTrigger = "healthKit"
         if let hr = hrResult.value, let avg = avgHR {
             averageHeartRate = avg
@@ -697,10 +723,11 @@ final class MindWaveViewModel: ObservableObject {
                 timestamp: hrResult.sampleDate ?? Date()
             ))
         } else {
-            // HealthKit取得失敗 → デモフォールバックなし。Watch or unavailable で継続
+            // HR取得失敗 → HRVは updateHRVState 経由で更新済みのため latestHealthKitSample.hrv はセット済み。
+            // Watch+HRV補完のために reevaluateActiveSource を呼ぶ。
             healthKitStatusLabel = "HealthKit：データなし"
             lastFetchMessage     = "心拍未取得: \(hrResult.message)"
-            MindWaveDebugLogger.log(.healthKit, "fetch failed; re-evaluating source")
+            MindWaveDebugLogger.log(.healthKit, "HR fetch failed; re-evaluating source")
             reevaluateActiveSource(now: Date())
         }
     }
