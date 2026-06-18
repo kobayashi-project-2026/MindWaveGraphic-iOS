@@ -20,7 +20,7 @@ enum MindWaveLogCategory: String {
 }
 
 enum MindWaveDebugLogger {
-    static func log(
+    nonisolated static func log(
         _ category: MindWaveLogCategory,
         _ message: @autoclosure () -> String
     ) {

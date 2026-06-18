@@ -2,13 +2,12 @@
 //  WatchConnectivityManager.swift
 //  MindWaveGraphic
 //
-//  Apple WatchからWatchConnectivityで受信した心拍数をViewModelに橋渡しする。
-//  シングルトンとして使い、App起動時にactivateする。
-//
-//  受信チャネル:
-//    - didReceiveMessage          → Watch側 sendMessage（リアルタイム）
-//    - didReceiveUserInfo         → Watch側 transferUserInfo（キュー転送）
-//    - didReceiveApplicationContext → Watch側 updateApplicationContext（最確実）
+// iPhone側WatchConnectivityの窓口。
+// Watchから3チャネル（sendMessage / transferUserInfo / updateApplicationContext）で
+// 心拍データを受信し、共通処理 handleIncomingMessage へ集約する。
+// 受信した心拍を検証後、MainActor上で onHeartRateReceived コールバックを呼び
+// MindWaveViewModel.applyWatchHeartRate へ渡す。
+// グラフィック処理・HealthKit処理は行わない。
 //
 
 import Foundation
@@ -17,8 +16,9 @@ import WatchConnectivity
 
 // ─────────────────────────────────────────────────────────
 // WatchConnectivityManager
-// WCSessionのDelegate。Watch → iPhone の心拍数メッセージを受信し、
-// onHeartRateReceived コールバック経由でViewModelへ通知する。
+// WCSessionのDelegate。Watch → iPhone の心拍メッセージを3チャネルで受信し、
+// デコード後に onHeartRateReceived コールバック経由でViewModelへ通知する。
+// シングルトン。App起動時に setup() を呼ぶことでセッションが確立される。
 // ─────────────────────────────────────────────────────────
 @MainActor
 final class WatchConnectivityManager: NSObject, ObservableObject {
@@ -44,29 +44,32 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     /// 最後に受信したチャネル名
     @Published var lastReceiveChannel: String         = "---"
 
-    // MARK: - コールバック（ViewModelが受信して心拍を即時反映する）
+    // MARK: - コールバック
 
-    /// Watch心拍受信時に呼ばれる。引数: (heartRate bpm, sampleDate)
+    /// Watch心拍受信時に呼ばれる。MindWaveViewModel.subscribeToWatchHeartRate() で登録される。
+    /// 引数: (heartRate bpm, sampleDate)
     var onHeartRateReceived: ((Double, Date) -> Void)?
 
     // MARK: - 初期化
 
+    /// シングルトンのため外部からは呼べない。shared 経由で利用する。
     private override init() {
         super.init()
     }
 
-    // MARK: - セットアップ（App起動時に呼ぶ）
+    // MARK: - セッション開始（App起動時に1回呼ぶ）
 
-    /// WCSessionをアクティベートする。
+    /// WCSession を activate する。WCSession.isSupported() が false のデバイスでは何もしない。
+    /// MindWaveGraphicApp の init またはonAppear から1回だけ呼ぶこと。
     func setup() {
         guard WCSession.isSupported() else {
-            print("[WatchConnectivity iPhone] WatchConnectivity非対応デバイス")
+            MindWaveDebugLogger.log(.error, "WatchConnectivity not supported on this device")
             watchConnectionStatusLabel = "WatchConnectivity非対応"
             return
         }
         WCSession.default.delegate = self
         WCSession.default.activate()
-        print("[WatchConnectivity iPhone] WCSession activate 開始")
+        MindWaveDebugLogger.log(.watch, "WCSession activation requested")
     }
 }
 
@@ -75,6 +78,9 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
 extension WatchConnectivityManager: WCSessionDelegate {
 
     // ── アクティベーション完了 ─────────────────────────────────────────
+    /// WCSession の activation が完了したときに呼ばれる。
+    /// 成功時は isPaired / isWatchAppInstalled / isReachable をログに残す。
+    /// 失敗時は error カテゴリでログを出す。
     nonisolated func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,
@@ -88,26 +94,34 @@ extension WatchConnectivityManager: WCSessionDelegate {
         @unknown default:   label = "不明"
         }
         if let error {
-            print("[WatchConnectivity iPhone] アクティベーションエラー: \(error.localizedDescription)")
+            MindWaveDebugLogger.log(.error, "WCSession activation error: \(error.localizedDescription)")
         } else {
-            print("[WatchConnectivity iPhone] アクティベーション完了: \(label) | isPaired=\(session.isPaired) | isWatchAppInstalled=\(session.isWatchAppInstalled)")
+            MindWaveDebugLogger.log(.watch, "activation completed state=\(label) paired=\(session.isPaired) installed=\(session.isWatchAppInstalled) reachable=\(session.isReachable)")
         }
         Task { @MainActor [self] in
             watchConnectionStatusLabel = label
         }
     }
 
+    // ── リアルタイム到達可能性の変化 ──────────────────────────────────
+    /// isReachable が変化したときだけ呼ばれる。値が変わったときのみログを出す。
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        MindWaveDebugLogger.log(.watch, "reachability changed reachable=\(session.isReachable)")
+    }
+
     // ── iOSのみ必須: セッション非アクティブ ────────────────────────────
+    /// Watch切替直前などに呼ばれる。reactivate前の中間状態。
     nonisolated func sessionDidBecomeInactive(_ session: WCSession) {
-        print("[WatchConnectivity iPhone] セッション非アクティブ")
+        MindWaveDebugLogger.log(.watch, "session became inactive")
         Task { @MainActor [self] in
             watchConnectionStatusLabel = "非アクティブ"
         }
     }
 
-    // ── iOSのみ必須: セッション非アクティブ化（Watch切替後などに再activate）
+    // ── iOSのみ必須: セッション非アクティブ化完了 ──────────────────────
+    /// sessionDidBecomeInactive の後に呼ばれる。新しいWatch用に再activateする。
     nonisolated func sessionDidDeactivate(_ session: WCSession) {
-        print("[WatchConnectivity iPhone] セッション非アクティブ化 → 再activate")
+        MindWaveDebugLogger.log(.watch, "session deactivated → re-activating")
         WCSession.default.activate()
         Task { @MainActor [self] in
             watchConnectionStatusLabel = "再アクティブ化中"
@@ -115,66 +129,87 @@ extension WatchConnectivityManager: WCSessionDelegate {
     }
 
     // ── リアルタイムメッセージ受信（Watch側 sendMessage, replyHandler: nil）
+    /// Watch が sendMessage(replyHandler: nil) で送った場合に呼ばれる。
     nonisolated func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any]
     ) {
-        print("[WatchConnectivity iPhone] didReceiveMessage（replyHandlerなし）")
+        MindWaveDebugLogger.log(.watch, "received channel=sendMessage keys=\(message.keys.sorted().joined(separator: ","))")
         handleIncomingMessage(message, channel: "sendMessage")
     }
 
     // ── リアルタイムメッセージ受信（Watch側 sendMessage, replyHandlerあり）
+    /// Watch が sendMessage(replyHandler:) で送った場合に呼ばれる。
+    /// 受信確認として ["status": "ok", "received": true] を即時返す。
     nonisolated func session(
         _ session: WCSession,
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        print("[WatchConnectivity iPhone] didReceiveMessage（replyHandlerあり）")
+        MindWaveDebugLogger.log(.watch, "received channel=sendMessage+reply keys=\(message.keys.sorted().joined(separator: ","))")
         handleIncomingMessage(message, channel: "sendMessage+reply")
         replyHandler(["status": "ok", "received": true])
+        MindWaveDebugLogger.log(.watch, "reply sent channel=sendMessage+reply status=ok")
     }
 
     // ── バックグラウンド転送受信（Watch側 transferUserInfo）
+    /// Watch が transferUserInfo で送ったデータが届いたときに呼ばれる。
+    /// iPhone がバックグラウンドでも配信される。
     nonisolated func session(
         _ session: WCSession,
         didReceiveUserInfo userInfo: [String: Any] = [:]
     ) {
-        print("[WatchConnectivity iPhone] didReceiveUserInfo")
-        handleIncomingMessage(userInfo, channel: "transferUserInfo")
+        MindWaveDebugLogger.log(.watch, "received channel=userInfo keys=\(userInfo.keys.sorted().joined(separator: ","))")
+        handleIncomingMessage(userInfo, channel: "userInfo")
     }
 
     // ── アプリコンテキスト受信（Watch側 updateApplicationContext）
-    // これが最も確実なチャネル。Watch側が updateApplicationContext を呼ぶと
-    // iPhone側のこのデリゲートが呼ばれる。
+    /// Watch が updateApplicationContext を呼ぶと iPhone 側でここが呼ばれる。
+    /// 最新状態を1件だけ保持するチャネル。
     nonisolated func session(
         _ session: WCSession,
         didReceiveApplicationContext applicationContext: [String: Any]
     ) {
-        print("[WatchConnectivity iPhone] didReceiveApplicationContext")
-        handleIncomingMessage(applicationContext, channel: "appContext")
+        MindWaveDebugLogger.log(.watch, "received channel=applicationContext keys=\(applicationContext.keys.sorted().joined(separator: ","))")
+        handleIncomingMessage(applicationContext, channel: "applicationContext")
     }
 
     // MARK: - 共通メッセージ処理
 
-    /// Watch から届いたメッセージを解析し、心拍数をコールバック経由でViewModelへ渡す。
+    /// Watch から届いたメッセージを3段階で検証し、心拍数をコールバック経由でViewModelへ渡す。
+    /// 検証失敗の種別（typeキーなし・heartRateキーなし・timestamp変換失敗）をログで区別する。
+    /// 範囲外の値は既存の有効範囲を変更せずログ警告のみ出す。
     private nonisolated func handleIncomingMessage(
         _ message: [String: Any],
         channel: String
     ) {
-        // type: "heartRate" のメッセージのみ処理する
-        guard let type      = message["type"] as? String, type == "heartRate",
-              let hr        = message["heartRate"] as? Double,
-              let timestamp = message["timestamp"] as? TimeInterval else {
-            print("[WatchConnectivity iPhone] 未知フォーマット (\(channel)): keys=\(message.keys.joined(separator: ","))")
+        // type: "heartRate" を確認する
+        guard let type = message["type"] as? String, type == "heartRate" else {
+            let keys = message.keys.sorted().joined(separator: ",")
+            MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=type missing or not heartRate keys=\(keys)")
             return
+        }
+        // heartRate キーと型を確認する
+        guard let hr = message["heartRate"] as? Double else {
+            MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=heartRate key missing or wrong type")
+            return
+        }
+        // timestamp キーと型を確認する
+        guard let timestamp = message["timestamp"] as? TimeInterval else {
+            MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=timestamp key missing or wrong type")
+            return
+        }
+
+        // 範囲ログ（既存の有効範囲は変更しない）
+        if hr <= 0 {
+            MindWaveDebugLogger.log(.error, "decode warning channel=\(channel) bpm=\(hr) value ≤0")
+        } else if hr > 250 {
+            MindWaveDebugLogger.log(.error, "decode warning channel=\(channel) bpm=\(hr) unrealistic value >250")
         }
 
         let sampleDate = Date(timeIntervalSince1970: timestamp)
         let summary    = String(format: "%.0f bpm", hr)
         let debugText  = String(format: "%.0f bpm | %@ | %@", hr, channel, formatTime(sampleDate))
-
-        // このログが必ず出ることを確認する
-        print("[WatchConnectivity] received heartRate: \(summary) via \(channel) at \(formatTime(sampleDate))")
 
         // MainActor でUIプロパティを更新し、ViewModelのコールバックを呼ぶ
         Task { @MainActor [self] in
@@ -184,6 +219,8 @@ extension WatchConnectivityManager: WCSessionDelegate {
             lastWatchMessage         = summary
             lastPayloadDebug         = debugText
             lastReceiveChannel       = channel
+            MindWaveDebugLogger.log(.watch, "decoded channel=\(channel) bpm=\(Int(hr)) count=\(watchMessageCount)")
+            MindWaveDebugLogger.log(.watch, "delivering heart rate to MindWaveViewModel")
             onHeartRateReceived?(hr, sampleDate)
         }
     }

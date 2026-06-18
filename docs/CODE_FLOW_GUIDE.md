@@ -203,3 +203,47 @@ DEBUGビルドでのみ出力される。Releaseビルドでは全て無効。
 ```
 
 → `expiry task scheduled` が出ているのに `sample expired` が出ない場合、Task がキャンセルされている可能性がある（新しい Watch サンプルが15秒以内に届いた場合は `expiry task skipped` が出る）。
+
+---
+
+## 10. WatchConnectivityの3チャネル
+
+| チャネル | 役割 |
+|---|---|
+| sendMessage | Watch と iPhone が到達可能な場合の低遅延送信。replyHandler あり |
+| updateApplicationContext | 最新状態を1件保持する同期。常に実行される補助チャネル |
+| transferUserInfo | 到達不能時にもキューへ積む転送。sendMessage 失敗時のフォールバック |
+
+## 11. 受信後の流れ
+
+```
+WatchConnectivityManager（didReceiveMessage / didReceiveUserInfo / didReceiveApplicationContext）
+→ handleIncomingMessage（type / heartRate / timestamp 検証）
+→ onHeartRateReceived コールバック
+→ MindWaveViewModel.applyWatchHeartRate
+→ MindWaveSample（source: .watchLive）
+→ ingest
+```
+
+## 12. ログを使った正常系確認
+
+Watch→iPhone 通信が正常なとき、以下の順序でログが見える:
+
+```
+[MindWaveWatch][HR] sample bpm=82
+[MindWaveWatch][WC] sendMessage attempt bpm=82 reachable=true
+[MindWave][WATCH] received channel=sendMessage keys=heartRate,timestamp,type
+[MindWave][WATCH] decoded channel=sendMessage bpm=82 count=N
+[MindWave][WATCH] delivering heart rate to MindWaveViewModel
+[MindWave][WATCH] heart rate received bpm=82 mockMode=false
+[MindWave][PIPELINE] latest Watch sample stored
+[MindWave][SOURCE] active source changed mock -> watchLive
+[MindWave][GRAPHIC] input updated score=... confidence=... state=...
+```
+
+async の reply は別タイミングで届く:
+
+```
+[MindWaveWatch][WC] sendMessage reply received
+[MindWave][WATCH] reply sent channel=sendMessage+reply status=ok
+```
