@@ -32,11 +32,15 @@ import SwiftUI
 //   - Privateな関数・計算プロパティの追加
 //   - Graphicsフォルダ内への追加ファイル
 //   - GraphicPlugin.swift の登録1行
+/// GraphicPlugin から呼ばれる最終グラフィックView。
+/// StarfieldGraphicView へ GraphicInput を渡す。
+/// showsParameterOverlay: true → 数値オーバーレイ表示中（実測確認段階）。
+/// 本番で数値を消す場合は showsParameterOverlay を false に変更する。
 struct TeamGraphicView: View {
     let input: GraphicInput
 
     var body: some View {
-        StarfieldGraphicView(input: input)
+        StarfieldGraphicView(input: input, showsParameterOverlay: true)
     }
 }
 

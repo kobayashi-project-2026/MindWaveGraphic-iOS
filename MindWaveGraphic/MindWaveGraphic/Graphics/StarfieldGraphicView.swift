@@ -20,8 +20,19 @@ import SwiftUI
 //
 // ■ HealthKit / WatchConnectivity / ViewModel は一切参照しない。
 // ─────────────────────────────────────────────────────────
+/// 3D星空でGraphicInput.scoreを可視化するView。
+/// HealthKit / WatchConnectivity / ViewModel は参照しない。
+///
+/// - Parameters:
+///   - input: スコア・confidence・状態を含む入力値
+///   - showsParameterOverlay: true のとき数値オーバーレイを表示。
+///     本番で非表示にするには TeamGraphicView 側で false を渡すだけでよい。
+///     現段階（実測確認中）は true を使用すること。
 struct StarfieldGraphicView: View {
     let input: GraphicInput
+    /// 数値オーバーレイ表示フラグ。デフォルトtrue（確認段階）。
+    /// 本番非表示にするときは TeamGraphicView で false に変更する。
+    var showsParameterOverlay: Bool = true
 
     // 800個の星。初回のみ生成し、フレームごとに再生成しない。
     @State private var stars: [Star] = StarfieldGraphicView.buildStars()
@@ -54,11 +65,11 @@ struct StarfieldGraphicView: View {
                 }
             }
 
-            // フェーズB-7: 数値オーバーレイ（DEBUG のみ表示）
-            // 本番 Release で非表示: このブロックを削除または #if false に変更する
-            #if DEBUG
-            scoreOverlay
-            #endif
+            // 数値オーバーレイ（showsParameterOverlay が true のとき表示）
+            // 本番非表示は TeamGraphicView 側で showsParameterOverlay: false を渡す
+            if showsParameterOverlay {
+                scoreOverlay
+            }
         }
     }
 
