@@ -8,10 +8,18 @@
 
 /* Begin PBXBuildFile section */
 		43BF912E2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 43BF912D2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		43BF914A2FD8A09000607844 /* MindWaveGraphicWatch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 43BF912D2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		43BF912F2FD8A08D00607844 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 43BF906A2FD280F400607844 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 43BF912C2FD8A08D00607844;
+			remoteInfo = "MindWaveGraphicWatch Watch App";
+		};
+		43BF914B2FD8A09000607844 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 43BF906A2FD280F400607844 /* Project object */;
 			proxyType = 1;
@@ -28,6 +36,17 @@
 			dstSubfolderSpec = 16;
 			files = (
 				43BF912E2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		43BF914C2FD8A09000607844 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				43BF914A2FD8A09000607844 /* MindWaveGraphicWatch Watch App.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -100,10 +119,12 @@
 				43BF906E2FD280F400607844 /* Sources */,
 				43BF906F2FD280F400607844 /* Frameworks */,
 				43BF90702FD280F400607844 /* Resources */,
+				43BF914C2FD8A09000607844 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				43BF914D2FD8A09000607844 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				43BF90742FD280F500607844 /* MindWaveGraphic */,
@@ -244,6 +265,11 @@
 			isa = PBXTargetDependency;
 			target = 43BF912C2FD8A08D00607844 /* MindWaveGraphicWatch Watch App */;
 			targetProxy = 43BF912F2FD8A08D00607844 /* PBXContainerItemProxy */;
+		};
+		43BF914D2FD8A09000607844 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 43BF912C2FD8A08D00607844 /* MindWaveGraphicWatch Watch App */;
+			targetProxy = 43BF914B2FD8A09000607844 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
