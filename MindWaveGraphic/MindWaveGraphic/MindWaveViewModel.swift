@@ -56,6 +56,12 @@ final class MindWaveViewModel: ObservableObject {
     @Published var sameSampleCount: Int             = 0
     @Published var livePulseTrigger: Int            = 0
 
+    // MARK: - HRV Observer 状態（診断用）
+
+    @Published private(set) var isHRVObserverActive: Bool  = false
+    @Published private(set) var lastHRVObserverDate: Date? = nil
+    @Published private(set) var hrvObserverUpdateCount: Int = 0
+
     // MARK: - ライブ監視状態（診断用）
 
     @Published var isLiveMonitoring: Bool           = false
@@ -136,6 +142,7 @@ final class MindWaveViewModel: ObservableObject {
 
     private var lastHeartRateSampleIdentifier: String? = nil
     private var lastHRVSampleIdentifier: String?       = nil
+    private var hrvObserverStarted                     = false
 
     // MARK: - 最新サンプル保持
 
@@ -365,6 +372,79 @@ final class MindWaveViewModel: ObservableObject {
         MindWaveDebugLogger.log(.mock, "auto-update stopped")
     }
 
+    // MARK: - HealthKit HRV Observer
+
+    /// HealthKit HRV observer を開始する。
+    /// requestHealthKitAuthorization の完了後に1回だけ呼ぶ。
+    /// 初回の fetchHealthKitData で lastHRVSampleIdentifier が設定された後に開始することで
+    /// 既存サンプルの重複処理を防ぐ。
+    private func startHRVObserver() {
+        guard !hrvObserverStarted else { return }
+        hrvObserverStarted   = true
+        isHRVObserverActive  = true
+        hkManager.startHRVObserver { [weak self] result in
+            Task { @MainActor [weak self] in
+                self?.applyNewHRVSample(result)
+            }
+        }
+        MindWaveDebugLogger.log(.healthKit, "HRV observer registered")
+    }
+
+    /// HealthKit に新しい HRV サンプルが保存されたときに呼ばれる（MainActor）。
+    ///
+    /// - 同一UUIDのサンプルは重複処理しない
+    /// - HRV更新時は最新Watch心拍を使用する。Watchが有効期限内なら watchLive source、
+    ///   そうでなければ healthKit source で ingest する
+    /// - サンプル時刻は HRV サンプルの記録時刻を使う
+    func applyNewHRVSample(_ result: HealthMetricFetchResult) {
+        guard let newValue = result.value else {
+            MindWaveDebugLogger.log(.healthKit, "HRV observer fired but no value")
+            return
+        }
+
+        // 重複チェック：同じ UUID のサンプルは処理しない
+        if let newId = result.sampleIdentifier, newId == lastHRVSampleIdentifier {
+            MindWaveDebugLogger.log(.healthKit, "HRV observer: same sample skipped id=\(newId.prefix(8))")
+            return
+        }
+
+        // 新しいサンプルを記録
+        lastHRVSampleIdentifier = result.sampleIdentifier
+        isNewHRVSample          = true
+        latestHRVSampleDate     = result.sampleDate
+        lastHRVObserverDate     = Date()
+        hrvObserverUpdateCount += 1
+
+        let dateStr = result.sampleDate.map { d in
+            let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f.string(from: d)
+        } ?? "?"
+        MindWaveDebugLogger.log(.healthKit,
+            "HRV observer: new sample value=\(String(format: "%.1f", newValue))ms " +
+            "date=\(dateStr) id=\(result.sampleIdentifier?.prefix(8) ?? "nil")")
+
+        // HRV更新時は最新Watch心拍と結合する
+        let now = Date()
+        let heartRate: Double?
+        let source: MindDataSource
+        if isWatchSampleFresh, let watchHR = latestWatchSample?.heartRate {
+            heartRate = watchHR
+            source    = .watchLive
+            MindWaveDebugLogger.log(.healthKit, "HRV observer: combining with watchLive HR=\(String(format: "%.0f", watchHR))")
+        } else {
+            heartRate = currentHeartRate > 0 ? currentHeartRate : nil
+            source    = .healthKit
+            MindWaveDebugLogger.log(.healthKit, "HRV observer: Watch stale, using healthKit source")
+        }
+
+        ingest(MindWaveSample(
+            heartRate: heartRate,
+            hrv: newValue,
+            contextScore: nil,
+            source: source,
+            timestamp: result.sampleDate ?? now
+        ))
+    }
+
     // MARK: - Watch ライブ心拍 コールバック登録
 
     /// WatchConnectivityManager.shared からの心拍コールバックを applyWatchHeartRate に接続する。
@@ -447,6 +527,7 @@ final class MindWaveViewModel: ObservableObject {
             MindWaveDebugLogger.log(.healthKit, "authorization requested")
             healthKitStatusLabel = "HealthKit：許可済み"
             if !forceDemoMode { await fetchHealthKitData() }
+            startHRVObserver()
         } catch {
             healthKitStatusLabel = "HealthKit：許可リクエスト失敗"
             MindWaveDebugLogger.log(.error, "HealthKit authorization error: \(error)")

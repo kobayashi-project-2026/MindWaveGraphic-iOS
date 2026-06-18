@@ -37,6 +37,8 @@ final class HealthKitManager {
     private let heartRateType = HKQuantityType(.heartRate)
     private let hrvType       = HKQuantityType(.heartRateVariabilitySDNN)
 
+    private var hrvObserverQuery: HKObserverQuery?
+
     // MARK: - Availability
 
     static var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
@@ -225,6 +227,70 @@ final class HealthKitManager {
                 continuation.resume(returning: total / Double(samples.count))
             }
             store.execute(query)
+        }
+    }
+
+    // MARK: - HRV Observer
+
+    /// 最新HRVサンプルを HealthMetricFetchResult として返す。
+    /// sampleIdentifier（UUID）が含まれるため重複検知に使用できる。
+    func fetchLatestHRVSample() async -> HealthMetricFetchResult {
+        let unit = HKUnit.secondUnit(with: .milli)
+        if let s = await fetchLatestSample(type: hrvType, unit: unit) {
+            let msg = "HRV 最新サンプル: \(String(format: "%.1f", s.value)) ms"
+            return HealthMetricFetchResult(
+                value: s.value,
+                source: "最新サンプル",
+                message: msg,
+                sampleDate: s.sampleDate,
+                sampleIdentifier: s.identifier
+            )
+        }
+        return HealthMetricFetchResult(
+            value: nil,
+            source: "none",
+            message: "HRVサンプルなし",
+            sampleDate: nil,
+            sampleIdentifier: nil
+        )
+    }
+
+    /// HealthKit HRVの新規サンプル追加を監視する。
+    /// 新しいサンプルが保存されるたびに handler が呼ばれる。
+    /// handler はバックグラウンドスレッドから呼ばれるため、呼び出し側で MainActor dispatch が必要。
+    func startHRVObserver(handler: @escaping (HealthMetricFetchResult) -> Void) {
+        guard Self.isAvailable else { return }
+
+        // 既存オブザーバーを停止してから再登録
+        if let existing = hrvObserverQuery {
+            store.stop(existing)
+        }
+
+        let query = HKObserverQuery(sampleType: hrvType, predicate: nil) { [weak self] _, completionHandler, error in
+            guard let self else { completionHandler(); return }
+            if let error = error {
+                print("[HealthKit] HRV observer error: \(error.localizedDescription)")
+                completionHandler()
+                return
+            }
+            Task {
+                let result = await self.fetchLatestHRVSample()
+                handler(result)
+                // HealthKitへ処理完了を通知（background delivery使用時に必要）
+                completionHandler()
+            }
+        }
+        hrvObserverQuery = query
+        store.execute(query)
+        print("[HealthKit] HRV observer started")
+    }
+
+    /// HRV observerを停止する。
+    func stopHRVObserver() {
+        if let query = hrvObserverQuery {
+            store.stop(query)
+            hrvObserverQuery = nil
+            print("[HealthKit] HRV observer stopped")
         }
     }
 
