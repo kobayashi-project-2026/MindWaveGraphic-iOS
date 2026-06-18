@@ -269,7 +269,7 @@ final class HealthKitManager {
         let query = HKObserverQuery(sampleType: hrvType, predicate: nil) { [weak self] _, completionHandler, error in
             guard let self else { completionHandler(); return }
             if let error = error {
-                print("[HealthKit] HRV observer error: \(error.localizedDescription)")
+                MindWaveDebugLogger.log(.error, "HRV observer error: \(error.localizedDescription)")
                 completionHandler()
                 return
             }
@@ -282,7 +282,7 @@ final class HealthKitManager {
         }
         hrvObserverQuery = query
         store.execute(query)
-        print("[HealthKit] HRV observer started")
+        MindWaveDebugLogger.log(.healthKit, "HRV observer started")
     }
 
     /// HRV observerを停止する。
@@ -290,7 +290,7 @@ final class HealthKitManager {
         if let query = hrvObserverQuery {
             store.stop(query)
             hrvObserverQuery = nil
-            print("[HealthKit] HRV observer stopped")
+            MindWaveDebugLogger.log(.healthKit, "HRV observer stopped")
         }
     }
 

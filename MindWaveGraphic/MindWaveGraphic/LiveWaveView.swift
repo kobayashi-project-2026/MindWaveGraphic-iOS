@@ -329,6 +329,15 @@ struct LiveWaveView: View {
                         debugRow("HRVサンプル更新",  viewModel.isNewHRVSample ? "新規 ✓" : "同じ")
                     }
 
+                    // ── HRV Observer ──────────────────────────────────
+                    debugBlock {
+                        debugRow("HRV監視",     viewModel.isHRVObserverActive ? "稼働中 ●" : "停止中")
+                        debugRow("HRV新規受信", "\(viewModel.hrvObserverUpdateCount) 回")
+                        debugRow("HRV最終通知", formatTime(viewModel.lastHRVObserverDate))
+                        debugRow("HRV経過",     hrvAgeString(viewModel.latestHRVSampleDate))
+                        debugRow("Graphic更新契機", viewModel.lastGraphicUpdateTrigger)
+                    }
+
                     // ── スコア ─────────────────────────────────────────
                     debugBlock {
                         debugRow("スコア（計算値）", String(format: "%.1f", viewModel.stressResult.stressScore))
@@ -526,6 +535,12 @@ struct LiveWaveView: View {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss"
         return f.string(from: date)
+    }
+
+    private func hrvAgeString(_ date: Date?) -> String {
+        guard let date else { return "---" }
+        let minutes = Int(Date().timeIntervalSince(date) / 60)
+        return minutes < 1 ? "1分未満" : "\(minutes)分"
     }
 }
 

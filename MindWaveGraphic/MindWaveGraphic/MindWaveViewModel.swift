@@ -58,9 +58,11 @@ final class MindWaveViewModel: ObservableObject {
 
     // MARK: - HRV Observer 状態（診断用）
 
-    @Published private(set) var isHRVObserverActive: Bool  = false
-    @Published private(set) var lastHRVObserverDate: Date? = nil
+    @Published private(set) var isHRVObserverActive: Bool   = false
+    @Published private(set) var lastHRVObserverDate: Date?  = nil
     @Published private(set) var hrvObserverUpdateCount: Int = 0
+    /// GraphicInputを最後に更新したデータ経路（"heartRate" / "hrv" / "healthKit" / "mock"）
+    @Published private(set) var lastGraphicUpdateTrigger: String = "---"
 
     // MARK: - ライブ監視状態（診断用）
 
@@ -324,6 +326,7 @@ final class MindWaveViewModel: ObservableObject {
 
     /// Mock スコアを ingest を通して反映する。Mock ON 時のみ GraphicInput に反映される。
     func sendMockSample() {
+        lastGraphicUpdateTrigger = "mock"
         MindWaveDebugLogger.log(.mock, "sample sent score=\(String(format: "%.1f", mockScore))")
         let sample = MindWaveSample(
             heartRate: nil,
@@ -380,8 +383,12 @@ final class MindWaveViewModel: ObservableObject {
     /// 既存サンプルの重複処理を防ぐ。
     private func startHRVObserver() {
         guard !hrvObserverStarted else { return }
-        hrvObserverStarted   = true
-        isHRVObserverActive  = true
+        guard HealthKitManager.isAvailable else {
+            MindWaveDebugLogger.log(.healthKit, "HRV observer: HealthKit not available, skipping")
+            return
+        }
+        hrvObserverStarted  = true
+        isHRVObserverActive = true
         hkManager.startHRVObserver { [weak self] result in
             Task { @MainActor [weak self] in
                 self?.applyNewHRVSample(result)
@@ -390,12 +397,21 @@ final class MindWaveViewModel: ObservableObject {
         MindWaveDebugLogger.log(.healthKit, "HRV observer registered")
     }
 
+    /// HRV observer を停止し、isHRVObserverActive を false に戻す。
+    func stopHRVObserver() {
+        hkManager.stopHRVObserver()
+        isHRVObserverActive = false
+        MindWaveDebugLogger.log(.healthKit, "HRV observer stopped from ViewModel")
+    }
+
     /// HealthKit に新しい HRV サンプルが保存されたときに呼ばれる（MainActor）。
     ///
     /// - 同一UUIDのサンプルは重複処理しない
-    /// - HRV更新時は最新Watch心拍を使用する。Watchが有効期限内なら watchLive source、
-    ///   そうでなければ healthKit source で ingest する
-    /// - サンプル時刻は HRV サンプルの記録時刻を使う
+    /// - latestWatchSample・scheduleWatchExpiry は一切変更しない
+    ///   → Watch鮮度タイムスタンプがHRV時刻で破壊されない
+    /// - latestHealthKitSample.hrv を更新し、selectActiveSample の補完ロジックが
+    ///   最新Watch心拍（latestWatchSample.heartRate）と最新HRVを結合する
+    /// - reevaluateActiveSource を直接呼んで GraphicInput を再計算する
     func applyNewHRVSample(_ result: HealthMetricFetchResult) {
         guard let newValue = result.value else {
             MindWaveDebugLogger.log(.healthKit, "HRV observer fired but no value")
@@ -408,12 +424,14 @@ final class MindWaveViewModel: ObservableObject {
             return
         }
 
-        // 新しいサンプルを記録
+        // 新しいHRVサンプルを記録（latestWatchSampleは変更しない）
         lastHRVSampleIdentifier = result.sampleIdentifier
         isNewHRVSample          = true
         latestHRVSampleDate     = result.sampleDate
         lastHRVObserverDate     = Date()
         hrvObserverUpdateCount += 1
+        currentHRV              = newValue
+        didFetchHRV             = true
 
         let dateStr = result.sampleDate.map { d in
             let f = DateFormatter(); f.dateFormat = "HH:mm:ss"; return f.string(from: d)
@@ -422,27 +440,21 @@ final class MindWaveViewModel: ObservableObject {
             "HRV observer: new sample value=\(String(format: "%.1f", newValue))ms " +
             "date=\(dateStr) id=\(result.sampleIdentifier?.prefix(8) ?? "nil")")
 
-        // HRV更新時は最新Watch心拍と結合する
-        let now = Date()
-        let heartRate: Double?
-        let source: MindDataSource
-        if isWatchSampleFresh, let watchHR = latestWatchSample?.heartRate {
-            heartRate = watchHR
-            source    = .watchLive
-            MindWaveDebugLogger.log(.healthKit, "HRV observer: combining with watchLive HR=\(String(format: "%.0f", watchHR))")
-        } else {
-            heartRate = currentHeartRate > 0 ? currentHeartRate : nil
-            source    = .healthKit
-            MindWaveDebugLogger.log(.healthKit, "HRV observer: Watch stale, using healthKit source")
-        }
-
-        ingest(MindWaveSample(
-            heartRate: heartRate,
+        // latestHealthKitSample の HRV だけを更新する。
+        // selectActiveSample が Watch(fresh) + HK.hrv を補完結合する。
+        // Watch が新鮮かどうかは selectActiveSample 内で判定する（ここでは変更しない）。
+        latestHealthKitSample = MindWaveSample(
+            heartRate: latestHealthKitSample?.heartRate,
             hrv: newValue,
             contextScore: nil,
-            source: source,
-            timestamp: result.sampleDate ?? now
-        ))
+            source: .healthKit,
+            timestamp: result.sampleDate ?? Date()
+        )
+
+        MindWaveDebugLogger.log(.healthKit,
+            "HRV observer: re-evaluating source watchFresh=\(isWatchSampleFresh)")
+        lastGraphicUpdateTrigger = "hrv"
+        reevaluateActiveSource(now: Date())
     }
 
     // MARK: - Watch ライブ心拍 コールバック登録
@@ -476,11 +488,14 @@ final class MindWaveViewModel: ObservableObject {
         lastFetchMessage          = "Watchライブ心拍を受信"
         MindWaveDebugLogger.log(.watch, "heart rate received bpm=\(Int(heartRate)) mockMode=\(isMockMode)")
 
-        // MockモードON中もWatchサンプルを保存する。
-        // selectActiveSample内でMockが優先されるため、GraphicInputはMock値のまま維持される。
+        // HRVはWatchサンプルに埋め込まず、selectActiveSampleの補完ロジック
+        // (latestHealthKitSample?.hrv) に委ねる。
+        // これにより、HRV observer 更新時に latestWatchSample.timestamp を
+        // 書き換えずに最新HRVを即時反映できる。
+        lastGraphicUpdateTrigger = "heartRate"
         ingest(MindWaveSample(
             heartRate: heartRate,
-            hrv: currentHRV > 0 ? currentHRV : nil,
+            hrv: nil,
             contextScore: nil,
             source: .watchLive,
             timestamp: sampleDate
@@ -662,6 +677,7 @@ final class MindWaveViewModel: ObservableObject {
         }
 
         // ── HealthKit値をingestパイプラインへ ─────────────────────
+        lastGraphicUpdateTrigger = "healthKit"
         if let hr = hrResult.value, let avg = avgHR {
             averageHeartRate = avg
             if let hrv = hrvResult.value, let avgH = avgHRV {
