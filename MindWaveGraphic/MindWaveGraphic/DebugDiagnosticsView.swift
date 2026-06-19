@@ -87,14 +87,73 @@ struct DebugDiagnosticsView: View {
 
                     // ── HRV Observer ──────────────────────────────────
                     debugBlock {
-                        debugRow("HRV監視",     viewModel.isHRVObserverActive ? "稼働中 ●" : "停止中")
-                        debugRow("HRV実測取得", viewModel.didFetchHRV ? "済 ✓" : "未取得")
-                        debugRow("HRV取得元",   viewModel.lastHRVFetchSource)
-                        debugRow("HRV新規受信", "\(viewModel.hrvObserverUpdateCount) 回")
-                        debugRow("HRV最終通知", formatTime(viewModel.lastHRVObserverDate))
-                        debugRow("HRV経過",     hrvAgeString(viewModel.latestHRVSampleDate))
+                        debugRow("HRV監視",       viewModel.isHRVObserverActive ? "稼働中 ●" : "停止中")
+                        debugRow("HRV実測取得",   viewModel.didFetchHRV ? "済 ✓" : "未取得")
+                        debugRow("HRV取得元",     viewModel.lastHRVFetchSource)
+                        debugRow("HRV新規受信",   "\(viewModel.hrvObserverUpdateCount) 回")
+                        debugRow("HRV最終通知",   formatTime(viewModel.lastHRVObserverDate))
+                        debugRow("HRV経過",       hrvAgeString(viewModel.latestHRVSampleDate))
+                        debugRow("HRV終了時刻",   formatTime(viewModel.latestHRVEndDate))
+                        debugRow("HRV Source",    viewModel.latestHRVSourceName ?? "---")
+                        debugRow("HRV Bundle",    shortBundleID(viewModel.latestHRVBundleID))
+                        debugRow("HRV初回Query",  viewModel.hrvInitialQueryStatus)
                         debugRow("Graphic更新契機", viewModel.lastGraphicUpdateTrigger)
                     }
+
+                    // ── HRV 手動診断（DEBUGのみ） ──────────────────────
+                    VStack(spacing: 6) {
+                        // 診断ボタン
+                        Button {
+                            Task {
+                                await viewModel.runHRVDiagnostic()
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "heart.text.square")
+                                    .font(.system(size: 10))
+                                Text("HRVを再取得・診断")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundStyle(MindWaveTheme.accent)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 8)
+                                .fill(MindWaveTheme.accent.opacity(0.10)))
+                        }
+                        .buttonStyle(.plain)
+
+                        // 診断結果
+                        debugBlock {
+                            debugRow("HRV診断件数", viewModel.hrvDiagnosticSamples.isEmpty
+                                     && viewModel.hrvDiagnosticError == nil
+                                     && viewModel.hrvInitialQueryStatus == "未実行"
+                                     ? "未実行"
+                                     : "\(viewModel.hrvDiagnosticSamples.count) 件")
+                            debugRow("HRV Queryエラー", viewModel.hrvDiagnosticError ?? "なし")
+                            if let s = viewModel.hrvDiagnosticSamples.first {
+                                debugRow("最新HRV値",    String(format: "%.1f ms", s.valueMilliseconds))
+                                debugRow("最新HRV開始",  formatTime(s.startDate))
+                                debugRow("最新HRV終了",  formatTime(s.endDate))
+                                debugRow("最新HRV Source", s.sourceName)
+                                debugRow("最新HRV Bundle", shortBundleID(s.sourceBundleIdentifier))
+                                debugRow("最新HRV UUID", String(s.uuid.uuidString.prefix(8)))
+                                debugRow("最新HRV Device", s.deviceName ?? "---")
+                            } else if viewModel.hrvInitialQueryStatus != "未実行" {
+                                Text("HealthKitにHRVサンプルが見つかりません。\nHealthアプリで「心臓→心拍変動」を確認してください。")
+                                    .font(.system(size: 9, weight: .light))
+                                    .foregroundStyle(MindWaveTheme.textTertiary)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.white.opacity(0.04))
+                            .overlay(RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(MindWaveTheme.accent.opacity(0.15), lineWidth: 1))
+                    )
 
                     // ── スコア計算 ─────────────────────────────────────
                     debugBlock {
@@ -307,6 +366,12 @@ struct DebugDiagnosticsView: View {
         guard let date else { return "---" }
         let minutes = Int(Date().timeIntervalSince(date) / 60)
         return minutes < 1 ? "1分未満" : "\(minutes)分"
+    }
+
+    /// Bundle IDを末尾20文字に短縮して表示する（長くなりすぎないよう）
+    private func shortBundleID(_ id: String?) -> String {
+        guard let id, !id.isEmpty else { return "---" }
+        return id.count > 20 ? "..." + String(id.suffix(20)) : id
     }
 }
 

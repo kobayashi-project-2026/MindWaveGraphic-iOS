@@ -66,6 +66,20 @@ final class MindWaveViewModel: ObservableObject {
     /// GraphicInputを最後に更新したデータ経路（"heartRate" / "hrv" / "healthKit" / "mock"）
     @Published private(set) var lastGraphicUpdateTrigger: String = "---"
 
+    // MARK: - HRV 詳細情報（診断用）
+
+    /// 最新HRVサンプルのSource名（例："Apple Watch"）
+    @Published private(set) var latestHRVSourceName: String? = nil
+    /// 最新HRVサンプルの終了時刻
+    @Published private(set) var latestHRVEndDate: Date? = nil
+    /// 最新HRVサンプルのBundle Identifier
+    @Published private(set) var latestHRVBundleID: String? = nil
+    /// 初回HRV Queryの状態（"未実行" / "クエリ中" / "0件" / "成功" / "エラー"）
+    @Published private(set) var hrvInitialQueryStatus: String = "未実行"
+    /// 診断Query結果（DebugDiagnosticsView専用）
+    @Published private(set) var hrvDiagnosticSamples: [HRVDiagnosticSample] = []
+    @Published private(set) var hrvDiagnosticError: String? = nil
+
     // MARK: - ライブ監視状態（診断用）
 
     @Published var isLiveMonitoring: Bool           = false
@@ -408,6 +422,47 @@ final class MindWaveViewModel: ObservableObject {
         MindWaveDebugLogger.log(.healthKit, "HRV observer registered")
     }
 
+    // MARK: - HRV 手動診断（Debug画面から呼ぶ）
+
+    /// HealthKit内のHRVサンプルを全期間診断し、結果をViewModelへ反映する。
+    /// 0件・エラー・サンプルありを明確に区別する。
+    /// 診断Queryが成功した場合は最新サンプルをGraphicInputへ反映する。
+    func runHRVDiagnostic() async {
+        guard HealthKitManager.isAvailable else {
+            MindWaveDebugLogger.log(.healthKit, "HRV diagnostic: HealthKit not available")
+            return
+        }
+        MindWaveDebugLogger.log(.healthKit, "HRV diagnostic triggered from Debug")
+        let (samples, err) = await hkManager.diagnoseHRVSamples(limit: 20)
+        hrvDiagnosticSamples = samples
+        hrvDiagnosticError   = err
+
+        if let err {
+            MindWaveDebugLogger.log(.error, "HRV diagnostic failed: \(err)")
+            hrvInitialQueryStatus = "エラー: \(err)"
+            return
+        }
+
+        hrvInitialQueryStatus = samples.isEmpty ? "0件" : "成功 \(samples.count)件"
+
+        // 最新サンプルが存在する場合、ViewModelへ反映してGraphicInputを再計算する
+        if let latest = samples.first {
+            let result = HealthMetricFetchResult(
+                value:                  latest.valueMilliseconds,
+                source:                 "診断クエリ",
+                message:                "診断取得: \(String(format: "%.1f", latest.valueMilliseconds))ms",
+                sampleDate:             latest.startDate,
+                sampleIdentifier:       latest.uuid.uuidString,
+                sampleEndDate:          latest.endDate,
+                sourceName:             latest.sourceName,
+                sourceBundleIdentifier: latest.sourceBundleIdentifier
+            )
+            updateHRVState(result: result, isFromObserver: false)
+            reevaluateActiveSource(now: Date())
+            MindWaveDebugLogger.log(.healthKit, "HRV diagnostic applied to ViewModel value=\(String(format: "%.1f", latest.valueMilliseconds))ms")
+        }
+    }
+
     /// HRV observer を停止し、isHRVObserverActive を false に戻す。
     func stopHRVObserver() {
         hkManager.stopHRVObserver()
@@ -442,6 +497,9 @@ final class MindWaveViewModel: ObservableObject {
         // ── HRV状態を統一更新 ───────────────────────────────────────
         lastHRVSampleIdentifier = result.sampleIdentifier
         latestHRVSampleDate     = result.sampleDate
+        latestHRVEndDate        = result.sampleEndDate   // endDate（診断用）
+        latestHRVSourceName     = result.sourceName      // Source名（診断用）
+        latestHRVBundleID       = result.sourceBundleIdentifier
         isNewHRVSample          = true
         didFetchHRV             = true
         currentHRV              = newValue
@@ -581,8 +639,8 @@ final class MindWaveViewModel: ObservableObject {
         }
         do {
             try await hkManager.requestAuthorization()
-            MindWaveDebugLogger.log(.healthKit, "authorization requested")
-            healthKitStatusLabel = "HealthKit：許可済み"
+            MindWaveDebugLogger.log(.healthKit, "authorization request completed")
+            healthKitStatusLabel = "HealthKit：権限要求完了"
             if !forceDemoMode { await fetchHealthKitData() }
             startHRVObserver()
         } catch {
@@ -708,8 +766,10 @@ final class MindWaveViewModel: ObservableObject {
         // HRV状態を統一経路で更新（latestHealthKitSample.hrv・currentHRV・診断変数を一括更新）
         if hrvResult.isSuccess {
             updateHRVState(result: hrvResult, isFromObserver: false)
+            hrvInitialQueryStatus = "成功"
         } else {
             isNewHRVSample = false
+            hrvInitialQueryStatus = "0件"
             MindWaveDebugLogger.log(.healthKit, "initial HRV unavailable: \(hrvResult.message)")
         }
 

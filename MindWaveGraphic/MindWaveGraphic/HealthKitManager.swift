@@ -17,13 +17,48 @@ struct HealthMetricFetchResult {
     let source: String
     /// 診断・ログ用メッセージ
     let message: String
-    /// HealthKitサンプル自体の記録時刻（fetchした時刻ではない）
-    /// これにより「新しいデータが来たか」「前回と同じサンプルか」を判定できる。
+    /// HealthKitサンプル自体の記録時刻（startDate）
     let sampleDate: Date?
     /// サンプルのUUID文字列（新旧判定に使う。nilは平均値など識別子がない場合）
     let sampleIdentifier: String?
+    /// サンプルの終了時刻（HRVのendDate診断用。heartRateではnil）
+    let sampleEndDate: Date?
+    /// サンプルのSource名（診断用。nilは平均値など）
+    let sourceName: String?
+    /// サンプルのBundleIdentifier（診断用）
+    let sourceBundleIdentifier: String?
 
     var isSuccess: Bool { value != nil }
+
+    /// 既存コード互換のinit。新規フィールドは省略可（デフォルトnil）。
+    init(value: Double?, source: String, message: String,
+         sampleDate: Date?, sampleIdentifier: String?,
+         sampleEndDate: Date? = nil,
+         sourceName: String? = nil,
+         sourceBundleIdentifier: String? = nil) {
+        self.value = value
+        self.source = source
+        self.message = message
+        self.sampleDate = sampleDate
+        self.sampleIdentifier = sampleIdentifier
+        self.sampleEndDate = sampleEndDate
+        self.sourceName = sourceName
+        self.sourceBundleIdentifier = sourceBundleIdentifier
+    }
+}
+
+// MARK: - HRV診断サンプル型
+
+/// HRV診断クエリの1件分の詳細情報。
+/// 架空の値は含まない。HealthKitから読み取った実データのみ。
+struct HRVDiagnosticSample {
+    let valueMilliseconds: Double
+    let startDate: Date
+    let endDate: Date
+    let uuid: UUID
+    let sourceName: String
+    let sourceBundleIdentifier: String
+    let deviceName: String?
 }
 
 // ─────────────────────────────────────────────────────────
@@ -72,7 +107,8 @@ final class HealthKitManager {
             print("[HealthKit] \(msg) (recorded: \(formatDate(s.sampleDate)))")
             return HealthMetricFetchResult(
                 value: s.value, source: "最新1件",
-                message: msg, sampleDate: s.sampleDate, sampleIdentifier: s.identifier
+                message: msg, sampleDate: s.sampleDate, sampleIdentifier: s.identifier,
+                sampleEndDate: s.endDate, sourceName: s.sourceName, sourceBundleIdentifier: s.bundleID
             )
         }
 
@@ -129,13 +165,14 @@ final class HealthKitManager {
                                           sampleDate: Date(), sampleIdentifier: nil)
         }
 
-        // ③ 全期間の最新1件（記録時刻 + UUID を取得する）
+        // ③ 全期間の最新1件（記録時刻 + UUID + Source を取得する）
         if let s = await fetchLatestSample(type: hrvType, unit: unit) {
             let msg = "HRV 最新記録: \(String(format: "%.1f", s.value)) ms"
-            print("[HealthKit] \(msg) (recorded: \(formatDate(s.sampleDate)))")
+            print("[HealthKit] \(msg) (start: \(formatDate(s.sampleDate)) end: \(formatDate(s.endDate)) src: \(s.sourceName))")
             return HealthMetricFetchResult(
                 value: s.value, source: "最新記録",
-                message: msg, sampleDate: s.sampleDate, sampleIdentifier: s.identifier
+                message: msg, sampleDate: s.sampleDate, sampleIdentifier: s.identifier,
+                sampleEndDate: s.endDate, sourceName: s.sourceName, sourceBundleIdentifier: s.bundleID
             )
         }
 
@@ -162,29 +199,32 @@ final class HealthKitManager {
         return v
     }
 
-    // MARK: - Private: 最新1サンプル（value + sampleDate + identifier）
+    // MARK: - Private: 最新1サンプル（value + startDate + endDate + identifier + source）
 
-    /// fetchした時刻ではなく、HealthKitに記録されたサンプル自体の startDate を返す。
-    /// sampleIdentifier（UUID）は、前回と同じサンプルか判定するために使う。
+    /// HealthKitに記録されたサンプル自体のstartDate・endDate・UUID・Sourceを返す。
+    /// startDate降順（最新が先頭）・predicate=nil（全期間対象）・limit=1。
+    /// HRVとheartRateの両方で使用する共通メソッド。
     private func fetchLatestSample(
         type: HKQuantityType, unit: HKUnit
-    ) async -> (value: Double, sampleDate: Date, identifier: String)? {
+    ) async -> (value: Double, sampleDate: Date, endDate: Date, identifier: String, sourceName: String, bundleID: String)? {
         let store = self.store
         return await withCheckedContinuation { continuation in
+            // startDate降順：最新のサンプルが先頭になる。HRV SDNNのendDateでも同様に最新が取れる。
             let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
             let query = HKSampleQuery(sampleType: type, predicate: nil,
                                       limit: 1, sortDescriptors: [sort]) { _, samples, error in
                 if let error = error {
-                    print("[HealthKit] fetchLatestSample エラー: \(error.localizedDescription)")
+                    MindWaveDebugLogger.log(.error, "fetchLatestSample error type=\(type.identifier): \(error.localizedDescription)")
                 }
                 guard let sample = samples?.first as? HKQuantitySample else {
+                    MindWaveDebugLogger.log(.healthKit, "fetchLatestSample no result type=\(type.identifier)")
                     continuation.resume(returning: nil)
                     return
                 }
                 let value  = sample.quantity.doubleValue(for: unit)
-                let date   = sample.startDate
                 let id     = sample.uuid.uuidString
-                continuation.resume(returning: (value, date, id))
+                let src    = sample.sourceRevision.source
+                continuation.resume(returning: (value, sample.startDate, sample.endDate, id, src.name, src.bundleIdentifier))
             }
             store.execute(query)
         }
@@ -234,18 +274,28 @@ final class HealthKitManager {
 
     /// 最新HRVサンプルを HealthMetricFetchResult として返す。
     /// sampleIdentifier（UUID）が含まれるため重複検知に使用できる。
+    /// 最新HRVサンプルを取得。endDate・Source・bundleIDも返す（診断・dedup用）。
     func fetchLatestHRVSample() async -> HealthMetricFetchResult {
         let unit = HKUnit.secondUnit(with: .milli)
+        MindWaveDebugLogger.log(.healthKit, "initial HRV query started")
         if let s = await fetchLatestSample(type: hrvType, unit: unit) {
             let msg = "HRV 最新サンプル: \(String(format: "%.1f", s.value)) ms"
+            MindWaveDebugLogger.log(.healthKit,
+                "initial HRV loaded value=\(String(format: "%.1f", s.value))ms " +
+                "start=\(formatDate(s.sampleDate)) end=\(formatDate(s.endDate)) " +
+                "source=\(s.sourceName) id=\(String(s.identifier.prefix(8)))")
             return HealthMetricFetchResult(
                 value: s.value,
                 source: "最新サンプル",
                 message: msg,
                 sampleDate: s.sampleDate,
-                sampleIdentifier: s.identifier
+                sampleIdentifier: s.identifier,
+                sampleEndDate: s.endDate,
+                sourceName: s.sourceName,
+                sourceBundleIdentifier: s.bundleID
             )
         }
+        MindWaveDebugLogger.log(.healthKit, "initial HRV query completed count=0")
         return HealthMetricFetchResult(
             value: nil,
             source: "none",
@@ -253,6 +303,58 @@ final class HealthKitManager {
             sampleDate: nil,
             sampleIdentifier: nil
         )
+    }
+
+    // MARK: - HRV診断Query（全期間・最大N件）
+
+    /// HealthKit内のHRVサンプルを全期間で診断クエリする。
+    /// predicate=nil（全期間）、source限定なし、endDate降順、最大limit件。
+    /// 0件・エラー・サンプルありを明確に区別する。
+    func diagnoseHRVSamples(limit: Int = 20) async -> (samples: [HRVDiagnosticSample], error: String?) {
+        guard Self.isAvailable else {
+            return ([], "HealthKit not available")
+        }
+        let unit   = HKUnit.secondUnit(with: .milli)
+        let store  = self.store
+        MindWaveDebugLogger.log(.healthKit, "HRV diagnostic started limit=\(limit)")
+
+        return await withCheckedContinuation { continuation in
+            // endDate降順：最新サンプルが先頭
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
+            let query = HKSampleQuery(sampleType: hrvType, predicate: nil,
+                                      limit: limit, sortDescriptors: [sort]) { _, samples, error in
+                if let error = error {
+                    let msg = "\(error.localizedDescription)"
+                    MindWaveDebugLogger.log(.error,
+                        "HRV diagnostic query failed domain=\((error as NSError).domain) " +
+                        "code=\((error as NSError).code) message=\(msg)")
+                    continuation.resume(returning: ([], msg))
+                    return
+                }
+                let cast = samples as? [HKQuantitySample] ?? []
+                MindWaveDebugLogger.log(.healthKit, "HRV diagnostic completed count=\(cast.count) error=nil")
+                let result = cast.enumerated().map { (i, s) -> HRVDiagnosticSample in
+                    let val = s.quantity.doubleValue(for: unit)
+                    let src = s.sourceRevision.source
+                    MindWaveDebugLogger.log(.healthKit,
+                        "HRV sample[\(i)] value=\(String(format: "%.1f", val))ms " +
+                        "start=\(s.startDate) end=\(s.endDate) " +
+                        "source=\(src.name) bundle=\(src.bundleIdentifier) " +
+                        "id=\(String(s.uuid.uuidString.prefix(8)))")
+                    return HRVDiagnosticSample(
+                        valueMilliseconds: val,
+                        startDate: s.startDate,
+                        endDate: s.endDate,
+                        uuid: s.uuid,
+                        sourceName: src.name,
+                        sourceBundleIdentifier: src.bundleIdentifier,
+                        deviceName: s.device?.name
+                    )
+                }
+                continuation.resume(returning: (result, nil))
+            }
+            store.execute(query)
+        }
     }
 
     /// HealthKit HRVの新規サンプル追加を監視する。
