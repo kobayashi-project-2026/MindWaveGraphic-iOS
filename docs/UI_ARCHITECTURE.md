@@ -160,3 +160,117 @@ SettingsView の「数値表示」トグルを OFF → `showsParameterOverlay = 
 3. `AccountView.swift` のゲスト判定を認証状態に切り替え
 4. `ContentView.swift` の `EnvironmentObject` に `AuthState` を追加
 5. Sign in with Apple: `AuthenticationServices` フレームワークを追加（Capability追加が必要）
+
+---
+
+## 12. ガイドフロー（RegulationFlow）
+
+### 概要
+
+参考コードから「シーン選択 → ガイド → 再測定 → 結果 → 保存」という遷移の考え方を採用。
+ダミーBPM・架空の改善結果・ログイン遷移は採用しない。
+
+### タブ構成との関係
+
+```
+Home
+└─ 「今の状態を整える」ボタン → selectedTab = 1（Guideタブへ移動）
+
+Guide（タブ）
+├─ 「シーンを選んで整える」→ GuideFlowView (fullScreenCover)
+└─ クイックスタートカード → GuideSessionView (fullScreenCover) ※従来の直接アクセス
+```
+
+### フロー段階 (RegulationFlowStep)
+
+```
+sceneSelection → exerciseSelection → session → remeasurement → result
+```
+
+Int ベースの状態管理を避け、型安全な enum で管理。
+
+### MeasurementScene
+
+6種類のシーン。スコア計算式には影響しない。
+```
+interview / study / sports / social / daily / other
+```
+
+### ガイド前スナップショット (GuideSnapshot)
+
+セッション開始前にViewModelから実値を取得。
+- isMockData=true でMockモードを区別
+- HRV未取得は nil（0で代用しない）
+- heartRate は Watch受信値を優先、なければHealthKit値
+
+### 再測定の完了条件
+
+```
+minWatchSamplesForRemeasurement = 3 件の新規Watch受信
+または
+maxRemeasurementSeconds = 30 秒経過
+```
+
+HRVは必須条件にしない（新規サンプル生成の保証がないため）。
+
+### HRV更新状態の区別
+
+- セッション前後で `latestHRVSampleDate` が変化した場合: `hrvUpdated = true`
+- 変化なし: `hrvUpdated = false`（記録に明示）
+
+### GuideHistoryStore
+
+- `ObservableObject`、ContentViewで1回だけ生成
+- EnvironmentObjectでGuideFlowView・HistoryViewが共有
+- **現時点はメモリ内保存のみ（アプリ終了で消える）**
+- UserDefaults / SwiftDataへの移行は次フェーズ
+
+### 保存後の遷移
+
+```
+historyStore.add(record)
+dismiss()
+Task { @MainActor in selectedTab = 2 }  // HistoryタブへのTab切替
+```
+
+### 保存せず終了
+
+```
+dismiss()
+Task { @MainActor in selectedTab = 0 }  // Homeへ戻る
+```
+
+### 再実施
+
+```
+before snapshot を取り直す
+step = .session に戻る（シーン・ガイドは維持）
+Timer・再測定カウンターをリセット
+```
+
+### 中断処理
+
+すべての段階で `.alert` による中断確認。
+中断時: `dismiss()` でGuideFlowViewを閉じる（HistoryStoreへは保存しない）。
+
+---
+
+## 13. 参考コードとの対応
+
+| 参考コードの要素 | 採用 | 理由 |
+|---|---|---|
+| シーン選択→ガイド→結果の遷移フロー | ✓ 採用 | 流れの考え方として利用 |
+| ランダム生成BPM | ✗ 不採用 | 架空データのため |
+| 徐々に減るBPMアニメーション | ✗ 不採用 | 架空演出のため |
+| 架空の「改善成功」表示 | ✗ 不採用 | 医療効果の断定のため |
+| ログイン遷移 (Splash→Account→Main) | ✗ 不採用 | 認証基盤未接続のため |
+| 架空のクラウド同期 | ✗ 不採用 | 未実装のため |
+| 文字列ベースの状態管理 (currentStep: Int) | ✗ 不採用 | RegulationFlowStep enum で型安全に置換 |
+| 固定日時・ダミー履歴 | ✗ 不採用 | Date()を使用し実データのみ保存 |
+
+---
+
+## 14. 将来のログイン遷移案
+
+現在 Settings/Account/LoginPrototypeView にUIプロトタイプあり。
+本物の認証を接続する場合の変更点は `docs/UI_ARCHITECTURE.md` のセクション11を参照。

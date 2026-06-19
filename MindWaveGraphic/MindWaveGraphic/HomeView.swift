@@ -15,6 +15,8 @@ import Combine
 /// ViewModelは ContentView から @EnvironmentObject で受け取る（新規生成しない）。
 struct HomeView: View {
     @EnvironmentObject var viewModel: MindWaveViewModel
+    /// ガイドタブへ遷移するためのバインディング（ContentViewのselectedTabを参照）
+    @Binding var selectedTab: Int
 
     // MARK: - UI State
     /// 計測経過時間（秒）。計測停止でリセット。
@@ -158,6 +160,21 @@ struct HomeView: View {
             // 計測開始・停止
             measurementButton
 
+            // ガイドへの導線（整える）
+            Button {
+                selectedTab = 1   // ガイドタブへ移動
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "wind")
+                        .font(.system(size: 10))
+                    Text("今の状態を整える")
+                        .font(.system(size: 11, weight: .light))
+                }
+                .foregroundStyle(.white.opacity(0.35))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("ガイドタブを開く")
+
             // Debug ボタン（DEBUGビルドのみ）
             #if DEBUG
             Button { showDebugSheet = true } label: {
@@ -279,6 +296,6 @@ struct HomeView: View {
 }
 
 #Preview {
-    HomeView()
+    HomeView(selectedTab: .constant(0))
         .environmentObject(MindWaveViewModel())
 }

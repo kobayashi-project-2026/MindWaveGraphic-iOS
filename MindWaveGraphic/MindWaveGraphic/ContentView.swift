@@ -1,17 +1,17 @@
-//
-//  ContentView.swift
-//  MindWaveGraphic
-//
-//  アプリのルートView。TabViewで4画面（ホーム・ガイド・履歴・設定）を管理する。
-//  MindWaveViewModelをStateObjectとして生成し、全子Viewへ EnvironmentObject で共有する。
-//  旧Liveタブは削除済み。ライブ計測機能はHomeViewへ統合されている。
-//
 
 import SwiftUI
 
+/// アプリのルートView。TabViewで4画面（ホーム・ガイド・履歴・設定）を管理する。
+/// MindWaveViewModelをStateObjectとして生成し、全子Viewへ EnvironmentObject で共有する。
+/// GuideHistoryStoreもここで生成し、GuideFlowViewとHistoryViewが同じインスタンスを共有する。
+/// 旧Liveタブは削除済み。ライブ計測機能はHomeViewへ統合されている。
 struct ContentView: View {
     /// アプリ全体で1つだけ生成するViewModel。EnvironmentObjectで全タブへ共有する。
     @StateObject private var viewModel = MindWaveViewModel()
+    /// ガイドセッション履歴。GuideFlowViewとHistoryViewが共有する。
+    @StateObject private var historyStore = GuideHistoryStore()
+    /// タブ選択状態。GuideFlowViewが保存後にHistoryタブへ遷移するために使う。
+    @State private var selectedTab = 0
 
     init() {
         let appearance = UITabBarAppearance()
@@ -22,14 +22,14 @@ struct ContentView: View {
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             // ホーム（旧Liveタブの計測機能を統合した没入型メイン画面）
-            HomeView()
+            HomeView(selectedTab: $selectedTab)
                 .tabItem { Label("ホーム", systemImage: "house.fill") }
                 .tag(0)
 
-            // ガイド（使い方・HRV説明）
-            GuideView()
+            // ガイド（シーン選択 → ガイド → 再測定 → 結果）
+            GuideView(selectedTab: $selectedTab)
                 .tabItem { Label("ガイド", systemImage: "wind") }
                 .tag(1)
 
@@ -44,6 +44,7 @@ struct ContentView: View {
                 .tag(3)
         }
         .environmentObject(viewModel)
+        .environmentObject(historyStore)
         .tint(MindWaveTheme.accent)
         .preferredColorScheme(.dark)
     }

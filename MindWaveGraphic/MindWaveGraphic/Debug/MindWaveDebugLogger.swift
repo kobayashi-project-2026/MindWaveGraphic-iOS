@@ -17,6 +17,7 @@ enum MindWaveLogCategory: String {
     case analysis  = "ANALYSIS"
     case graphic   = "GRAPHIC"
     case error     = "ERROR"
+    case flow      = "FLOW"      // ガイドフロー遷移ログ
 }
 
 enum MindWaveDebugLogger {

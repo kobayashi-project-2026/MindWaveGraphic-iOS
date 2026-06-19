@@ -11,8 +11,13 @@
 import SwiftUI
 
 struct GuideView: View {
-    @State private var expanding        = false
+    @EnvironmentObject var viewModel: MindWaveViewModel
+    @EnvironmentObject var historyStore: GuideHistoryStore
+    /// タブ移動用。ContentViewから渡される。
+    @Binding var selectedTab: Int
+    @State private var expanding           = false
     @State private var selectedExercise: GuideExercise? = nil
+    @State private var showFlowView        = false
 
     var body: some View {
         ZStack {
@@ -36,11 +41,61 @@ struct GuideView: View {
 
                     // ── 既存の発光リング（ambient アニメーションとして維持） ──
                     breathingRing
-                        .padding(.bottom, 32)
+                        .padding(.bottom, 28)
 
-                    // ── おすすめガイドカード ──────────────────────────
+                    // ── ガイドフロー入口（シーン選択→ガイド→再測定→結果）──
+                    VStack(spacing: 10) {
+                        Text("ガイドフロー")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(MindWaveTheme.textTertiary)
+                            .tracking(0.5)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 4)
+
+                        Button {
+                            showFlowView = true
+                        } label: {
+                            HStack(spacing: 12) {
+                                ZStack {
+                                    Circle()
+                                        .fill(MindWaveTheme.accent.opacity(0.15))
+                                        .frame(width: 44, height: 44)
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(MindWaveTheme.accent)
+                                }
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("シーンを選んで整える")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(MindWaveTheme.textPrimary)
+                                    Text("シーン選択 → ガイド → 再測定 → 結果確認")
+                                        .font(.system(size: 11, weight: .light))
+                                        .foregroundStyle(MindWaveTheme.textTertiary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(MindWaveTheme.textTertiary)
+                            }
+                            .padding(14)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(.ultraThinMaterial.opacity(0.50))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14)
+                                            .strokeBorder(MindWaveTheme.accent.opacity(0.25), lineWidth: 1)
+                                    )
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("シーンを選んでガイドフローを開始する")
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 24)
+
+                    // ── クイックアクセス（直接ガイドを開始）──────────
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("ガイドを選ぶ")
+                        Text("クイックスタート")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(MindWaveTheme.textTertiary)
                             .tracking(0.5)
@@ -65,6 +120,11 @@ struct GuideView: View {
         }
         .fullScreenCover(item: $selectedExercise) { exercise in
             GuideSessionView(exercise: exercise)
+        }
+        .fullScreenCover(isPresented: $showFlowView) {
+            GuideFlowView(selectedTab: $selectedTab)
+                .environmentObject(viewModel)
+                .environmentObject(historyStore)
         }
     }
 
@@ -169,6 +229,8 @@ struct GuideView: View {
 }
 
 #Preview {
-    GuideView()
+    GuideView(selectedTab: .constant(1))
+        .environmentObject(MindWaveViewModel())
+        .environmentObject(GuideHistoryStore())
         .preferredColorScheme(.dark)
 }
