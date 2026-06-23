@@ -44,9 +44,10 @@ struct AppRootView: View {
                 LogInView(flowState: flowState)
 
             case .mainApp:
-                // 既存のメインアプリ（ContentView：4タブ・Watch・HRV・Starfield）
-                // このブロック内は一切変更しない
-                ContentView()
+                // フェーズ3：3タブのMainTabViewへ切り替え。
+                // ContentView（4タブ）はそのまま残す。
+                // MindWaveViewModelはMainTabViewで1回だけ生成する。
+                MainTabView()
             }
         }
         .preferredColorScheme(.dark)
