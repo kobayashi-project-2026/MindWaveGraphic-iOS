@@ -35,6 +35,20 @@ struct GuideFlowView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    // MARK: - カスタム init
+
+    /// initialScene を渡すと sceneSelection をスキップして exerciseSelection から開始する。
+    /// GuideView の場面カードから直接フローを開始するときに使用する。
+    init(selectedTab: Binding<Int>, initialScene: MeasurementScene? = nil) {
+        _selectedTab = selectedTab
+        if let scene = initialScene {
+            // 場面が事前確定済みのため exerciseSelection から開始
+            _step          = State(initialValue: .exerciseSelection)
+            _selectedScene = State(initialValue: scene)
+        }
+        // initialScene が nil のときはデフォルト値（sceneSelection / nil）を使用
+    }
+
     // MARK: - Flow State
 
     @State private var step: RegulationFlowStep = .sceneSelection
@@ -103,6 +117,7 @@ struct GuideFlowView: View {
         .alert("ガイドを中断しますか？", isPresented: $showAbandonAlert) {
             Button("中断する", role: .destructive) {
                 MindWaveDebugLogger.log(.flow, "flow cancelled step=\(step)")
+                print("[Regulation] session cancelled")
                 dismiss()
             }
             Button("続ける", role: .cancel) {}
@@ -190,6 +205,7 @@ struct GuideFlowView: View {
                     sessionIsRunning  = false
                     sessionIsFinished = true
                     MindWaveDebugLogger.log(.flow, "session completed")
+                    print("[Regulation] session completed")
                     // セッション終了後1.5秒で再測定へ自動進行
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         guard self.sessionIsFinished else { return }
@@ -392,6 +408,7 @@ struct GuideFlowView: View {
         sessionAnimate     = false
         step = .session
         MindWaveDebugLogger.log(.flow, "session started duration=\(sessionDurationSeconds) exercise=\(selectedExercise?.rawValue ?? "?")")
+        print("[Regulation] session started")
     }
 
     // MARK: - ▼ STEP 3: Session (インラインセッション、GuideRelaxationVisualsを使用)

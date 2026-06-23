@@ -39,6 +39,9 @@ enum MeasurementScene: String, CaseIterable, Identifiable {
     case social    = "social"
     case daily     = "daily"
     case other     = "other"
+    // フェーズ4で追加。保存データとの互換性：GuideHistoryStoreはメモリ内保存のため影響なし。
+    case meeting   = "meeting"   // 重要な会議
+    case speech    = "speech"    // スピーチ
 
     var id: String { rawValue }
 
@@ -50,6 +53,8 @@ enum MeasurementScene: String, CaseIterable, Identifiable {
         case .social:    return "デート・対人場面"
         case .daily:     return "日常"
         case .other:     return "その他"
+        case .meeting:   return "重要な会議"
+        case .speech:    return "スピーチ"
         }
     }
 
@@ -61,16 +66,18 @@ enum MeasurementScene: String, CaseIterable, Identifiable {
         case .social:    return "heart.fill"
         case .daily:     return "house.fill"
         case .other:     return "ellipsis.circle.fill"
+        case .meeting:   return "calendar.badge.clock"
+        case .speech:    return "mic.fill"
         }
     }
 
     /// シーンごとのおすすめガイド（ユーザーは任意に変更できる）
     var recommendedExercise: GuideExercise {
         switch self {
-        case .interview, .sports: return .ripple
-        case .study, .daily:     return .flow
-        case .social:            return .ripple
-        case .other:             return .ripple
+        case .interview, .sports, .speech: return .ripple
+        case .study, .daily:              return .flow
+        case .social, .meeting:           return .ripple
+        case .other:                      return .ripple
         }
     }
 }
