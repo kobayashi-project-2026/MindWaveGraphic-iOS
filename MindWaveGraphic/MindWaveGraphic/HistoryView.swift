@@ -40,57 +40,36 @@ private let dummyHistory: [(day: String, records: [SessionRecord])] = [
 // MARK: - History View
 
 struct HistoryView: View {
-    /// GuideFlowView から保存されたガイドセッション記録。ContentViewから EnvironmentObject で共有。
+    /// GuideFlowView から保存されたガイドセッション記録。MainTabViewから EnvironmentObject で共有。
     @EnvironmentObject var historyStore: GuideHistoryStore
 
     var body: some View {
-        ZStack {
-            MindWaveTheme.backgroundGradient.ignoresSafeArea()
+        // NavigationStack: GuideRecordCard → RecordDetailView へのNavigation遷移を有効にする
+        NavigationStack {
+            ZStack {
+                MindWaveTheme.backgroundGradient.ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 28) {
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 28) {
 
-                    Text("履歴")
-                        .font(.system(size: 30, weight: .ultraLight))
-                        .foregroundStyle(MindWaveTheme.textPrimary)
-                        .tracking(2)
-                        .padding(.top, 12)
+                        Text("履歴")
+                            .font(.system(size: 30, weight: .ultraLight))
+                            .foregroundStyle(MindWaveTheme.textPrimary)
+                            .tracking(2)
+                            .padding(.top, 12)
 
-                    // ── ガイドセッション記録（実際に保存されたデータ）──
-                    if historyStore.records.isEmpty {
-                        guideRecordsEmptyState
-                    } else {
-                        guideRecordsSection
-                    }
-
-                    // ── 参考用ダミーデータ（開発中プレースホルダー）──────
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("サンプル")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(MindWaveTheme.textTertiary)
-                            .tracking(1.2)
-                            .textCase(.uppercase)
-
-                        ForEach(dummyHistory, id: \.day) { section in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(section.day)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(MindWaveTheme.textTertiary.opacity(0.6))
-                                    .tracking(1.0)
-                                ForEach(section.records) { record in
-                                    SessionCard(record: record)
-                                        .opacity(0.55)
-                                }
-                            }
+                        // 実際に保存された記録のみ表示。ダミーデータは本番UIに出さない。
+                        if historyStore.records.isEmpty {
+                            guideRecordsEmptyState
+                        } else {
+                            guideRecordsSection
                         }
-                        Text("※ 上記はUI確認用のサンプルデータです")
-                            .font(.system(size: 10, weight: .light))
-                            .foregroundStyle(MindWaveTheme.textTertiary.opacity(0.5))
                     }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 40)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 40)
             }
+            .navigationBarHidden(true)
         }
     }
 
@@ -104,7 +83,7 @@ struct HistoryView: View {
             Text("まだガイド記録はありません")
                 .font(.system(size: 15, weight: .light))
                 .foregroundStyle(MindWaveTheme.textSecondary)
-            Text("ガイドを実施して「履歴へ保存」を選ぶと、ここに表示されます")
+            Text("ガイドを実施して「レポートを確認して保存」を選ぶと、ここに表示されます")
                 .font(.system(size: 12, weight: .light))
                 .foregroundStyle(MindWaveTheme.textTertiary)
                 .multilineTextAlignment(.center)
@@ -121,8 +100,12 @@ struct HistoryView: View {
                 .tracking(1.2)
                 .textCase(.uppercase)
 
+            // NavigationLink: タップで RecordDetailView へ遷移
             ForEach(historyStore.records) { record in
-                GuideRecordCard(record: record)
+                NavigationLink(destination: RecordDetailView(record: record)) {
+                    GuideRecordCard(record: record)
+                }
+                .buttonStyle(.plain)
             }
         }
     }

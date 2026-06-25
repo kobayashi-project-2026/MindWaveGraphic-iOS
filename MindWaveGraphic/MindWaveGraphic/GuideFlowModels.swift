@@ -140,6 +140,25 @@ struct GuideSessionRecord: Identifiable, Equatable {
     let after: GuideSnapshot?
     /// 再測定中にHRV Observerで新規サンプルを受信したか
     let hrvUpdated: Bool
+    /// ユーザーが入力した感情メモ（任意・空の場合は nil）
+    let emotionMemo: String?
+
+    /// 既存呼び出し元との後方互換を保つカスタムinit。
+    /// emotionMemo はデフォルト nil なので、フェーズ4までの保存コードは変更不要。
+    init(id: UUID, startedAt: Date, scene: MeasurementScene,
+         exercise: GuideExercise, durationSeconds: Int,
+         before: GuideSnapshot, after: GuideSnapshot?,
+         hrvUpdated: Bool, emotionMemo: String? = nil) {
+        self.id             = id
+        self.startedAt      = startedAt
+        self.scene          = scene
+        self.exercise       = exercise
+        self.durationSeconds = durationSeconds
+        self.before         = before
+        self.after          = after
+        self.hrvUpdated     = hrvUpdated
+        self.emotionMemo    = emotionMemo
+    }
 }
 
 // MARK: - GuideHistoryStore
