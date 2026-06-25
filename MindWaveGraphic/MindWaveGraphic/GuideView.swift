@@ -30,6 +30,8 @@ struct GuideView: View {
     @State private var showFlowView        = false
     /// 「その他」サブ選択シート
     @State private var showOtherSheet      = false
+    /// 3モード呼吸ガイド（既存フローとは独立した追加UI）
+    @State private var showBreathingModes  = false
 
     // MARK: - 主要場面（4カード固定表示）
     /// GuideViewの主要選択肢。その他は別途シートで展開する。
@@ -157,6 +159,49 @@ struct GuideView: View {
                     .accessibilityLabel("呼吸セッションを開始する")
                     .accessibilityHint(selectedScene == nil ? "場面を先に選んでください" : "選択した場面でガイドを開始します")
 
+                    // ── 3モード呼吸ガイド（追加入口・既存フローとは独立）────
+                    Button {
+                        print("[Breathing] guide opened from GuideView")
+                        showBreathingModes = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.white.opacity(0.08))
+                                    .frame(width: 42, height: 42)
+                                Image(systemName: "lungs.fill")
+                                    .font(.system(size: 18))
+                                    .foregroundStyle(Color.cyan.opacity(0.85))
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("3モード呼吸ガイド")
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundStyle(MindWaveTheme.textPrimary)
+                                Text("4-7-8・BOX・2-1-4 から選んで整える")
+                                    .font(.system(size: 11, weight: .light))
+                                    .foregroundStyle(MindWaveTheme.textTertiary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12))
+                                .foregroundStyle(MindWaveTheme.textTertiary)
+                        }
+                        .padding(16)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(.ultraThinMaterial.opacity(0.45))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(.white.opacity(0.10), lineWidth: 1)
+                                )
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 16)
+                    .accessibilityLabel("3モード呼吸ガイドを開く")
+                    .accessibilityHint("4-7-8・BOX・2-1-4 の呼吸モードから選べます")
+
                     // ── クイックスタート（既存・変更なし）──────────
                     VStack(alignment: .leading, spacing: 12) {
                         Text("クイックスタート")
@@ -192,6 +237,10 @@ struct GuideView: View {
         // ── フルスクリーンカバー：クイックスタート → GuideSessionView ──
         .fullScreenCover(item: $selectedExercise) { exercise in
             GuideSessionView(exercise: exercise)
+        }
+        // ── 3モード呼吸ガイド（既存 fullScreenCover と競合しない追加）──
+        .fullScreenCover(isPresented: $showBreathingModes) {
+            MindWaveBreathingGuideView()
         }
         // ── 「その他」サブ選択シート ──────────────────────────
         .sheet(isPresented: $showOtherSheet) {
