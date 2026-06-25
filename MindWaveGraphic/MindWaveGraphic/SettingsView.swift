@@ -9,6 +9,7 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var viewModel: MindWaveViewModel
 
     @AppStorage("showsParameterOverlay") private var showsParameterOverlay = true
@@ -169,6 +170,12 @@ struct SettingsView: View {
             }
             .navigationTitle("設定")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("閉じる") { dismiss() }
+                        .foregroundStyle(MindWaveCyberTheme.cyan)
+                }
+            }
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $showAccountSheet) {

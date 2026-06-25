@@ -19,6 +19,7 @@ struct HomeView: View {
     @State private var liveDotVisible: Bool = true
     @State private var showDebugSheet = false
     @State private var showAccountSheet = false
+    @State private var showSettingsSheet = false
 
     // MARK: - Timers（既存・変更なし）
     private let sessionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -109,6 +110,10 @@ struct HomeView: View {
         .onReceive(blinkTimer) { _ in
             liveDotVisible = viewModel.isLiveMonitoring ? !liveDotVisible : true
         }
+        .sheet(isPresented: $showSettingsSheet) {
+            SettingsView()
+                .environmentObject(viewModel)
+        }
         .sheet(isPresented: $showAccountSheet) {
             AccountView()
         }
@@ -145,6 +150,18 @@ struct HomeView: View {
                 isActive: viewModel.isLiveMonitoring
             )
             .animation(.easeInOut(duration: 0.3), value: viewModel.isLiveMonitoring)
+
+            // 設定ボタン（SettingsViewをsheetで表示）
+            Button {
+                showSettingsSheet = true
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 19, weight: .light))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 12)
+            .accessibilityLabel("設定を開く")
 
             // プロフィールボタン（既存動作維持）
             Button { showAccountSheet = true } label: {
