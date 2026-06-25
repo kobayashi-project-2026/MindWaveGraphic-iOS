@@ -2,10 +2,13 @@
 //  HistoryView.swift
 //  MindWaveGraphic
 //
+//  既存ロジックを維持したUI統合：Cyber UIデザインを適用。
+//  NavigationStack構造・履歴ロジック・新しい記録が先頭に来る順序は変更しない。
+//
 
 import SwiftUI
 
-// MARK: - Dummy Session Data
+// MARK: - Dummy structures（未使用・削除禁止）
 
 private struct SessionRecord: Identifiable {
     let id = UUID()
@@ -15,54 +18,27 @@ private struct SessionRecord: Identifiable {
     let score: Double
 }
 
-private let dummyHistory: [(day: String, records: [SessionRecord])] = [
-    (
-        day: "今日",
-        records: [
-            SessionRecord(title: "夜のセッション", time: "22:14", duration: "8分", score: 38)
-        ]
-    ),
-    (
-        day: "昨日",
-        records: [
-            SessionRecord(title: "午後のセッション", time: "15:30", duration: "5分", score: 62),
-            SessionRecord(title: "朝のセッション",   time: "08:12", duration: "7分", score: 45)
-        ]
-    ),
-    (
-        day: "5月18日（土）",
-        records: [
-            SessionRecord(title: "夜のセッション", time: "23:01", duration: "10分", score: 88)
-        ]
-    )
-]
-
-// MARK: - History View
+// MARK: - HistoryView
 
 struct HistoryView: View {
-    /// GuideFlowView から保存されたガイドセッション記録。MainTabViewから EnvironmentObject で共有。
     @EnvironmentObject var historyStore: GuideHistoryStore
 
     var body: some View {
-        // NavigationStack: GuideRecordCard → RecordDetailView へのNavigation遷移を有効にする
         NavigationStack {
             ZStack {
-                MindWaveTheme.backgroundGradient.ignoresSafeArea()
+                MindWaveCyberBackground()
 
                 ScrollView(showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 28) {
+                    VStack(alignment: .leading, spacing: 24) {
 
-                        Text("履歴")
-                            .font(.system(size: 30, weight: .ultraLight))
-                            .foregroundStyle(MindWaveTheme.textPrimary)
-                            .tracking(2)
+                        // ログ形式ヘッダー
+                        cyberHistoryHeader
                             .padding(.top, 12)
 
-                        // 実際に保存された記録のみ表示。ダミーデータは本番UIに出さない。
                         if historyStore.records.isEmpty {
-                            guideRecordsEmptyState
+                            cyberEmptyState
                         } else {
-                            guideRecordsSection
+                            cyberRecordsSection
                         }
                     }
                     .padding(.horizontal, 20)
@@ -70,52 +46,82 @@ struct HistoryView: View {
                 }
             }
             .navigationBarHidden(true)
+            .onAppear { print("[CyberUI] history appeared") }
         }
     }
 
-    // MARK: - Guide Records
+    // MARK: - ログ形式ヘッダー
 
-    private var guideRecordsEmptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "clock.badge.questionmark")
-                .font(.system(size: 36, weight: .ultraLight))
-                .foregroundStyle(MindWaveTheme.textTertiary)
-            Text("まだガイド記録はありません")
-                .font(.system(size: 15, weight: .light))
-                .foregroundStyle(MindWaveTheme.textSecondary)
-            Text("ガイドを実施して「レポートを確認して保存」を選ぶと、ここに表示されます")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(MindWaveTheme.textTertiary)
-                .multilineTextAlignment(.center)
+    private var cyberHistoryHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Rectangle()
+                    .fill(MindWaveCyberTheme.cyan)
+                    .frame(width: 3, height: 22)
+                    .shadow(color: MindWaveCyberTheme.cyan.opacity(0.8), radius: 6)
+                Text("SESSION LOG")
+                    .font(.system(size: 22, weight: .ultraLight, design: .monospaced))
+                    .foregroundStyle(MindWaveCyberTheme.textPrimary)
+                    .tracking(3)
+            }
+            HStack(spacing: 8) {
+                Text("RECORDS")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(MindWaveCyberTheme.cyan.opacity(0.7))
+                    .tracking(1.5)
+                Text("·")
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                Text("\(historyStore.records.count) ENTRIES")
+                    .font(.system(size: 10, weight: .light, design: .monospaced))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                    .tracking(0.8)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
     }
 
-    private var guideRecordsSection: some View {
+    // MARK: - 空状態
+
+    private var cyberEmptyState: some View {
+        MindWaveCyberPanel {
+            VStack(spacing: 12) {
+                Image(systemName: "clock.badge.questionmark")
+                    .font(.system(size: 36, weight: .ultraLight))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                Text("まだガイド記録はありません")
+                    .font(.system(size: 15, weight: .light))
+                    .foregroundStyle(MindWaveCyberTheme.textSecondary)
+                Text("ガイドを実施して「レポートを確認して保存」を選ぶと、ここに表示されます")
+                    .font(.system(size: 12, weight: .light))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+        }
+    }
+
+    // MARK: - 記録一覧
+
+    private var cyberRecordsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("ガイド記録")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MindWaveTheme.textTertiary)
-                .tracking(1.2)
-                .textCase(.uppercase)
+            MindWaveCyberSectionHeader(title: "GUIDE RECORDS")
+                .padding(.leading, 2)
 
-            // NavigationLink: タップで RecordDetailView へ遷移
             ForEach(historyStore.records) { record in
                 NavigationLink(destination: RecordDetailView(record: record)) {
-                    GuideRecordCard(record: record)
+                    CyberGuideRecordCard(record: record)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(record.exercise.title) \(record.scene.displayName)")
+                .accessibilityHint("タップして詳細を表示します")
             }
         }
     }
 }
 
-// MARK: - GuideRecordCard
+// MARK: - CyberGuideRecordCard
 
-/// GuideFlowView で保存されたガイドセッションの1件表示。
-/// nilの値を0で代用しない。Mock記録は明示する。
-private struct GuideRecordCard: View {
+private struct CyberGuideRecordCard: View {
     let record: GuideSessionRecord
 
     private var dateString: String {
@@ -135,155 +141,125 @@ private struct GuideRecordCard: View {
         return after.score - record.before.score
     }
 
+    private var deltaColor: Color {
+        guard let delta = scoreDelta else { return MindWaveCyberTheme.textTertiary }
+        if delta < 0 { return MindWaveCyberTheme.cyan }
+        if delta > 0 { return MindWaveCyberTheme.orange }
+        return MindWaveCyberTheme.textSecondary
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+
             // ヘッダー行
             HStack {
                 HStack(spacing: 6) {
                     Image(systemName: record.exercise.icon)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.cyan.opacity(0.7))
+                        .font(.system(size: 11))
+                        .foregroundStyle(MindWaveCyberTheme.cyan.opacity(0.8))
                     Text(record.exercise.title)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(MindWaveTheme.textPrimary)
+                        .foregroundStyle(MindWaveCyberTheme.textPrimary)
                 }
                 Spacer()
                 Text(dateString)
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(MindWaveTheme.textTertiary)
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
             }
 
-            // シーン + 時間 + Mock表示
+            // 場面・時間・Mock
             HStack(spacing: 8) {
+                Image(systemName: record.scene.icon)
+                    .font(.system(size: 10))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
                 Text(record.scene.displayName)
                     .font(.system(size: 11))
-                    .foregroundStyle(MindWaveTheme.textSecondary)
+                    .foregroundStyle(MindWaveCyberTheme.textSecondary)
                 Text("·")
-                    .foregroundStyle(MindWaveTheme.textTertiary)
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
                 Text(durationLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(MindWaveTheme.textSecondary)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(MindWaveCyberTheme.textSecondary)
                 if record.before.isMockData {
-                    Text("Mock")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color.orange.opacity(0.75))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.orange.opacity(0.12)))
+                    MindWaveCyberStatusBadge(label: "MOCK", isActive: false, color: MindWaveCyberTheme.orange)
                 }
             }
 
-            Divider().background(Color.white.opacity(0.07))
+            Divider()
+                .background(MindWaveCyberTheme.borderColor)
 
             // スコア比較
             HStack(spacing: 0) {
-                scoreColumn("前", score: record.before.score, hr: record.before.heartRate)
+                cyberScoreColumn("前", score: record.before.score, hr: record.before.heartRate)
                 Spacer()
                 if let delta = scoreDelta {
                     VStack(spacing: 2) {
                         Text(String(format: "%+.1f", delta))
                             .font(.system(size: 16, weight: .thin, design: .rounded))
-                            .foregroundStyle(delta < 0 ? Color.cyan.opacity(0.8) : delta > 0 ? Color.orange.opacity(0.75) : .white.opacity(0.4))
+                            .foregroundStyle(deltaColor)
                         Image(systemName: delta < 0 ? "arrow.down" : delta > 0 ? "arrow.up" : "minus")
                             .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(deltaColor.opacity(0.6))
                     }
                     Spacer()
                 }
                 if let after = record.after {
-                    scoreColumn("後", score: after.score, hr: after.heartRate)
+                    cyberScoreColumn("後", score: after.score, hr: after.heartRate)
                 } else {
                     Text("再測定なし")
                         .font(.system(size: 11))
-                        .foregroundStyle(MindWaveTheme.textTertiary)
+                        .foregroundStyle(MindWaveCyberTheme.textTertiary)
                 }
             }
 
-            // HRV更新状態
+            // HRV更新
             HStack(spacing: 4) {
                 Image(systemName: record.hrvUpdated ? "checkmark.circle.fill" : "minus.circle")
                     .font(.system(size: 10))
-                    .foregroundStyle(record.hrvUpdated ? Color.cyan.opacity(0.6) : .white.opacity(0.20))
+                    .foregroundStyle(record.hrvUpdated ? MindWaveCyberTheme.cyan.opacity(0.7) : .white.opacity(0.18))
                 Text(record.hrvUpdated ? "HRV更新あり" : "HRVは今回更新されませんでした")
                     .font(.system(size: 10, weight: .light))
-                    .foregroundStyle(.white.opacity(0.30))
+                    .foregroundStyle(.white.opacity(0.28))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
             }
         }
         .padding(14)
-        .darkCard()
+        .background(
+            RoundedRectangle(cornerRadius: MindWaveCyberTheme.panelRadius)
+                .fill(MindWaveCyberTheme.panelBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: MindWaveCyberTheme.panelRadius)
+                        .strokeBorder(MindWaveCyberTheme.borderColor, lineWidth: 1)
+                )
+        )
     }
 
-    private func scoreColumn(_ label: String, score: Double, hr: Double?) -> some View {
+    private func cyberScoreColumn(_ label: String, score: Double, hr: Double?) -> some View {
         VStack(alignment: .center, spacing: 3) {
             Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(MindWaveTheme.textTertiary)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(MindWaveCyberTheme.textTertiary)
             Text(String(format: "%.0f", score))
                 .font(.system(size: 28, weight: .thin, design: .rounded))
                 .foregroundStyle(MindWaveTheme.stressColor(score: score))
             if let hr {
                 Text(String(format: "%.0f bpm", hr))
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
             } else {
-                Text("---")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.20))
+                Text("未取得")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
             }
         }
         .frame(width: 72)
     }
 }
 
-// MARK: - Session Card
-
-private struct SessionCard: View {
-    let record: SessionRecord
-
-    private var color: Color   { MindWaveTheme.stressColor(score: record.score) }
-    private var label: String  { MindWaveTheme.stressLabel(score: record.score) }
-    private var amplitude: Double { 0.25 + record.score / 100.0 * 0.55 }
-
-    var body: some View {
-        HStack(spacing: 14) {
-
-            // ミニ波形サムネイル
-            MiniWave(amplitude: amplitude, color: color)
-                .frame(width: 58, height: 38)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(record.title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(MindWaveTheme.textPrimary)
-                HStack(spacing: 6) {
-                    Text(record.time)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(MindWaveTheme.textSecondary)
-                    Text("·")
-                        .foregroundStyle(MindWaveTheme.textTertiary)
-                    Text(record.duration)
-                        .font(.system(size: 12))
-                        .foregroundStyle(MindWaveTheme.textSecondary)
-                }
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(String(format: "%.0f", record.score))
-                    .font(.system(size: 22, weight: .thin, design: .rounded))
-                    .foregroundStyle(color)
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(color.opacity(0.75))
-            }
-        }
-        .padding(14)
-        .darkCard()
-    }
-}
-
-// MARK: - Mini Waveform（静止ダミー波形）
+// MARK: - MiniWave（未使用・削除禁止）
 
 private struct MiniWave: View {
     let amplitude: Double
@@ -294,7 +270,6 @@ private struct MiniWave: View {
             let w = size.width
             let h = size.height
             let mid = h * 0.5
-
             var line = Path()
             var first = true
             for x in stride(from: 0.0, through: w, by: 1.5) {
@@ -304,12 +279,6 @@ private struct MiniWave: View {
                 else { line.addLine(to: pt) }
             }
             ctx.stroke(line, with: .color(color.opacity(0.75)), lineWidth: 1.5)
-
-            var fill = line
-            fill.addLine(to: CGPoint(x: w, y: h))
-            fill.addLine(to: CGPoint(x: 0, y: h))
-            fill.closeSubpath()
-            ctx.fill(fill, with: .color(color.opacity(0.12)))
         }
         .background(color.opacity(0.06))
     }
