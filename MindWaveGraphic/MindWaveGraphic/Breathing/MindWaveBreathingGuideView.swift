@@ -10,6 +10,8 @@
 import SwiftUI
 
 struct MindWaveBreathingGuideView: View {
+    /// HomeViewのクイックワークカードからモードを指定するための初期モード（省略可）。
+    var initialMode: MindWaveBreathingMode = .fourSevenEight
     @StateObject private var viewModel = MindWaveBreathingViewModel()
     @Environment(\.dismiss) private var dismiss
 
@@ -168,7 +170,10 @@ struct MindWaveBreathingGuideView: View {
             }
         }
         .onDisappear { viewModel.stop() }
-        .onAppear { print("[CyberUI] breathing guide presented") }
+        .onAppear {
+            viewModel.changeMode(initialMode)
+            print("[CyberUI] breathing guide presented mode=\(initialMode.displayName)")
+        }
         .preferredColorScheme(.dark)
     }
 

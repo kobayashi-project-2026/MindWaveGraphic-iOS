@@ -1,28 +1,17 @@
 // MainTabView.swift
 // App
 //
-// 認証後に表示される3タブのメインナビゲーション。
-// AppRootView の authStatus = .mainApp で表示される。
+// 参考写真に合わせたカスタム浮遊タブバーへ全面再設計。
+// システムTabBarを使用せず、ZStack+カスタムピルバーで実装。
+// ViewModelとGuideHistoryStoreは変更なし（1回だけ生成・EnvironmentObject共有）。
 //
 // タブ構成：
-//   tag 0: 計測      (HomeView)       ← 既存Mind Wave Graphic・WatchConnectivity
-//   tag 1: 場面選択  (GuideView)      ← 既存シーン選択・呼吸ガイドフロー
-//   tag 2: 履歴      (HistoryView)    ← 既存GuideHistoryStore表示
+//   tag 0: リアルタイム計測  (HomeView)
+//   tag 1: 作戦・場面選択    (GuideView)
+//   tag 2: ログ履歴          (HistoryView)
 //
-// 初期表示は「場面選択（tag 1）」とする。
+// 初期表示は「作戦・場面選択（tag 1）」。
 //
-// 状態オブジェクトの設計：
-//   MindWaveViewModel と GuideHistoryStore をここで1回だけ生成し、
-//   .environmentObject() で各タブへ共有する。
-//   HomeView・GuideView・HistoryView は @EnvironmentObject で受け取り、
-//   新規生成しない。これにより HealthKit Observer、Watch連携、
-//   HRV Observer の重複起動を防ぐ。
-//
-// selectedTab は GuideView / GuideFlowView の「履歴へ保存後に tab 2 へ遷移」
-// および HomeView の「整える → tab 1」へ同じ Binding で渡す。
-// タグ番号は既存 ContentView と互換（Guide=1, History=2）なため変更不要。
-//
-// SettingsView は今回タブに含めない（フェーズ6で歯車ボタンからSheet接続予定）。
 
 import SwiftUI
 
@@ -30,59 +19,38 @@ struct MainTabView: View {
 
     // MARK: - 状態所有（各1インスタンス）
 
-    /// 心拍・HRV・GraphicInput・Watch連携をすべて管理するViewModel。
-    /// このMainTabViewだけで生成し、@EnvironmentObjectで全タブへ共有する。
-    @StateObject private var viewModel = MindWaveViewModel()
-
-    /// ガイドセッション履歴ストア。
-    /// GuideFlowViewとHistoryViewが同一インスタンスを参照する。
-    @StateObject private var historyStore = GuideHistoryStore()
-
-    /// 初期表示は「場面選択（tag 1）」。
-    @State private var selectedTab = 1
+    @StateObject private var viewModel     = MindWaveViewModel()
+    @StateObject private var historyStore  = GuideHistoryStore()
+    @State       private var selectedTab   = 1
 
     // MARK: - Body
 
     var body: some View {
-        TabView(selection: $selectedTab) {
+        ZStack(alignment: .bottom) {
 
-            // ── タブ0：計測 ──────────────────────────────────────
-            // 既存HomeViewをそのまま使用。
-            // StarfieldGraphicView・HRV・Watch心拍・Mock/実測モードを維持する。
-            HomeView(selectedTab: $selectedTab)
-                .tabItem {
-                    Image(systemName: "bolt.shield.fill")
-                    Text("計測")
-                }
-                .tag(0)
+            // コンテンツ（TabView・システムタブバーなし）
+            TabView(selection: $selectedTab) {
+                HomeView(selectedTab: $selectedTab)
+                    .tag(0)
+                GuideView(selectedTab: $selectedTab)
+                    .tag(1)
+                HistoryView()
+                    .tag(2)
+            }
+            // カスタムタブバー分の安全エリアをコンテンツに追加
+            .safeAreaInset(edge: .bottom) {
+                Color.clear.frame(height: 80)
+            }
 
-            // ── タブ1：場面選択 ──────────────────────────────────
-            // 既存GuideViewをそのまま使用。
-            // 呼吸ガイドフロー・GuideFlowView・GuideSessionViewを維持する。
-            GuideView(selectedTab: $selectedTab)
-                .tabItem {
-                    Image(systemName: "cpu")
-                    Text("場面選択")
-                }
-                .tag(1)
-
-            // ── タブ2：履歴 ──────────────────────────────────────
-            // 既存HistoryViewをそのまま使用。
-            // GuideHistoryStore・GuideSessionRecordを維持する。
-            HistoryView()
-                .tabItem {
-                    Image(systemName: "terminal.fill")
-                    Text("履歴")
-                }
-                .tag(2)
+            // カスタム浮遊タブバー
+            customTabBar
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
         }
-        // 全タブへ共有（各ViewはEnvironmentObjectで受け取る）
         .environmentObject(viewModel)
         .environmentObject(historyStore)
-        .tint(MindWaveTheme.accent)
         .preferredColorScheme(.dark)
         .onChange(of: selectedTab) { _, newValue in
-            // タブ遷移の構造化ログ
             switch newValue {
             case 0:  print("[Navigation] main tab changed: measurement")
             case 1:  print("[Navigation] main tab changed: sceneSelection")
@@ -90,14 +58,64 @@ struct MainTabView: View {
             default: print("[Navigation] main tab changed: unknown(\(newValue))")
             }
         }
-        .onAppear {
-            // タブバーの外観設定（MindWaveテーマに準拠）
-            let appearance = UITabBarAppearance()
-            appearance.configureWithOpaqueBackground()
-            appearance.backgroundColor = UIColor(red: 0.04, green: 0.04, blue: 0.10, alpha: 0.95)
-            UITabBar.appearance().standardAppearance   = appearance
-            UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+
+    // MARK: - カスタム浮遊タブバー
+
+    private var customTabBar: some View {
+        let items: [(label: String, icon: String, activeIcon: String)] = [
+            ("リアルタイム計測", "bolt",     "bolt.fill"),
+            ("作戦・場面選択",   "cpu",      "cpu"),
+            ("ログ履歴",         "terminal", "terminal.fill"),
+        ]
+
+        return HStack(spacing: 0) {
+            ForEach(items.indices, id: \.self) { idx in
+                let isSelected = selectedTab == idx
+                Button {
+                    selectedTab = idx
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: isSelected ? items[idx].activeIcon : items[idx].icon)
+                            .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                        Text(items[idx].label)
+                            .font(.system(size: 10, weight: .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                    }
+                    .foregroundStyle(isSelected ? MindWaveCyberTheme.cyan : .white.opacity(0.50))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
+                    .background(
+                        Capsule()
+                            .fill(MindWaveCyberTheme.cyan.opacity(isSelected ? 0.16 : 0))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(
+                                        MindWaveCyberTheme.cyan.opacity(isSelected ? 0.30 : 0),
+                                        lineWidth: 1
+                                    )
+                            )
+                    )
+                    .animation(.easeInOut(duration: 0.18), value: selectedTab)
+                }
+                .buttonStyle(.plain)
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(items[idx].label)
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 28)
+                .fill(Color(red: 0.04, green: 0.05, blue: 0.12).opacity(0.96))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 28)
+                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.45), radius: 16, x: 0, y: 8)
+        )
     }
 }
 
