@@ -60,6 +60,10 @@ struct DebugDiagnosticsView: View {
                         debugRow("Watch受信数", "\(viewModel.watchMessageCount) 回")
                         debugRow("Watch最終",   formatTime(viewModel.latestWatchHeartRateDate))
                         debugRow("WCSession",   WatchConnectivityManager.shared.watchConnectionStatusLabel)
+                        debugRow("Activation",  WatchConnectivityManager.shared.wcActivationStateLabel)
+                        debugRow("Reachable",   WatchConnectivityManager.shared.isWatchReachable ? "YES ✓" : "NO")
+                        debugRow("Paired",      WatchConnectivityManager.shared.isWatchPaired ? "YES ✓" : "NO")
+                        debugRow("App導入",     WatchConnectivityManager.shared.isWatchAppInstalled ? "YES ✓" : "NO")
                     }
 
                     // ── ライブ監視状態 ──────────────────────────────────

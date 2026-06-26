@@ -41,6 +41,25 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     /// 最後に受信したチャネル名
     @Published var lastReceiveChannel: String         = "---"
 
+    // MARK: - WCSession 診断プロパティ（DebugDiagnosticsView 用）
+
+    /// WCSession の isReachable（WatchConnectivity 非対応デバイスでは常に false）
+    var isWatchReachable: Bool { WCSession.isSupported() && WCSession.default.isReachable }
+    /// WCSession の isPaired（activation 前は false）
+    var isWatchPaired: Bool { WCSession.isSupported() && WCSession.default.isPaired }
+    /// WCSession の isWatchAppInstalled（activation 前は false）
+    var isWatchAppInstalled: Bool { WCSession.isSupported() && WCSession.default.isWatchAppInstalled }
+    /// WCSession の activationState をラベル文字列で返す
+    var wcActivationStateLabel: String {
+        guard WCSession.isSupported() else { return "非対応" }
+        switch WCSession.default.activationState {
+        case .activated:    return "activated"
+        case .inactive:     return "inactive"
+        case .notActivated: return "notActivated"
+        @unknown default:   return "unknown"
+        }
+    }
+
     // MARK: - コールバック
 
     /// Watch心拍受信時に呼ばれる。MindWaveViewModel.subscribeToWatchHeartRate() で登録される。
@@ -217,7 +236,7 @@ extension WatchConnectivityManager: WCSessionDelegate {
             lastPayloadDebug         = debugText
             lastReceiveChannel       = channel
             MindWaveDebugLogger.log(.watch, "decoded channel=\(channel) bpm=\(Int(hr)) count=\(watchMessageCount)")
-            MindWaveDebugLogger.log(.watch, "delivering heart rate to MindWaveViewModel")
+            MindWaveDebugLogger.log(.watch, "[PhoneLink] payload received channel=\(channel) fields=type,heartRate,timestamp bpm=\(Int(hr))")
             onHeartRateReceived?(hr, sampleDate)
         }
     }

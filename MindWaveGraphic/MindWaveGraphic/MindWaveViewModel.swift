@@ -161,6 +161,8 @@ final class MindWaveViewModel: ObservableObject {
     private var lastHeartRateSampleIdentifier: String? = nil
     private var lastHRVSampleIdentifier: String?       = nil
     private var hrvObserverStarted                     = false
+    /// WatchConnectivity 3チャネル重複・古いパケットを弾くためのタイムスタンプ管理。
+    private var lastAppliedWatchTimestamp: TimeInterval = 0
 
     // MARK: - 最新サンプル保持
 
@@ -322,7 +324,7 @@ final class MindWaveViewModel: ObservableObject {
             MindWaveDebugLogger.log(.source, "active source changed \(previousSource.rawValue) -> \(sample.source.rawValue)")
         }
         MindWaveDebugLogger.log(.analysis, "score=\(String(format: "%.1f", tensionScore)) confidence=\(String(format: "%.2f", confidence)) state=\(state.rawValue)")
-        MindWaveDebugLogger.log(.graphic, "input updated trigger=\(lastGraphicUpdateTrigger) score=\(String(format: "%.1f", tensionScore)) confidence=\(String(format: "%.2f", confidence)) state=\(state.rawValue)")
+        MindWaveDebugLogger.log(.graphic, "[Pipeline] graphic input updated source=\(sample.source.rawValue) trigger=\(lastGraphicUpdateTrigger) score=\(String(format: "%.1f", tensionScore)) confidence=\(String(format: "%.2f", confidence)) state=\(state.rawValue)")
     }
 
     // MARK: - ▼ scheduleWatchExpiry: Watch有効期限の自動再評価 ▼
@@ -573,6 +575,16 @@ final class MindWaveViewModel: ObservableObject {
     /// Mock ON 中でも常に Watch サンプルを ingest し、watchLive 受信履歴を更新する。
     /// selectActiveSample で Mock が優先されるため、GraphicInput は Mock 値を維持する。
     func applyWatchHeartRate(_ heartRate: Double, sampleDate: Date) {
+        // 古いパケット・同一タイムスタンプの重複チャネル配信を無視する
+        // 3チャネル戦略（sendMessage / updateApplicationContext / transferUserInfo）で
+        // 同じパケットが複数届いた場合も最初の1件だけ処理する。
+        let ts = sampleDate.timeIntervalSince1970
+        guard ts > lastAppliedWatchTimestamp else {
+            MindWaveDebugLogger.log(.watch, "[ViewModel] stale payload ignored ts=\(String(format: "%.3f", ts))")
+            return
+        }
+        lastAppliedWatchTimestamp = ts
+
         // 常に更新：Watch受信診断情報（Mockモードでも記録する）
         latestWatchHeartRate       = heartRate
         latestWatchHeartRateDate   = sampleDate
@@ -586,7 +598,7 @@ final class MindWaveViewModel: ObservableObject {
         livePulseTrigger         += 1
         didFetchHeartRate         = true
         lastFetchMessage          = "Watchライブ心拍を受信"
-        MindWaveDebugLogger.log(.watch, "heart rate received bpm=\(Int(heartRate)) mockMode=\(isMockMode)")
+        MindWaveDebugLogger.log(.watch, "[ViewModel] watch heart rate accepted bpm=\(Int(heartRate)) mockMode=\(isMockMode)")
 
         // HRVはWatchサンプルに埋め込まず、selectActiveSampleの補完ロジック
         // (latestHealthKitSample?.hrv) に委ねる。
@@ -686,7 +698,11 @@ final class MindWaveViewModel: ObservableObject {
         MindWaveDebugLogger.log(.lifecycle, "start live monitoring interval=\(Int(liveUpdateInterval))s")
 
         liveMonitoringTask = Task { [weak self] in
-            await self?.runLiveMonitoringLoop()
+            guard let self else { return }
+            // HealthKit認可がまだであれば権限ダイアログを表示し、初回取得とHRV Observerを開始する。
+            // 既に認可済みの場合は即座に完了する（iOS挙動）。
+            await self.requestHealthKitAuthorization()
+            await self.runLiveMonitoringLoop()
         }
     }
 
@@ -700,7 +716,17 @@ final class MindWaveViewModel: ObservableObject {
     }
 
     func toggleLiveMonitoring() {
-        isLiveMonitoring ? stopLiveMonitoring() : startLiveMonitoring()
+        if isLiveMonitoring {
+            stopLiveMonitoring()
+        } else {
+            // ライブ取得開始時にMockモードを自動解除する。
+            // これにより実データがGraphicInputへ流れるようになる。
+            if isMockMode {
+                MindWaveDebugLogger.log(.mock, "mock mode auto-disabled on live monitoring start")
+                setMockMode(false)
+            }
+            startLiveMonitoring()
+        }
     }
 
     // MARK: - Private: ライブ監視ループ
