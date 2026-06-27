@@ -16,7 +16,10 @@ struct MindWaveGraphicApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            // フェーズ2：認証フローを挿入。
+            // mainApp状態になると AppRootView が既存の ContentView を表示する。
+            // ContentView 本体は一切変更していない。
+            AppRootView()
         }
     }
 }

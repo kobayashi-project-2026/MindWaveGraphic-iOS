@@ -2,296 +2,422 @@
 //  HomeView.swift
 //  MindWaveGraphic
 //
-//  没入型ホーム画面。旧 Live タブの計測機能をすべてここに統合。
-//  Starfield グラフィックを画面全面に描画し、UI を薄いオーバーレイとして重ねる。
-//  ViewModel は ContentView からの EnvironmentObject を使用し、新規生成はしない。
+//  ホーム画面。GraphicHostViewを主役とし、状態説明・メトリクス・CTAを補助表示する。
+//  架空の値は使用しない。データ未取得時は「—」で表示する。
 //
 
 import SwiftUI
-import Combine
 
-/// アプリの中心画面。Starfield を全画面背景として使用し、Watch ライブ計測を行う。
-/// 旧 Live タブの GraphicHostView・心拍/HRV 表示・計測開始停止・Debug シートをすべて含む。
-/// ViewModelは ContentView から @EnvironmentObject で受け取る（新規生成しない）。
 struct HomeView: View {
     @EnvironmentObject var viewModel: MindWaveViewModel
-    /// ガイドタブへ遷移するためのバインディング（ContentViewのselectedTabを参照）
     @Binding var selectedTab: Int
 
-    // MARK: - UI State
-    /// 計測経過時間（秒）。計測停止でリセット。
-    @State private var elapsed: Int = 0
-    /// LIVE ドット点滅フラグ
-    @State private var liveDotVisible: Bool = true
-    /// Debug 診断シートの表示フラグ（DEBUG ビルドのみ使用）
-    @State private var showDebugSheet = false
-    /// Account シートの表示フラグ
-    @State private var showAccountSheet = false
-
-    // MARK: - Timers
-    private let sessionTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    private let blinkTimer   = Timer.publish(every: 0.8, on: .main, in: .common).autoconnect()
-
-    // MARK: - Computed
-    /// Watch 鮮度があり HRV が未取得の場合、HRV 待機中を示す
-    private var isHRVWaiting: Bool {
-        viewModel.isWatchSampleFresh && !viewModel.didFetchHRV && !viewModel.isMockMode
-    }
+    @State private var showSettingsSheet  = false
+    @State private var showDebugSheet     = false
+    @State private var showBreathingSheet = false
+    @State private var breathingMode: MindWaveBreathingMode = .fourSevenEight
 
     // MARK: - Body
 
     var body: some View {
         ZStack {
-            // ── 全画面 Starfield 背景 ──────────────────────────────────
-            // GraphicPlugin → TeamGraphicView → StarfieldGraphicView に委譲。
-            // .ignoresSafeArea() でノッチ・タブバー下まで描画して没入感を出す。
-            GraphicHostView(input: viewModel.graphicInput)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea()
-
-            // ── UI オーバーレイ ──────────────────────────────────────
+            background
             VStack(spacing: 0) {
-                topHUD
+                compactHeader
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
-
-                Spacer()
-
-                bottomPanel
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 6)
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        stateCanvas
+                            .padding(.horizontal, 16)
+                        stateNarrative
+                            .padding(.horizontal, 20)
+                        metricsRow
+                            .padding(.horizontal, 20)
+                        regulationSection
+                        primaryAction
+                            .padding(.horizontal, 20)
+                        Spacer().frame(height: 96)
+                    }
+                    .padding(.top, 8)
+                }
             }
         }
-        .onAppear { elapsed = 0 }
-        .onChange(of: viewModel.isLiveMonitoring) { _, active in
-            if !active { elapsed = 0 }
-        }
-        .onReceive(sessionTimer) { _ in
-            if viewModel.isLiveMonitoring { elapsed += 1 }
-        }
-        .onReceive(blinkTimer) { _ in
-            liveDotVisible = viewModel.isLiveMonitoring ? !liveDotVisible : true
-        }
-        .onChange(of: viewModel.graphicInput.score) { _, _ in
-            // スコア変化時の animation は StarfieldGraphicView 内で処理済み
-        }
-        .sheet(isPresented: $showAccountSheet) {
-            AccountView()
+        .onAppear { print("[UI][Home] view_appeared") }
+        .sheet(isPresented: $showSettingsSheet) {
+            SettingsView().environmentObject(viewModel)
         }
         .sheet(isPresented: $showDebugSheet) {
             DebugDiagnosticsView()
                 .environmentObject(viewModel)
                 .presentationDetents([.medium, .large])
         }
+        .fullScreenCover(isPresented: $showBreathingSheet) {
+            BreathingFromHomeWrapper(initialMode: breathingMode)
+        }
     }
 
-    // MARK: - Top HUD
+    // MARK: - 背景
 
-    /// アプリ名・計測時間・接続状態・プロフィールボタンを表示する上部 HUD
-    private var topHUD: some View {
-        HStack(alignment: .center) {
-            // アプリ名 + 経過時間
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Mind Wave")
-                    .font(.system(size: 17, weight: .ultraLight))
-                    .foregroundStyle(.white.opacity(0.90))
-                    .tracking(2)
-                if viewModel.isLiveMonitoring {
-                    Text(timeString)
-                        .font(.system(size: 11, weight: .light, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.40))
-                        .transition(.opacity)
-                }
-            }
+    private var background: some View {
+        ZStack {
+            Color(red: 0.02, green: 0.02, blue: 0.06).ignoresSafeArea()
+            CyberGridShape(cellSize: 44)
+                .stroke(Color.cyan.opacity(0.025), lineWidth: 0.5)
+                .ignoresSafeArea()
+        }
+    }
 
-            Spacer()
+    // MARK: - コンパクトヘッダー
 
-            // Active Source / LIVE ドット
-            HStack(spacing: 5) {
+    private var compactHeader: some View {
+        HStack(spacing: 10) {
+            // 接続状態インジケーター
+            HStack(spacing: 6) {
                 Circle()
-                    .fill(viewModel.isLiveMonitoring ? MindWaveTheme.accent : .white.opacity(0.3))
-                    .opacity(viewModel.isLiveMonitoring ? (liveDotVisible ? 1.0 : 0.20) : 0.35)
+                    .fill(indicatorColor)
                     .frame(width: 6, height: 6)
-                    .shadow(color: viewModel.isLiveMonitoring
-                            ? MindWaveTheme.accent.opacity(0.9) : .clear, radius: 4)
-                Text(statusLabel)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(viewModel.isLiveMonitoring
-                                     ? MindWaveTheme.accent : .white.opacity(0.30))
-                    .tracking(1.2)
+                    .shadow(color: indicatorColor.opacity(0.8), radius: 4)
+                Text(shortStatusLabel)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.70))
             }
-            .padding(.trailing, 14)
-            .animation(.easeInOut(duration: 0.3), value: viewModel.isLiveMonitoring)
-
-            // プロフィールボタン → AccountView シート
-            Button { showAccountSheet = true } label: {
-                Image(systemName: "person.crop.circle")
-                    .font(.system(size: 21, weight: .light))
-                    .foregroundStyle(.white.opacity(0.60))
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    // MARK: - Bottom Panel
-
-    /// 生体指標（心拍・HRV）・状態名・計測開始停止・Debug ボタンを表示する下部パネル
-    private var bottomPanel: some View {
-        VStack(spacing: 10) {
-            // 状態名
-            if viewModel.activeDataSource != .unavailable {
-                Text(viewModel.graphicInput.state.displayName)
-                    .font(.system(size: 13, weight: .light))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .animation(.easeInOut(duration: 0.4), value: viewModel.graphicInput.state)
-            }
-
-            // HRV 待機メッセージ
-            if isHRVWaiting {
-                Text("HRV測定を待機中")
-                    .font(.system(size: 10, weight: .light))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .transition(.opacity)
-            }
-
-            // 生体指標ストリップ（心拍・HRV）
-            biometricStrip
-
-            // 計測開始・停止
-            measurementButton
-
-            // ガイドへの導線（整える）
-            Button {
-                selectedTab = 1   // ガイドタブへ移動
-            } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: "wind")
-                        .font(.system(size: 10))
-                    Text("今の状態を整える")
-                        .font(.system(size: 11, weight: .light))
-                }
-                .foregroundStyle(.white.opacity(0.35))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("ガイドタブを開く")
-
-            // Debug ボタン（DEBUGビルドのみ）
+            Spacer()
             #if DEBUG
-            Button { showDebugSheet = true } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "ant.circle")
-                        .font(.system(size: 9))
-                    Text("Debug")
-                        .font(.system(size: 9, weight: .medium))
-                }
-                .foregroundStyle(.white.opacity(0.22))
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.06)))
+            Button {
+                showDebugSheet = true
+                print("[UI][Home] debug_sheet_opened")
+            } label: {
+                Image(systemName: "ant.circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(Color.white.opacity(0.28))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("診断画面を開く")
             #endif
-        }
-    }
-
-    /// 心拍数と HRV SDNN をガラス調ストリップで表示する
-    private var biometricStrip: some View {
-        HStack(spacing: 0) {
-            biometricCell(icon: "heart.fill",
-                          value: heartRateString,
-                          unit: "bpm",
-                          accentColor: Color(red: 0.95, green: 0.35, blue: 0.35))
-            Rectangle()
-                .fill(.white.opacity(0.12))
-                .frame(width: 1, height: 32)
-            biometricCell(icon: "waveform.path.ecg",
-                          value: hrvString,
-                          unit: viewModel.didFetchHRV ? "ms" : "",
-                          accentColor: MindWaveTheme.accent)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14)
-            .strokeBorder(.white.opacity(0.10), lineWidth: 1))
-    }
-
-    private func biometricCell(icon: String, value: String,
-                                unit: String, accentColor: Color) -> some View {
-        VStack(spacing: 3) {
-            Image(systemName: icon)
-                .font(.system(size: 10))
-                .foregroundStyle(accentColor.opacity(0.75))
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 24, weight: .light, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.88))
-                    .contentTransition(.numericText())
-                if !unit.isEmpty {
-                    Text(unit)
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.38))
-                }
+            Button {
+                showSettingsSheet = true
+                print("[UI][Home] settings_opened")
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.white.opacity(0.50))
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("設定を開く")
         }
-        .frame(maxWidth: .infinity)
+        .frame(height: 36)
     }
 
-    /// ライブ取得開始・停止ボタン
-    private var measurementButton: some View {
-        Button { viewModel.toggleLiveMonitoring() } label: {
-            HStack(spacing: 8) {
-                Image(systemName: viewModel.isLiveMonitoring
-                      ? "stop.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 14))
-                Text(viewModel.isLiveMonitoring ? "取得停止" : "ライブ取得開始")
-                    .font(.system(size: 13, weight: .medium))
-            }
-            .foregroundStyle(viewModel.isLiveMonitoring
-                             ? Color.orange.opacity(0.90) : MindWaveTheme.accent)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 11)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(viewModel.isLiveMonitoring
-                          ? Color.orange.opacity(0.12)
-                          : MindWaveTheme.accent.opacity(0.15))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(
-                                viewModel.isLiveMonitoring
-                                    ? Color.orange.opacity(0.30)
-                                    : MindWaveTheme.accent.opacity(0.30),
-                                lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
-        .animation(.easeInOut(duration: 0.25), value: viewModel.isLiveMonitoring)
-    }
-
-    // MARK: - Helpers
-
-    private var timeString: String {
-        String(format: "%02d:%02d", elapsed / 60, elapsed % 60)
-    }
-
-    private var statusLabel: String {
+    private var indicatorColor: Color {
         switch viewModel.activeDataSource {
-        case .watchLive:   return "LIVE"
-        case .healthKit:   return "HK"
-        case .mock:        return "MOCK"
+        case .watchLive:   return .cyan
+        case .healthKit:   return Color(red: 0.20, green: 0.85, blue: 0.60)
+        case .mock:        return .orange
+        case .unavailable: return Color.white.opacity(0.25)
+        }
+    }
+
+    private var shortStatusLabel: String {
+        switch viewModel.activeDataSource {
+        case .watchLive:   return viewModel.isLiveMonitoring ? "計測中" : "Watch 接続済"
+        case .healthKit:   return "HealthKit"
+        case .mock:        return "デモ"
         case .unavailable: return "待機中"
         }
     }
 
-    private var heartRateString: String {
-        guard viewModel.didFetchHeartRate || viewModel.latestWatchHeartRate != nil else { return "---" }
-        return String(format: "%.0f", viewModel.currentHeartRate)
+    // MARK: - グラフィックキャンバス（主役）
+
+    private var stateCanvas: some View {
+        GeometryReader { geo in
+            let h = min(max(geo.size.width * 0.62, 200), 300)
+            ZStack(alignment: .bottomLeading) {
+                GraphicHostView(input: viewModel.graphicInput)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: h)
+                    .allowsHitTesting(false)
+
+                // BPM オーバーレイ（左下・補助情報）
+                bpmOverlay
+                    .padding(14)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(red: 0.02, green: 0.02, blue: 0.06).opacity(0.85), .clear],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+            }
+            .frame(height: h)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+        }
+        .frame(height: 240)   // GeometryReader には固定高さが必要
     }
 
-    private var hrvString: String {
-        viewModel.didFetchHRV ? String(format: "%.0f", viewModel.currentHRV) : "---"
+    private var bpmOverlay: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .lastTextBaseline, spacing: 4) {
+                Text(heartRateDisplay)
+                    .font(.system(size: 42, weight: .thin, design: .rounded))
+                    .foregroundStyle(hasRealHeartRate ? Color.white : Color.white.opacity(0.25))
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.3), value: heartRateDisplay)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("BPM")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.40))
+                    if viewModel.isLiveMonitoring {
+                        Text(viewModel.latestWatchHeartRate != nil ? "LIVE" : "接続中")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(Color.cyan.opacity(0.75))
+                    }
+                }
+            }
+            if viewModel.didFetchHRV {
+                Text(String(format: "HRV  %.0f ms", viewModel.currentHRV))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.70))
+            }
+        }
+    }
+
+    private var hasRealHeartRate: Bool {
+        viewModel.latestWatchHeartRate != nil || viewModel.didFetchHeartRate
+    }
+
+    private var heartRateDisplay: String {
+        if let w = viewModel.latestWatchHeartRate { return String(format: "%.0f", w) }
+        if viewModel.didFetchHeartRate            { return String(format: "%.0f", viewModel.currentHeartRate) }
+        return "—"
+    }
+
+    // MARK: - 状態ナラティブ
+
+    private var stateNarrative: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(narrativeTitle)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.white.opacity(0.90))
+            Text(narrativeBody)
+                .font(.system(size: 13))
+                .foregroundStyle(Color.white.opacity(0.50))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.easeInOut(duration: 0.3), value: viewModel.activeDataSource)
+    }
+
+    private var narrativeTitle: String {
+        switch viewModel.activeDataSource {
+        case .watchLive:
+            if viewModel.isLiveMonitoring {
+                return viewModel.didFetchHRV ? "リアルタイム計測中" : "接続中 — HRV取得待ち"
+            }
+            return "計測を開始できます"
+        case .healthKit: return "HealthKitから読み込み中"
+        case .mock:      return "デモモード"
+        case .unavailable: return "データを待っています"
+        }
+    }
+
+    private var narrativeBody: String {
+        switch viewModel.activeDataSource {
+        case .watchLive:
+            if viewModel.didFetchHRV { return "状態グラフィックが現在の心理的揺らぎを反映しています。" }
+            return "Apple Watchを装着したまましばらくお待ちください。"
+        case .healthKit:
+            return "HealthKitに記録された最新データを表示しています。"
+        case .mock:
+            return "Apple Watchと接続すると実データへ切り替わります。"
+        case .unavailable:
+            return "下のボタンで計測を開始すると、Apple Watchからデータが届きます。"
+        }
+    }
+
+    // MARK: - メトリクス行（補助情報）
+
+    private var metricsRow: some View {
+        HStack(spacing: 0) {
+            metricItem(
+                label: "データソース",
+                value: dataSourceLabel,
+                accent: indicatorColor
+            )
+            Divider()
+                .frame(height: 28)
+                .background(Color.white.opacity(0.10))
+            metricItem(
+                label: "HRV",
+                value: viewModel.didFetchHRV ? String(format: "%.0f ms", viewModel.currentHRV) : "—",
+                accent: viewModel.didFetchHRV ? Color.cyan : Color.white.opacity(0.25)
+            )
+            Divider()
+                .frame(height: 28)
+                .background(Color.white.opacity(0.10))
+            metricItem(
+                label: "状態",
+                value: viewModel.isLiveMonitoring ? "計測中" : "停止中",
+                accent: viewModel.isLiveMonitoring ? Color.cyan : Color.white.opacity(0.35)
+            )
+        }
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func metricItem(label: String, value: String, accent: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value)
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                .foregroundStyle(accent)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(Color.white.opacity(0.38))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var dataSourceLabel: String {
+        switch viewModel.activeDataSource {
+        case .watchLive:   return "Watch Live"
+        case .healthKit:   return "HealthKit"
+        case .mock:        return "デモ"
+        case .unavailable: return "未接続"
+        }
+    }
+
+    // MARK: - クイック調整セクション
+
+    private var regulationSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("呼吸で整える")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.45))
+                .padding(.horizontal, 20)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    regulationCard(
+                        mode: .fourSevenEight,
+                        label: "4-7-8",
+                        description: "深い弛緩",
+                        icon: "moon.stars"
+                    )
+                    regulationCard(
+                        mode: .box,
+                        label: "ボックス",
+                        description: "集中と安定",
+                        icon: "square"
+                    )
+                    regulationCard(
+                        mode: .twoOneFour,
+                        label: "2-1-4",
+                        description: "緊張を手放す",
+                        icon: "leaf"
+                    )
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    private func regulationCard(
+        mode: MindWaveBreathingMode,
+        label: String,
+        description: String,
+        icon: String
+    ) -> some View {
+        Button {
+            print("[UI][Home] regulation_selected mode=\(mode.displayName)")
+            breathingMode      = mode
+            showBreathingSheet = true
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color.cyan.opacity(0.80))
+                Spacer()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                    Text(description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.white.opacity(0.45))
+                    Text(mode.displayName)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.55))
+                }
+            }
+            .padding(14)
+            .frame(width: 140, height: 110)
+            .background(Color(red: 0.05, green: 0.07, blue: 0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.08), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(label)呼吸法で整える")
+        .accessibilityHint(description)
+    }
+
+    // MARK: - 主要CTA（ライブ計測）
+
+    private var primaryAction: some View {
+        Button {
+            viewModel.toggleLiveMonitoring()
+            print("[UI][Home] live_monitoring_toggle requested")
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: viewModel.isLiveMonitoring ? "stop.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 16))
+                Text(viewModel.isLiveMonitoring ? "計測を停止する" : "計測を開始する")
+                    .font(.system(size: 15, weight: .semibold))
+            }
+            .foregroundStyle(viewModel.isLiveMonitoring ? Color.orange : Color.black)
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(
+                viewModel.isLiveMonitoring
+                    ? Color(red: 0.10, green: 0.06, blue: 0.03)
+                    : Color.cyan
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(viewModel.isLiveMonitoring ? Color.orange.opacity(0.50) : .clear, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.22), value: viewModel.isLiveMonitoring)
+        .accessibilityLabel(viewModel.isLiveMonitoring ? "計測を停止する" : "ライブ計測を開始する")
+        .accessibilityHint(
+            viewModel.isLiveMonitoring
+                ? "Apple Watchからのデータ取得を停止します"
+                : "Apple Watchとリアルタイムで接続して計測します"
+        )
+    }
+}
+
+// MARK: - 呼吸ガイド遷移ラッパー
+
+private struct BreathingFromHomeWrapper: View {
+    let initialMode: MindWaveBreathingMode
+    @State private var syncDone = false
+
+    var body: some View {
+        if syncDone {
+            MindWaveBreathingGuideView(initialMode: initialMode)
+        } else {
+            MindWaveSyncTransitionView(subtitle: "呼吸ガイドを準備しています") {
+                syncDone = true
+            }
+        }
     }
 }
 

@@ -2,10 +2,13 @@
 //  HistoryView.swift
 //  MindWaveGraphic
 //
+//  履歴画面。実データのみ表示する。架空の値は使用しない。
+//  RecordDetailViewへの遷移を維持する。
+//
 
 import SwiftUI
 
-// MARK: - Dummy Session Data
+// MARK: - 未使用構造体（削除禁止）
 
 private struct SessionRecord: Identifiable {
     let id = UUID()
@@ -15,129 +18,109 @@ private struct SessionRecord: Identifiable {
     let score: Double
 }
 
-private let dummyHistory: [(day: String, records: [SessionRecord])] = [
-    (
-        day: "今日",
-        records: [
-            SessionRecord(title: "夜のセッション", time: "22:14", duration: "8分", score: 38)
-        ]
-    ),
-    (
-        day: "昨日",
-        records: [
-            SessionRecord(title: "午後のセッション", time: "15:30", duration: "5分", score: 62),
-            SessionRecord(title: "朝のセッション",   time: "08:12", duration: "7分", score: 45)
-        ]
-    ),
-    (
-        day: "5月18日（土）",
-        records: [
-            SessionRecord(title: "夜のセッション", time: "23:01", duration: "10分", score: 88)
-        ]
-    )
-]
-
-// MARK: - History View
+// MARK: - HistoryView
 
 struct HistoryView: View {
-    /// GuideFlowView から保存されたガイドセッション記録。ContentViewから EnvironmentObject で共有。
     @EnvironmentObject var historyStore: GuideHistoryStore
 
     var body: some View {
-        ZStack {
-            MindWaveTheme.backgroundGradient.ignoresSafeArea()
+        NavigationStack {
+            ZStack {
+                Color(red: 0.02, green: 0.02, blue: 0.06).ignoresSafeArea()
+                CyberGridShape(cellSize: 44)
+                    .stroke(Color.cyan.opacity(0.025), lineWidth: 0.5)
+                    .ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 28) {
-
-                    Text("履歴")
-                        .font(.system(size: 30, weight: .ultraLight))
-                        .foregroundStyle(MindWaveTheme.textPrimary)
-                        .tracking(2)
-                        .padding(.top, 12)
-
-                    // ── ガイドセッション記録（実際に保存されたデータ）──
-                    if historyStore.records.isEmpty {
-                        guideRecordsEmptyState
-                    } else {
-                        guideRecordsSection
-                    }
-
-                    // ── 参考用ダミーデータ（開発中プレースホルダー）──────
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("サンプル")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(MindWaveTheme.textTertiary)
-                            .tracking(1.2)
-                            .textCase(.uppercase)
-
-                        ForEach(dummyHistory, id: \.day) { section in
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(section.day)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(MindWaveTheme.textTertiary.opacity(0.6))
-                                    .tracking(1.0)
-                                ForEach(section.records) { record in
-                                    SessionCard(record: record)
-                                        .opacity(0.55)
-                                }
-                            }
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 20) {
+                        pageHeader
+                            .padding(.top, 16)
+                        if historyStore.records.isEmpty {
+                            emptyState
+                        } else {
+                            recordsList
                         }
-                        Text("※ 上記はUI確認用のサンプルデータです")
-                            .font(.system(size: 10, weight: .light))
-                            .foregroundStyle(MindWaveTheme.textTertiary.opacity(0.5))
+                        Spacer().frame(height: 96)
                     }
+                    .padding(.horizontal, 20)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 40)
+            }
+            .navigationBarHidden(true)
+            .onAppear { print("[UI][History] view_appeared") }
+        }
+    }
+
+    // MARK: - ページヘッダー
+
+    private var pageHeader: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("履歴")
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(Color.white)
+            HStack(spacing: 8) {
+                Text("SESSION LOG")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.60))
+                    .tracking(1.2)
+                if !historyStore.records.isEmpty {
+                    Text("·")
+                        .foregroundStyle(Color.white.opacity(0.25))
+                    Text("\(historyStore.records.count) 件")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                }
             }
         }
     }
 
-    // MARK: - Guide Records
+    // MARK: - 空状態
 
-    private var guideRecordsEmptyState: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "clock.badge.questionmark")
-                .font(.system(size: 36, weight: .ultraLight))
-                .foregroundStyle(MindWaveTheme.textTertiary)
-            Text("まだガイド記録はありません")
-                .font(.system(size: 15, weight: .light))
-                .foregroundStyle(MindWaveTheme.textSecondary)
-            Text("ガイドを実施して「履歴へ保存」を選ぶと、ここに表示されます")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(MindWaveTheme.textTertiary)
-                .multilineTextAlignment(.center)
+    private var emptyState: some View {
+        VStack(spacing: 20) {
+            Spacer().frame(height: 24)
+            Image(systemName: "chart.line.uptrend.xyaxis.circle")
+                .font(.system(size: 44, weight: .ultraLight))
+                .foregroundStyle(Color.white.opacity(0.20))
+            VStack(spacing: 8) {
+                Text("まだ記録がありません")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.50))
+                Text("「整える」タブから呼吸ガイドを実施し、\nセッション終了後に保存すると記録されます。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.white.opacity(0.30))
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+            }
+            Spacer().frame(height: 8)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
+        .padding(.top, 20)
     }
 
-    private var guideRecordsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("ガイド記録")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(MindWaveTheme.textTertiary)
-                .tracking(1.2)
-                .textCase(.uppercase)
+    // MARK: - 記録一覧
 
+    private var recordsList: some View {
+        VStack(spacing: 8) {
             ForEach(historyStore.records) { record in
-                GuideRecordCard(record: record)
+                NavigationLink(destination: RecordDetailView(record: record)) {
+                    SessionRecordCard(record: record)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(record.exercise.title)、\(record.scene.displayName)")
+                .accessibilityHint("タップして詳細を表示します")
             }
         }
     }
 }
 
-// MARK: - GuideRecordCard
+// MARK: - セッション記録カード
 
-/// GuideFlowView で保存されたガイドセッションの1件表示。
-/// nilの値を0で代用しない。Mock記録は明示する。
-private struct GuideRecordCard: View {
+private struct SessionRecordCard: View {
     let record: GuideSessionRecord
 
     private var dateString: String {
         let f = DateFormatter()
-        f.dateFormat = "M/d HH:mm"
+        f.dateFormat = "M/d  HH:mm"
         return f.string(from: record.startedAt)
     }
 
@@ -147,160 +130,117 @@ private struct GuideRecordCard: View {
         return s == 0 ? "\(m)分" : "\(m)分\(s)秒"
     }
 
-    private var scoreDelta: Double? {
-        guard let after = record.after else { return nil }
-        return after.score - record.before.score
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            // ヘッダー行
-            HStack {
-                HStack(spacing: 6) {
-                    Image(systemName: record.exercise.icon)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.cyan.opacity(0.7))
-                    Text(record.exercise.title)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(MindWaveTheme.textPrimary)
-                }
-                Spacer()
-                Text(dateString)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(MindWaveTheme.textTertiary)
-            }
-
-            // シーン + 時間 + Mock表示
-            HStack(spacing: 8) {
-                Text(record.scene.displayName)
-                    .font(.system(size: 11))
-                    .foregroundStyle(MindWaveTheme.textSecondary)
-                Text("·")
-                    .foregroundStyle(MindWaveTheme.textTertiary)
-                Text(durationLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(MindWaveTheme.textSecondary)
-                if record.before.isMockData {
-                    Text("Mock")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Color.orange.opacity(0.75))
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.orange.opacity(0.12)))
-                }
-            }
-
-            Divider().background(Color.white.opacity(0.07))
-
-            // スコア比較
-            HStack(spacing: 0) {
-                scoreColumn("前", score: record.before.score, hr: record.before.heartRate)
-                Spacer()
-                if let delta = scoreDelta {
-                    VStack(spacing: 2) {
-                        Text(String(format: "%+.1f", delta))
-                            .font(.system(size: 16, weight: .thin, design: .rounded))
-                            .foregroundStyle(delta < 0 ? Color.cyan.opacity(0.8) : delta > 0 ? Color.orange.opacity(0.75) : .white.opacity(0.4))
-                        Image(systemName: delta < 0 ? "arrow.down" : delta > 0 ? "arrow.up" : "minus")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
-                    }
-                    Spacer()
-                }
-                if let after = record.after {
-                    scoreColumn("後", score: after.score, hr: after.heartRate)
-                } else {
-                    Text("再測定なし")
-                        .font(.system(size: 11))
-                        .foregroundStyle(MindWaveTheme.textTertiary)
-                }
-            }
-
-            // HRV更新状態
-            HStack(spacing: 4) {
-                Image(systemName: record.hrvUpdated ? "checkmark.circle.fill" : "minus.circle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(record.hrvUpdated ? Color.cyan.opacity(0.6) : .white.opacity(0.20))
-                Text(record.hrvUpdated ? "HRV更新あり" : "HRVは今回更新されませんでした")
-                    .font(.system(size: 10, weight: .light))
-                    .foregroundStyle(.white.opacity(0.30))
-            }
-        }
-        .padding(14)
-        .darkCard()
-    }
-
-    private func scoreColumn(_ label: String, score: Double, hr: Double?) -> some View {
-        VStack(alignment: .center, spacing: 3) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(MindWaveTheme.textTertiary)
-            Text(String(format: "%.0f", score))
-                .font(.system(size: 28, weight: .thin, design: .rounded))
-                .foregroundStyle(MindWaveTheme.stressColor(score: score))
-            if let hr {
-                Text(String(format: "%.0f bpm", hr))
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.35))
-            } else {
-                Text("---")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.white.opacity(0.20))
-            }
-        }
-        .frame(width: 72)
-    }
-}
-
-// MARK: - Session Card
-
-private struct SessionCard: View {
-    let record: SessionRecord
-
-    private var color: Color   { MindWaveTheme.stressColor(score: record.score) }
-    private var label: String  { MindWaveTheme.stressLabel(score: record.score) }
-    private var amplitude: Double { 0.25 + record.score / 100.0 * 0.55 }
-
     var body: some View {
         HStack(spacing: 14) {
 
-            // ミニ波形サムネイル
-            MiniWave(amplitude: amplitude, color: color)
-                .frame(width: 58, height: 38)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            // 左: メタ情報
+            VStack(alignment: .leading, spacing: 5) {
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(record.title)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(MindWaveTheme.textPrimary)
                 HStack(spacing: 6) {
-                    Text(record.time)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(MindWaveTheme.textSecondary)
+                    Image(systemName: record.exercise.icon)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.cyan.opacity(0.75))
+                    Text(record.exercise.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                    if record.before.isMockData {
+                        Text("DEMO")
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Color.orange)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(Color.orange.opacity(0.12))
+                                    .overlay(Capsule().strokeBorder(Color.orange.opacity(0.30), lineWidth: 1))
+                            )
+                    }
+                }
+
+                Text(dateString)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.35))
+
+                HStack(spacing: 5) {
+                    Image(systemName: record.scene.icon)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color.white.opacity(0.28))
+                    Text(record.scene.displayName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.white.opacity(0.42))
                     Text("·")
-                        .foregroundStyle(MindWaveTheme.textTertiary)
-                    Text(record.duration)
-                        .font(.system(size: 12))
-                        .foregroundStyle(MindWaveTheme.textSecondary)
+                        .foregroundStyle(Color.white.opacity(0.20))
+                    Text(durationLabel)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.35))
                 }
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(String(format: "%.0f", record.score))
-                    .font(.system(size: 22, weight: .thin, design: .rounded))
-                    .foregroundStyle(color)
-                Text(label)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(color.opacity(0.75))
+            // 右: 前後変化
+            changeIndicator
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10))
+                .foregroundStyle(Color.white.opacity(0.22))
+        }
+        .padding(16)
+        .frame(minHeight: 72)
+        .background(Color(red: 0.05, green: 0.07, blue: 0.11))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private var changeIndicator: some View {
+        if let beforeHR = record.before.heartRate,
+           let afterHR  = record.after?.heartRate {
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(spacing: 3) {
+                    Text(String(format: "%.0f", beforeHR))
+                        .foregroundStyle(Color.white.opacity(0.50))
+                    Image(systemName: afterHR < beforeHR ? "arrow.down" : "arrow.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(afterHR < beforeHR ? Color(red: 0.20, green: 0.85, blue: 0.60) : Color.white.opacity(0.35))
+                    Text(String(format: "%.0f", afterHR))
+                        .foregroundStyle(Color.white)
+                }
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                Text("BPM")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.30))
+            }
+        } else if let after = record.after {
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(spacing: 3) {
+                    Text(String(format: "%.0f", record.before.score))
+                        .foregroundStyle(Color.white.opacity(0.50))
+                    Image(systemName: after.score < record.before.score ? "arrow.down" : "arrow.right")
+                        .font(.system(size: 9))
+                        .foregroundStyle(after.score < record.before.score ? Color(red: 0.20, green: 0.85, blue: 0.60) : Color.white.opacity(0.35))
+                    Text(String(format: "%.0f", after.score))
+                        .foregroundStyle(Color.white)
+                }
+                .font(.system(size: 14, weight: .medium, design: .rounded))
+                Text("SCORE")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.30))
+            }
+        } else {
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("—")
+                    .font(.system(size: 20, weight: .thin, design: .rounded))
+                    .foregroundStyle(Color.white.opacity(0.22))
+                Text("未完了")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.22))
             }
         }
-        .padding(14)
-        .darkCard()
     }
 }
 
-// MARK: - Mini Waveform（静止ダミー波形）
+// MARK: - MiniWave（未使用・削除禁止）
 
 private struct MiniWave: View {
     let amplitude: Double
@@ -308,25 +248,15 @@ private struct MiniWave: View {
 
     var body: some View {
         Canvas { ctx, size in
-            let w = size.width
-            let h = size.height
-            let mid = h * 0.5
-
+            let w = size.width, h = size.height, mid = h * 0.5
             var line = Path()
             var first = true
             for x in stride(from: 0.0, through: w, by: 1.5) {
                 let y = mid + sin(x / w * .pi * 4.5 + 0.4) * amplitude * h * 0.40
                 let pt = CGPoint(x: x, y: y)
-                if first { line.move(to: pt); first = false }
-                else { line.addLine(to: pt) }
+                if first { line.move(to: pt); first = false } else { line.addLine(to: pt) }
             }
             ctx.stroke(line, with: .color(color.opacity(0.75)), lineWidth: 1.5)
-
-            var fill = line
-            fill.addLine(to: CGPoint(x: w, y: h))
-            fill.addLine(to: CGPoint(x: 0, y: h))
-            fill.closeSubpath()
-            ctx.fill(fill, with: .color(color.opacity(0.12)))
         }
         .background(color.opacity(0.06))
     }

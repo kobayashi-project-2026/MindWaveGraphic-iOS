@@ -35,6 +35,20 @@ struct GuideFlowView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    // MARK: - カスタム init
+
+    /// initialScene を渡すと sceneSelection をスキップして exerciseSelection から開始する。
+    /// GuideView の場面カードから直接フローを開始するときに使用する。
+    init(selectedTab: Binding<Int>, initialScene: MeasurementScene? = nil) {
+        _selectedTab = selectedTab
+        if let scene = initialScene {
+            // 場面が事前確定済みのため exerciseSelection から開始
+            _step          = State(initialValue: .exerciseSelection)
+            _selectedScene = State(initialValue: scene)
+        }
+        // initialScene が nil のときはデフォルト値（sceneSelection / nil）を使用
+    }
+
     // MARK: - Flow State
 
     @State private var step: RegulationFlowStep = .sceneSelection
@@ -45,6 +59,8 @@ struct GuideFlowView: View {
     @State private var afterSnapshot: GuideSnapshot? = nil
     @State private var showAbandonAlert = false
     @State private var hrvUpdatedDuringSession = false
+    /// フィードバック確認・保存シートの表示フラグ
+    @State private var showFeedbackView = false
 
     // Session step (inline session state)
     @State private var sessionElapsed: Int = 0
@@ -100,9 +116,33 @@ struct GuideFlowView: View {
         .onReceive(flowTimer) { _ in
             tickTimer()
         }
+        // フィードバック確認・保存シート（結果画面の「レポートを確認して保存」から開く）
+        // 保存処理は saveWithMemo() に一本化し、このシートでは二重保存しない
+        .sheet(isPresented: $showFeedbackView) {
+            if let before = beforeSnapshot,
+               let scene  = selectedScene,
+               let exercise = selectedExercise {
+                FeedbackRecordView(
+                    before:          before,
+                    after:           afterSnapshot,
+                    scene:           scene,
+                    exercise:        exercise,
+                    durationSeconds: sessionDurationSeconds,
+                    hrvUpdated:      hrvUpdatedDuringSession,
+                    onSave: { memo in
+                        // 感情メモを受け取り1回だけ保存して履歴タブへ移動
+                        saveWithMemo(memo)
+                    },
+                    onCancel: {
+                        showFeedbackView = false
+                    }
+                )
+            }
+        }
         .alert("ガイドを中断しますか？", isPresented: $showAbandonAlert) {
             Button("中断する", role: .destructive) {
                 MindWaveDebugLogger.log(.flow, "flow cancelled step=\(step)")
+                print("[Regulation] session cancelled")
                 dismiss()
             }
             Button("続ける", role: .cancel) {}
@@ -190,6 +230,7 @@ struct GuideFlowView: View {
                     sessionIsRunning  = false
                     sessionIsFinished = true
                     MindWaveDebugLogger.log(.flow, "session completed")
+                    print("[Regulation] session completed")
                     // セッション終了後1.5秒で再測定へ自動進行
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         guard self.sessionIsFinished else { return }
@@ -392,6 +433,7 @@ struct GuideFlowView: View {
         sessionAnimate     = false
         step = .session
         MindWaveDebugLogger.log(.flow, "session started duration=\(sessionDurationSeconds) exercise=\(selectedExercise?.rawValue ?? "?")")
+        print("[Regulation] session started")
     }
 
     // MARK: - ▼ STEP 3: Session (インラインセッション、GuideRelaxationVisualsを使用)
@@ -608,18 +650,18 @@ struct GuideFlowView: View {
 
                 // アクションボタン群
                 VStack(spacing: 10) {
-                    // 履歴へ保存
+                    // レポートを確認して保存（FeedbackRecordViewを開く）
                     Button {
-                        saveAndNavigateToHistory()
+                        showFeedbackView = true
                     } label: {
-                        Text("履歴へ保存")
+                        Text("レポートを確認して保存")
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(.black)
                             .frame(maxWidth: .infinity).padding(.vertical, 14)
                             .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan.opacity(0.85)))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("このセッションを履歴に保存する")
+                    .accessibilityLabel("フィードバック画面を開いて記録を保存する")
 
                     // 保存せずHomeへ
                     Button {
@@ -655,24 +697,31 @@ struct GuideFlowView: View {
         }
     }
 
-    private func saveAndNavigateToHistory() {
-        guard let before = beforeSnapshot,
-              let scene = selectedScene,
+    /// フィードバック画面から感情メモを受け取り、記録を1回だけ保存して履歴タブへ移動する。
+    /// 保存はここだけで実行する（二重保存防止）。
+    private func saveWithMemo(_ memo: String) {
+        guard let before   = beforeSnapshot,
+              let scene    = selectedScene,
               let exercise = selectedExercise else { return }
 
         let record = GuideSessionRecord(
-            id:                  UUID(),
-            startedAt:           before.timestamp,
-            scene:               scene,
-            exercise:            exercise,
-            durationSeconds:     sessionDurationSeconds,
-            before:              before,
-            after:               afterSnapshot,
-            hrvUpdated:          hrvUpdatedDuringSession
+            id:              UUID(),
+            startedAt:       before.timestamp,
+            scene:           scene,
+            exercise:        exercise,
+            durationSeconds: sessionDurationSeconds,
+            before:          before,
+            after:           afterSnapshot,
+            hrvUpdated:      hrvUpdatedDuringSession,
+            // 空文字はnilとして保存。"未記入"等の固定文字列を代入しない。
+            emotionMemo:     memo.isEmpty ? nil : memo
         )
         historyStore.add(record)
+        print("[Record] session record saved: \(record.id.uuidString.prefix(8))")
+
+        // シートを閉じてからfullScreenCoverを閉じ、履歴タブへ移動
+        showFeedbackView = false
         dismiss()
-        // dismiss完了後にタブ切替（fullScreenCoverのdismiss後に反映される）
         Task { @MainActor in
             selectedTab = 2
         }
