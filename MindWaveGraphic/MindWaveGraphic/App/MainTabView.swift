@@ -1,45 +1,36 @@
 // MainTabView.swift
 // App
-//
-// 参考写真に合わせたカスタム浮遊タブバーへ全面再設計。
-// システムTabBarを使用せず、ZStack+カスタムピルバーで実装。
-// ViewModelとGuideHistoryStoreは変更なし（1回だけ生成・EnvironmentObject共有）。
-//
-// タブ構成：
-//   tag 0: リアルタイム計測  (HomeView)
-//   tag 1: 作戦・場面選択    (GuideView)
-//   tag 2: ログ履歴          (HistoryView)
-//
-// 初期表示は「作戦・場面選択（tag 1）」。
-//
 
 import SwiftUI
 
 struct MainTabView: View {
 
-    // MARK: - 状態所有（各1インスタンス）
+    // MARK: - 状態
 
-    @StateObject private var viewModel     = MindWaveViewModel()
-    @StateObject private var historyStore  = GuideHistoryStore()
-    @State       private var selectedTab   = 1
+    @StateObject private var viewModel    = MindWaveViewModel()
+    @StateObject private var historyStore = GuideHistoryStore()
+    @State       private var selectedTab  = 0   // 初期タブ: ホーム
 
     // MARK: - Body
 
     var body: some View {
         ZStack(alignment: .bottom) {
 
-            // コンテンツ（TabView・システムタブバーなし）
+            // コンテンツ（システムTabBarは .toolbar(.hidden) で非表示）
             TabView(selection: $selectedTab) {
                 HomeView(selectedTab: $selectedTab)
                     .tag(0)
+                    .toolbar(.hidden, for: .tabBar)
                 GuideView(selectedTab: $selectedTab)
                     .tag(1)
+                    .toolbar(.hidden, for: .tabBar)
                 HistoryView()
                     .tag(2)
+                    .toolbar(.hidden, for: .tabBar)
             }
-            // カスタムタブバー分の安全エリアをコンテンツに追加
+            // カスタムタブバー分の余白（allowsHitTesting(false)でタッチ遮断を防ぐ）
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 80)
+                Color.clear.frame(height: 80).allowsHitTesting(false)
             }
 
             // カスタム浮遊タブバー
@@ -51,22 +42,17 @@ struct MainTabView: View {
         .environmentObject(historyStore)
         .preferredColorScheme(.dark)
         .onChange(of: selectedTab) { _, newValue in
-            switch newValue {
-            case 0:  print("[Navigation] main tab changed: measurement")
-            case 1:  print("[Navigation] main tab changed: sceneSelection")
-            case 2:  print("[Navigation] main tab changed: history")
-            default: print("[Navigation] main tab changed: unknown(\(newValue))")
-            }
+            print("[UI][Tab] selected index=\(newValue)")
         }
     }
 
-    // MARK: - カスタム浮遊タブバー
+    // MARK: - カスタムタブバー
 
     private var customTabBar: some View {
         let items: [(label: String, icon: String, activeIcon: String)] = [
-            ("リアルタイム計測", "bolt",     "bolt.fill"),
-            ("作戦・場面選択",   "cpu",      "cpu"),
-            ("ログ履歴",         "terminal", "terminal.fill"),
+            ("ホーム",   "waveform.path.ecg",  "waveform.path.ecg"),
+            ("整える",   "wind",               "wind"),
+            ("履歴",     "clock",              "clock.fill"),
         ]
 
         return HStack(spacing: 0) {
@@ -75,46 +61,32 @@ struct MainTabView: View {
                 Button {
                     selectedTab = idx
                 } label: {
-                    HStack(spacing: 5) {
+                    VStack(spacing: 3) {
                         Image(systemName: isSelected ? items[idx].activeIcon : items[idx].icon)
-                            .font(.system(size: 14, weight: isSelected ? .semibold : .regular))
+                            .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
                         Text(items[idx].label)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(.system(size: 9, weight: .medium))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.75)
                     }
-                    .foregroundStyle(isSelected ? MindWaveCyberTheme.cyan : .white.opacity(0.50))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 9)
-                    .background(
-                        Capsule()
-                            .fill(MindWaveCyberTheme.cyan.opacity(isSelected ? 0.16 : 0))
-                            .overlay(
-                                Capsule()
-                                    .strokeBorder(
-                                        MindWaveCyberTheme.cyan.opacity(isSelected ? 0.30 : 0),
-                                        lineWidth: 1
-                                    )
-                            )
-                    )
-                    .animation(.easeInOut(duration: 0.18), value: selectedTab)
+                    .foregroundStyle(isSelected ? Color.cyan : Color.white.opacity(0.45))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .frame(maxWidth: .infinity)
                 .accessibilityLabel(items[idx].label)
                 .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .frame(height: 60)
         .background(
-            RoundedRectangle(cornerRadius: 28)
+            RoundedRectangle(cornerRadius: 30)
                 .fill(Color(red: 0.04, green: 0.05, blue: 0.12).opacity(0.96))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 28)
-                        .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 30)
+                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.45), radius: 16, x: 0, y: 8)
+                .shadow(color: .black.opacity(0.50), radius: 20, x: 0, y: 8)
         )
     }
 }
