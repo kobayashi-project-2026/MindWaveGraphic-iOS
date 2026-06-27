@@ -92,6 +92,7 @@ struct DebugDiagnosticsView: View {
                     // ── HRV Observer ──────────────────────────────────
                     debugBlock {
                         debugRow("HRV監視",       viewModel.isHRVObserverActive ? "稼働中 ●" : "停止中")
+                        debugRow("HRV監視方式",   "HKAnchoredObjectQuery")
                         debugRow("HRV実測取得",   viewModel.didFetchHRV ? "済 ✓" : "未取得")
                         debugRow("HRV取得元",     viewModel.lastHRVFetchSource)
                         debugRow("HRV新規受信",   "\(viewModel.hrvObserverUpdateCount) 回")

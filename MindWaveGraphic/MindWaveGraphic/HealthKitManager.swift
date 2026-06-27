@@ -72,7 +72,7 @@ final class HealthKitManager {
     private let heartRateType = HKQuantityType(.heartRate)
     private let hrvType       = HKQuantityType(.heartRateVariabilitySDNN)
 
-    private var hrvObserverQuery: HKObserverQuery?
+    private var hrvAnchoredQuery: HKAnchoredObjectQuery?
 
     // MARK: - Availability
 
@@ -357,43 +357,95 @@ final class HealthKitManager {
         }
     }
 
-    /// HealthKit HRVの新規サンプル追加を監視する。
-    /// 新しいサンプルが保存されるたびに handler が呼ばれる。
+    /// HRV新規サンプルを連続監視する（HKAnchoredObjectQuery）。
+    /// resultsHandler: 起動時に既存サンプルを最新1件処理。
+    /// updateHandler: 以降の新着サンプルが届くたびに呼ばれる。
     /// handler はバックグラウンドスレッドから呼ばれるため、呼び出し側で MainActor dispatch が必要。
     func startHRVObserver(handler: @escaping (HealthMetricFetchResult) -> Void) {
         guard Self.isAvailable else { return }
 
-        // 既存オブザーバーを停止してから再登録
-        if let existing = hrvObserverQuery {
+        if let existing = hrvAnchoredQuery {
             store.stop(existing)
+            hrvAnchoredQuery = nil
         }
 
-        let query = HKObserverQuery(sampleType: hrvType, predicate: nil) { [weak self] _, completionHandler, error in
-            guard let self else { completionHandler(); return }
+        let unit = HKUnit.secondUnit(with: .milli)
+        MindWaveDebugLogger.log(.healthKit, "[WatchHRV] monitor starting type=HKAnchoredObjectQuery")
+
+        let query = HKAnchoredObjectQuery(
+            type: hrvType,
+            predicate: nil,
+            anchor: nil,
+            limit: HKObjectQueryNoLimit
+        ) { [weak self] _, samples, _, _, error in
+            guard let self else { return }
             if let error = error {
-                MindWaveDebugLogger.log(.error, "HRV observer error: \(error.localizedDescription)")
-                completionHandler()
+                MindWaveDebugLogger.log(.error, "[WatchHRV] initial query error: \(error.localizedDescription)")
                 return
             }
-            Task {
-                let result = await self.fetchLatestHRVSample()
+            guard let qs = samples as? [HKQuantitySample], !qs.isEmpty else {
+                MindWaveDebugLogger.log(.healthKit, "[WatchHRV] initial query no samples")
+                return
+            }
+            MindWaveDebugLogger.log(.healthKit, "[WatchHRV] initial query count=\(qs.count)")
+            if let latest = qs.sorted(by: { $0.endDate > $1.endDate }).first {
+                let result = self.makeHRVResult(from: latest, unit: unit)
+                MindWaveDebugLogger.log(.healthKit,
+                    "[WatchHRV] initial sample value=\(String(format: "%.1f", result.value ?? 0))ms " +
+                    "id=\(String(latest.uuid.uuidString.prefix(8)))")
                 handler(result)
-                // HealthKitへ処理完了を通知（background delivery使用時に必要）
-                completionHandler()
             }
         }
-        hrvObserverQuery = query
+
+        query.updateHandler = { [weak self] _, samples, _, _, error in
+            guard let self else { return }
+            if let error = error {
+                MindWaveDebugLogger.log(.error, "[WatchHRV] update error: \(error.localizedDescription)")
+                return
+            }
+            guard let qs = samples as? [HKQuantitySample], !qs.isEmpty else {
+                MindWaveDebugLogger.log(.healthKit, "[WatchHRV] update no new samples")
+                return
+            }
+            MindWaveDebugLogger.log(.healthKit, "[WatchHRV] update count=\(qs.count)")
+            for sample in qs.sorted(by: { $0.endDate < $1.endDate }) {
+                let result = self.makeHRVResult(from: sample, unit: unit)
+                MindWaveDebugLogger.log(.healthKit,
+                    "[WatchHRV] new sample accepted value=\(String(format: "%.1f", result.value ?? 0))ms " +
+                    "id=\(String(sample.uuid.uuidString.prefix(8)))")
+                handler(result)
+            }
+        }
+
+        hrvAnchoredQuery = query
         store.execute(query)
-        MindWaveDebugLogger.log(.healthKit, "HRV observer started")
+        MindWaveDebugLogger.log(.healthKit, "[WatchHRV] monitor started")
     }
 
-    /// HRV observerを停止する。
+    /// HRV監視を停止する。
     func stopHRVObserver() {
-        if let query = hrvObserverQuery {
+        if let query = hrvAnchoredQuery {
             store.stop(query)
-            hrvObserverQuery = nil
-            MindWaveDebugLogger.log(.healthKit, "HRV observer stopped")
+            hrvAnchoredQuery = nil
+            MindWaveDebugLogger.log(.healthKit, "[WatchHRV] monitor stopped")
         }
+    }
+
+    // MARK: - Private: HKQuantitySample → HealthMetricFetchResult 変換
+
+    private func makeHRVResult(from sample: HKQuantitySample, unit: HKUnit) -> HealthMetricFetchResult {
+        let value = sample.quantity.doubleValue(for: unit)
+        let src   = sample.sourceRevision.source
+        return HealthMetricFetchResult(
+            value:                  value,
+            source:                 "AnchoredObserver",
+            message:                "HRV anchored: \(String(format: "%.1f", value)) ms",
+            sampleDate:             sample.startDate,
+            sampleIdentifier:       sample.uuid.uuidString,
+            sampleEndDate:          sample.endDate,
+            sourceName:             src.name,
+            sourceBundleIdentifier: src.bundleIdentifier
+        )
     }
 
     // MARK: - Private: ログ用日時フォーマット
