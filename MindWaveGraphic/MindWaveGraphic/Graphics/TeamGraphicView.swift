@@ -33,17 +33,13 @@ import SwiftUI
 //   - Graphicsフォルダ内への追加ファイル
 //   - GraphicPlugin.swift の登録1行
 /// GraphicPlugin から呼ばれる最終グラフィックView。
-/// StarfieldGraphicView へ GraphicInput を渡す。
-/// showsParameterOverlay は @AppStorage で設定画面と同期する。
+/// SpaceshipStateGraphicView へ GraphicInput を渡す。
 /// score / confidence / state は GraphicInput から取得し、ViewModel には依存しない。
 struct TeamGraphicView: View {
     let input: GraphicInput
-    /// 数値オーバーレイ表示フラグ。SettingsView の「数値表示」トグルと連動する。
-    /// false にすると StarfieldGraphicView 内の score / confidence / state 数値が消える。
-    @AppStorage("showsParameterOverlay") private var showsParameterOverlay = true
 
     var body: some View {
-        StarfieldGraphicView(input: input, showsParameterOverlay: showsParameterOverlay)
+        SpaceshipStateGraphicView(input: input)
     }
 }
 
