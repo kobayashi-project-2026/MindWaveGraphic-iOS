@@ -9,14 +9,12 @@ struct MainTabView: View {
 
     @StateObject private var viewModel    = MindWaveViewModel()
     @StateObject private var historyStore = GuideHistoryStore()
-    @State       private var selectedTab  = 0   // 初期タブ: ホーム
+    @State       private var selectedTab  = 0
 
     // MARK: - Body
 
     var body: some View {
         ZStack(alignment: .bottom) {
-
-            // コンテンツ（システムTabBarは .toolbar(.hidden) で非表示）
             TabView(selection: $selectedTab) {
                 HomeView(selectedTab: $selectedTab)
                     .tag(0)
@@ -28,15 +26,13 @@ struct MainTabView: View {
                     .tag(2)
                     .toolbar(.hidden, for: .tabBar)
             }
-            // カスタムタブバー分の余白（allowsHitTesting(false)でタッチ遮断を防ぐ）
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 80).allowsHitTesting(false)
+                Color.clear.frame(height: 76).allowsHitTesting(false)
             }
 
-            // カスタム浮遊タブバー
-            customTabBar
-                .padding(.horizontal, 20)
-                .padding(.bottom, 20)
+            missionBar
+                .padding(.horizontal, 16)
+                .padding(.bottom, 18)
         }
         .environmentObject(viewModel)
         .environmentObject(historyStore)
@@ -46,47 +42,64 @@ struct MainTabView: View {
         }
     }
 
-    // MARK: - カスタムタブバー
+    // MARK: - ミッションバー（洗練されたタブバー）
 
-    private var customTabBar: some View {
-        let items: [(label: String, icon: String, activeIcon: String)] = [
-            ("ホーム",   "waveform.path.ecg",  "waveform.path.ecg"),
-            ("整える",   "wind",               "wind"),
-            ("履歴",     "clock",              "clock.fill"),
-        ]
+    private let items: [(label: String, icon: String, activeIcon: String)] = [
+        ("ホーム",   "waveform.path.ecg",  "waveform.path.ecg"),
+        ("整える",   "wind",               "wind"),
+        ("履歴",     "clock",              "clock.fill"),
+    ]
 
-        return HStack(spacing: 0) {
+    private var missionBar: some View {
+        HStack(spacing: 0) {
             ForEach(items.indices, id: \.self) { idx in
-                let isSelected = selectedTab == idx
+                let active = selectedTab == idx
                 Button {
                     selectedTab = idx
                 } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: isSelected ? items[idx].activeIcon : items[idx].icon)
-                            .font(.system(size: 16, weight: isSelected ? .semibold : .regular))
+                    VStack(spacing: 4) {
+                        Image(systemName: active ? items[idx].activeIcon : items[idx].icon)
+                            .font(.system(size: 17, weight: active ? .semibold : .regular))
+                            .foregroundStyle(active ? Color.cyan : Color.white.opacity(0.38))
+
+                        // 選択インジケーター
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(active ? Color.cyan : Color.clear)
+                            .frame(width: 18, height: 1.5)
+                            .shadow(color: active ? Color.cyan.opacity(0.7) : .clear, radius: 3)
+
                         Text(items[idx].label)
-                            .font(.system(size: 9, weight: .medium))
-                            .lineLimit(1)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(active ? Color.cyan.opacity(0.80) : Color.white.opacity(0.28))
                     }
-                    .foregroundStyle(isSelected ? Color.cyan : Color.white.opacity(0.45))
                     .frame(maxWidth: .infinity)
-                    .frame(height: 52)
+                    .frame(height: 56)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .animation(.easeInOut(duration: 0.22), value: active)
                 .accessibilityLabel(items[idx].label)
-                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
             }
         }
         .frame(height: 60)
         .background(
-            RoundedRectangle(cornerRadius: 30)
-                .fill(Color(red: 0.04, green: 0.05, blue: 0.12).opacity(0.96))
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(red: 0.04, green: 0.05, blue: 0.12).opacity(0.97))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 30)
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
                 )
-                .shadow(color: .black.opacity(0.50), radius: 20, x: 0, y: 8)
+                .overlay(
+                    // 上部アクセントライン
+                    VStack {
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(Color.cyan.opacity(0.20))
+                            .frame(height: 1)
+                        Spacer()
+                    }
+                )
+                .shadow(color: .black.opacity(0.55), radius: 18, x: 0, y: 8)
         )
     }
 }
