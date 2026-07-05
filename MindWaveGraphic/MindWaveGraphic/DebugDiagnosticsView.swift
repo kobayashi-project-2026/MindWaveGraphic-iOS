@@ -19,8 +19,8 @@ struct DebugDiagnosticsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView(showsIndicators: false) {
-                VStack(spacing: 6) {
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(spacing: 6) {
 
                     // ── ビルド識別 ─────────────────────────────────────
                     debugBlock {
@@ -89,23 +89,62 @@ struct DebugDiagnosticsView: View {
                         debugRow("HRVサンプル更新",  viewModel.isNewHRVSample ? "新規 ✓" : "同じ")
                     }
 
-                    // ── HRV Observer ──────────────────────────────────
+                    // ── 【表示状態】 ──────────────────────────────────
                     debugBlock {
                         debugRow("HRV監視",       viewModel.isHRVObserverActive ? "稼働中 ●" : "停止中")
-                        debugRow("HRV監視方式",   "HKAnchoredObjectQuery")
-                        debugRow("HRV実測取得",   viewModel.didFetchHRV ? "済 ✓" : "未取得")
-                        debugRow("HRV取得元",     viewModel.lastHRVFetchSource)
-                        debugRow("HRV新規受理",   "\(viewModel.hrvManagerAcceptedCount) 件")
-                        debugRow("HRV重複除外",   "\(viewModel.hrvManagerDuplicateCount) 件")
-                        debugRow("HRV古値除外",   "\(viewModel.hrvManagerStaleCount) 件")
-                        debugRow("HRV新規受信",   "\(viewModel.hrvObserverUpdateCount) 回")
-                        debugRow("HRV最終通知",   formatTime(viewModel.lastHRVObserverDate))
-                        debugRow("HRV経過",       hrvAgeString(viewModel.latestHRVSampleDate))
-                        debugRow("HRV終了時刻",   formatTime(viewModel.latestHRVEndDate))
-                        debugRow("HRV Source",    viewModel.latestHRVSourceName ?? "---")
-                        debugRow("HRV Bundle",    shortBundleID(viewModel.latestHRVBundleID))
-                        debugRow("HRV初回Query",  viewModel.hrvInitialQueryStatus)
+                        debugRow("HRV取得済み",   viewModel.didFetchHRV ? "済 ✓" : "未取得")
+                        let kind: String = {
+                            switch viewModel.lastHRVUpdateSource {
+                            case .aggregateFallback: return "集計フォールバック"
+                            case .none:              return "未取得"
+                            default:                 return "実サンプル"
+                            }
+                        }()
+                        debugRow("表示値種別",     kind)
+                        debugRow("HRV sample終了時刻", formatTime(viewModel.latestHRVEndDate))
+                        debugRow("HRV表示更新時刻", formatTime(viewModel.lastHRVDisplayUpdateDate))
+                        debugRow("HRV最終更新経路", viewModel.lastHRVUpdateSource.rawValue)
+                        debugRow("実サンプル表示更新数", "\(viewModel.hrvDisplayUpdateCount) 回")
+                        debugRow("HRV経過",         hrvAgeString(viewModel.latestHRVSampleDate))
                         debugRow("Graphic更新契機", viewModel.lastGraphicUpdateTrigger)
+                        debugRow("HRV Query状態",   viewModel.hrvInitialQueryStatus)
+                    }
+
+                    // ── 【通常取得】 ──────────────────────────────────
+                    debugBlock {
+                        debugRow("初回実サンプル採用数",   "\(viewModel.hrvInitialFetchAcceptedCount) 回")
+                        debugRow("定期実サンプル採用数",   "\(viewModel.hrvPeriodicFetchAcceptedCount) 回")
+                        debugRow("集計フォールバック表示数", "\(viewModel.fallbackAggregateHRVDisplayCount) 回")
+                    }
+
+                    // ── 【Anchored callback】 ─────────────────────────
+                    // callback回数: handlerが呼ばれた回数（0件・エラー含む）
+                    // HKM採用数: HKM内acceptSampleを通過したサンプル数
+                    // 表示採用数: VMのupdateHRVStateで画面状態を更新した件数
+                    debugBlock {
+                        debugRow("Initial callback回数", "\(viewModel.hrvAnchoredInitialCallbackCount) 回")
+                        debugRow("Update callback回数",  "\(viewModel.hrvAnchoredUpdateCallbackCount) 回")
+                        debugRow("Initial最終callback", formatTime(viewModel.lastHRVAnchoredInitialCallbackDate))
+                        debugRow("Update最終callback",  formatTime(viewModel.lastHRVAnchoredUpdateCallbackDate))
+                        debugRow("直近raw sample数",   "\(viewModel.lastHRVAnchoredRawSampleCount) 件")
+                        debugRow("直近HKM採用数",      "\(viewModel.lastHRVAnchoredHKMAcceptedCount) 件")
+                        debugRow("現在のQueryエラー",  viewModel.lastHRVQueryError ?? "なし")
+                    }
+
+                    // ── 【Anchored表示採用】 ──────────────────────────
+                    debugBlock {
+                        debugRow("Anchored初回・表示採用数", "\(viewModel.hrvAnchoredInitialAcceptedCount) 件")
+                        debugRow("Anchored更新・表示採用数", "\(viewModel.hrvAnchoredUpdateAcceptedCount) 件")
+                    }
+
+                    // ── 【除外】 ──────────────────────────────────────
+                    // HKM: HealthKitManager内acceptSampleが除外（Anchored経路のみ）
+                    // VM:  ViewModel内updateHRVStateが除外（全経路）
+                    debugBlock {
+                        debugRow("HKM重複除外数",     "\(viewModel.hrvHKMDuplicateCount) 件")
+                        debugRow("HKM古値除外数",     "\(viewModel.hrvHKMStaleCount) 件")
+                        debugRow("VM重複除外数",       "\(viewModel.hrvVMDuplicateCount) 件")
+                        debugRow("VM古値・同時刻除外数", "\(viewModel.hrvVMStaleCount) 件")
                     }
 
                     // ── HRV 手動診断（DEBUGのみ） ──────────────────────
@@ -210,8 +249,10 @@ struct DebugDiagnosticsView: View {
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.top, 12)
+                .padding(.bottom, 48)
             }
             .background(MindWaveTheme.background.ignoresSafeArea())
             .navigationTitle("診断")
