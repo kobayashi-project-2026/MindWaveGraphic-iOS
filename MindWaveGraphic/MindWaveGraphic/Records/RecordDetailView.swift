@@ -35,11 +35,6 @@ struct RecordDetailView: View {
         return String(format: "%.0f bpm", v)
     }
 
-    private func hrvText(_ value: Double?) -> String {
-        guard let v = value else { return "未取得" }
-        return String(format: "%.0f ms", v)
-    }
-
     private func scoreText(_ value: Double) -> String {
         String(format: "%.0f", value)
     }
@@ -119,24 +114,10 @@ struct RecordDetailView: View {
                     // ── 心拍数・HRV ───────────────────────────────────
                     MindWaveCyberPanel(title: "BIOMETRICS", accentColor: MindWaveCyberTheme.emerald) {
                         VStack(spacing: 8) {
-                            cyberRow("前 心拍数",     hrText(record.before.heartRate))
+                            cyberRow("前 心拍数", hrText(record.before.heartRate))
                             Divider().background(MindWaveCyberTheme.borderColor)
-                            cyberRow("後 心拍数",     hrText(record.after?.heartRate))
-                            Divider().background(MindWaveCyberTheme.borderColor)
-                            cyberRow("前 HRV (SDNN)", hrvText(record.before.hrv))
-                            Divider().background(MindWaveCyberTheme.borderColor)
-                            cyberRow("後 HRV (SDNN)", hrvText(record.after?.hrv))
+                            cyberRow("後 心拍数", hrText(record.after?.heartRate))
                         }
-                        HStack(spacing: 5) {
-                            Image(systemName: record.hrvUpdated ? "checkmark.circle.fill" : "minus.circle")
-                                .font(.system(size: 10))
-                                .foregroundStyle(record.hrvUpdated ? MindWaveCyberTheme.cyan.opacity(0.8) : MindWaveCyberTheme.textTertiary)
-                            Text(record.hrvUpdated ? "HRVが更新されました" : "HRVは今回更新されませんでした")
-                                .font(.system(size: 10, weight: .light))
-                                .foregroundStyle(MindWaveCyberTheme.textTertiary)
-                            Spacer()
-                        }
-                        .padding(.top, 8)
                     }
 
                     // ── 感情メモ ──────────────────────────────────────
