@@ -22,8 +22,7 @@ struct GuideView: View {
     // MARK: - Body
 
     var body: some View {
-        ZStack {
-            background
+        VStack(spacing: 0) {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 20) {
                     selectionHint
@@ -41,10 +40,10 @@ struct GuideView: View {
                     .padding(.bottom, 12)
                     .background(Color(red: 0.02, green: 0.02, blue: 0.06).opacity(0.98))
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                ctaSection
-            }
+            ctaSection
+            Spacer().frame(height: MainTabView.missionBarReservedHeight)
         }
+        .background(background)
         .onAppear { print("[UI][Guide] view_appeared") }
         .fullScreenCover(isPresented: $showFlowView) {
             GuideFlowView(selectedTab: $selectedTab, initialScene: selectedScene)
