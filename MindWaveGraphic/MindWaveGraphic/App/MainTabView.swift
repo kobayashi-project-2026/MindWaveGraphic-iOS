@@ -5,6 +5,12 @@ import SwiftUI
 
 struct MainTabView: View {
 
+    // MARK: - レイアウト定数
+    static let missionBarHeight: CGFloat       = 60
+    static let missionBarBottomPad: CGFloat    = 18
+    static let missionBarGap: CGFloat          = 14
+    static let missionBarReservedHeight: CGFloat = 92  // height + bottomPad + gap
+
     // MARK: - 状態
 
     @StateObject private var viewModel    = MindWaveViewModel()
@@ -27,7 +33,7 @@ struct MainTabView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 76).allowsHitTesting(false)
+                Color.clear.frame(height: MainTabView.missionBarReservedHeight).allowsHitTesting(false)
             }
 
             missionBar
@@ -57,49 +63,108 @@ struct MainTabView: View {
                 Button {
                     selectedTab = idx
                 } label: {
-                    VStack(spacing: 4) {
+                    VStack(spacing: 3) {
+                        // アイコン（アクティブ時は発光）
                         Image(systemName: active ? items[idx].activeIcon : items[idx].icon)
-                            .font(.system(size: 17, weight: active ? .semibold : .regular))
-                            .foregroundStyle(active ? Color.cyan : Color.white.opacity(0.38))
+                            .font(.system(size: 18, weight: active ? .semibold : .light))
+                            .foregroundStyle(active ? Color.cyan : Color.white.opacity(0.35))
+                            .shadow(color: active ? Color.cyan.opacity(0.75) : .clear, radius: 7)
 
-                        // 選択インジケーター
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(active ? Color.cyan : Color.clear)
-                            .frame(width: 18, height: 1.5)
-                            .shadow(color: active ? Color.cyan.opacity(0.7) : .clear, radius: 3)
+                        // 選択インジケーター（ライン＋ドット）
+                        HStack(spacing: 3) {
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(active ? Color.cyan : Color.clear)
+                                .frame(width: 14, height: 1.5)
+                            if active {
+                                Circle()
+                                    .fill(Color.cyan)
+                                    .frame(width: 2.5, height: 2.5)
+                                    .shadow(color: Color.cyan, radius: 3)
+                            } else {
+                                Color.clear.frame(width: 5.5, height: 2.5)
+                            }
+                        }
+                        .frame(height: 3)
 
                         Text(items[idx].label)
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(active ? Color.cyan.opacity(0.80) : Color.white.opacity(0.28))
+                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(active ? Color.cyan.opacity(0.85) : Color.white.opacity(0.26))
+                            .tracking(0.3)
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 56)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .animation(.easeInOut(duration: 0.22), value: active)
+                .animation(.easeInOut(duration: 0.20), value: active)
                 .accessibilityLabel(items[idx].label)
                 .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
             }
         }
         .frame(height: 60)
         .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(Color(red: 0.04, green: 0.05, blue: 0.12).opacity(0.97))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(Color.white.opacity(0.09), lineWidth: 1)
-                )
-                .overlay(
-                    // 上部アクセントライン
+            ZStack {
+                // ベース素材
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial)
+
+                // 深い紺グラデーション
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.04, green: 0.06, blue: 0.18).opacity(0.90),
+                                Color(red: 0.02, green: 0.03, blue: 0.10).opacity(0.92)
+                            ],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+
+                // 上端シアンエッジライン（パネルとの一体化）
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [Color.cyan.opacity(0.50), Color.cyan.opacity(0.10)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(height: 1.0)
+                    .blur(radius: 0.5)
+                    Spacer()
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                // 外枠ライン
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [Color.cyan.opacity(0.25), Color.white.opacity(0.05)],
+                            startPoint: .top, endPoint: .bottom
+                        ),
+                        lineWidth: 0.8
+                    )
+
+                // 左右端メカニカルアクセント
+                HStack {
                     VStack {
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(Color.cyan.opacity(0.20))
-                            .frame(height: 1)
+                        Spacer()
+                        Rectangle()
+                            .fill(Color.cyan.opacity(0.35))
+                            .frame(width: 6, height: 1.5)
                         Spacer()
                     }
-                )
-                .shadow(color: .black.opacity(0.55), radius: 18, x: 0, y: 8)
+                    .frame(width: 16)
+                    Spacer()
+                    VStack {
+                        Spacer()
+                        Rectangle()
+                            .fill(Color.cyan.opacity(0.35))
+                            .frame(width: 6, height: 1.5)
+                        Spacer()
+                    }
+                    .frame(width: 16)
+                }
+            }
+            .shadow(color: Color.cyan.opacity(0.10), radius: 12, x: 0, y: -3)
+            .shadow(color: .black.opacity(0.65), radius: 24, x: 0, y: 12)
         )
     }
 }

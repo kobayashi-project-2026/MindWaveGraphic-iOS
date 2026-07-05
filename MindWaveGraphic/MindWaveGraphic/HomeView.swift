@@ -3,7 +3,8 @@
 //  MindWaveGraphic
 //
 //  コックピット内部からの前方視点。宇宙空間グラフィックが主役。
-//  ダッシュボード下部にPULSE / HRV / 計測ボタン / QUICK WORK をコンパクト配置。
+//  1画面完結 — ScrollView なし。グラフィック57%＋ダッシュボード43%。
+//  Phase C v3（発表向け改革版）: コックピット窓枠・メトリクス強化・統合パネル。
 //  架空の値は使用しない。データ未取得時は「—」で表示する。
 //
 
@@ -18,49 +19,129 @@ struct HomeView: View {
     @State private var showBreathingSheet = false
     @State private var breathingMode: MindWaveBreathingMode = .fourSevenEight
     @State private var showStatusDetail   = false
+    @State private var buttonGlow: Bool    = false
 
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    // MARK: - Score-reactive accent
+
+    // score 0-100 → 0.0-1.0
+    private var scoreIntensity: Double {
+        min(max(viewModel.graphicInput.score / 100.0, 0.0), 1.0)
+    }
+
+    // 低: 深青-インディゴ / 中: シアン-緑 / 高: シアン + アンバー（星空に合わせる）
+    private var scoreAccentColor: Color {
+        let t = scoreIntensity
+        if t < 0.30 {
+            // 深い青→インディゴ
+            let phase = t / 0.30
+            return Color(hue: 0.68 - phase * 0.10, saturation: 0.90, brightness: 0.88)
+        } else if t < 0.65 {
+            // シアン〜緑
+            let phase = (t - 0.30) / 0.35
+            return Color(hue: 0.58 - phase * 0.11, saturation: 0.92, brightness: 0.94)
+        } else {
+            // アンバー（緊張状態）: hue 0.47→0.08
+            let phase = (t - 0.65) / 0.35
+            let h = 0.47 - phase * 0.39
+            return Color(hue: h < 0 ? h + 1 : h, saturation: 0.94, brightness: 0.97)
+        }
+    }
+
+    // 高緊張時の警戒赤味
+    private var dangerTint: Color {
+        let t = max(0, scoreIntensity - 0.70) / 0.30
+        return Color(red: 0.70 * t, green: 0.0, blue: 0.02 * t)
+    }
+
+    // 計測ボタン呼吸パルス周期 (低=3.5s, 高=1.2s)
+    private var buttonPulseDuration: Double {
+        3.5 - scoreIntensity * 2.3
+    }
 
     // MARK: - Body
 
     var body: some View {
         GeometryReader { geo in
-            // 画面高さに応じて比率を調整（小型iPhone対応）
-            let ratio: CGFloat = geo.size.height > 780 ? 0.59 : 0.52
-            let graphicH = geo.size.height * ratio
-            let safeTop  = geo.safeAreaInsets.top
+            let tabBarInset: CGFloat = MainTabView.missionBarReservedHeight
+            let availH   = geo.size.height - tabBarInset
+            let graphicH = availH * 0.72
+            let dashH    = availH * 0.28
 
             ZStack(alignment: .top) {
-                // 宇宙空間背景
+                // ── 宇宙空間背景
                 Color(red: 0.00, green: 0.01, blue: 0.06)
+                    .ignoresSafeArea()
 
-                // ── ワープグラフィック（上部・ステータスバー背後まで延伸）
+                // ── 星粒子グラフィック
                 GraphicHostView(input: viewModel.graphicInput)
                     .frame(maxWidth: .infinity)
                     .frame(height: graphicH)
+                    .ignoresSafeArea(edges: .top)
+                    .allowsHitTesting(false)
 
-                // ── ヘッダーオーバーレイ
-                cockpitHeader
-                    .padding(.top, safeTop + 8)
-                    .padding(.horizontal, 18)
+                // ── コックピット窓枠（三角ストラット構造）
+                cockpitWindowFrame
+                    .frame(height: graphicH)
+                    .ignoresSafeArea(edges: .top)
+                    .allowsHitTesting(false)
 
-                // ── コックピットダッシュボード（下部固定）
+                // ── グラフィック上端グラデーション（ヘッダー可読性）
                 VStack(spacing: 0) {
-                    Spacer(minLength: graphicH)
-                    cockpitDashboard(geo: geo)
-                        .padding(.bottom, 76)
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.62), .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: 90)
+                    Spacer()
+                }
+                .frame(height: graphicH)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+
+                // ── グラフィック下端グラデーション（パネルへの接続）
+                VStack(spacing: 0) {
+                    Spacer()
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            Color(red: 0.03, green: 0.06, blue: 0.18).opacity(0.60),
+                            Color(red: 0.04, green: 0.08, blue: 0.20).opacity(0.90)
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: 56)
+                }
+                .frame(height: graphicH)
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+
+                // ── ヘッダー
+                cockpitHeader
+                    .padding(.top, 8)
+                    .padding(.horizontal, 18)
+                    .zIndex(50)
+
+                // ── ダッシュボード
+                VStack(spacing: 0) {
+                    Spacer()
+                    cockpitDashboard(dashH: dashH)
+                    Spacer().frame(height: tabBarInset)
                 }
             }
         }
-        .ignoresSafeArea(edges: .top)
-        .onAppear { print("[CockpitHome] appeared") }
+        .onAppear {
+            print("[CockpitHome] appeared")
+            withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
+                buttonGlow = true
+            }
+        }
         .sheet(isPresented: $showSettingsSheet) {
             SettingsView().environmentObject(viewModel)
         }
         .sheet(isPresented: $showDebugSheet) {
             DebugDiagnosticsView()
                 .environmentObject(viewModel)
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.large])
         }
         .sheet(isPresented: $showStatusDetail) {
             statusDetailSheet
@@ -70,328 +151,1100 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - ヘッダー（グラフィック上フロート）
+    // MARK: - コックピット窓枠
+
+    private var cockpitWindowFrame: some View {
+        let accent = scoreAccentColor
+        return ZStack {
+            // ── ストラット本体（Canvas）
+            Canvas { ctx, size in
+                let sw = size.width
+                let sh = size.height
+                let strutW = sw * 0.175   // 幅を増やして重厚感アップ
+                let strutH = sh * 0.92
+                let bridgeY = sh * 0.83
+                let bridgeH = sh - bridgeY
+
+                // ─ 左ストラット（外側 = 真っ黒）
+                var lStrut = Path()
+                lStrut.move(to: .zero)
+                lStrut.addLine(to: CGPoint(x: strutW, y: 0))
+                lStrut.addLine(to: CGPoint(x: 0, y: strutH))
+                lStrut.closeSubpath()
+                ctx.fill(lStrut, with: .color(Color.black.opacity(0.95)))
+
+                // 左ストラット メタル層（斜め光沢）
+                var lMetal = Path()
+                lMetal.move(to: CGPoint(x: strutW, y: 0))
+                lMetal.addLine(to: CGPoint(x: strutW * 0.75, y: 0))
+                lMetal.addLine(to: CGPoint(x: 0, y: strutH * 0.72))
+                lMetal.addLine(to: CGPoint(x: 0, y: strutH))
+                lMetal.closeSubpath()
+                ctx.fill(lMetal, with: .color(Color(red: 0.04, green: 0.07, blue: 0.18).opacity(0.70)))
+
+                // 左ストラット 中央ハイライト帯（ベベル光）
+                var lBevel = Path()
+                lBevel.move(to: CGPoint(x: strutW * 0.42, y: 0))
+                lBevel.addLine(to: CGPoint(x: strutW * 0.52, y: 0))
+                lBevel.addLine(to: CGPoint(x: strutW * 0.08, y: strutH * 0.85))
+                lBevel.addLine(to: CGPoint(x: 0, y: strutH * 0.85))
+                lBevel.closeSubpath()
+                ctx.fill(lBevel, with: .color(Color.white.opacity(0.025)))
+
+                // ─ 右ストラット
+                var rStrut = Path()
+                rStrut.move(to: CGPoint(x: sw, y: 0))
+                rStrut.addLine(to: CGPoint(x: sw - strutW, y: 0))
+                rStrut.addLine(to: CGPoint(x: sw, y: strutH))
+                rStrut.closeSubpath()
+                ctx.fill(rStrut, with: .color(Color.black.opacity(0.95)))
+
+                var rMetal = Path()
+                rMetal.move(to: CGPoint(x: sw - strutW, y: 0))
+                rMetal.addLine(to: CGPoint(x: sw - strutW * 0.75, y: 0))
+                rMetal.addLine(to: CGPoint(x: sw, y: strutH * 0.72))
+                rMetal.addLine(to: CGPoint(x: sw, y: strutH))
+                rMetal.closeSubpath()
+                ctx.fill(rMetal, with: .color(Color(red: 0.04, green: 0.07, blue: 0.18).opacity(0.70)))
+
+                var rBevel = Path()
+                rBevel.move(to: CGPoint(x: sw - strutW * 0.42, y: 0))
+                rBevel.addLine(to: CGPoint(x: sw - strutW * 0.52, y: 0))
+                rBevel.addLine(to: CGPoint(x: sw - strutW * 0.08, y: strutH * 0.85))
+                rBevel.addLine(to: CGPoint(x: sw, y: strutH * 0.85))
+                rBevel.closeSubpath()
+                ctx.fill(rBevel, with: .color(Color.white.opacity(0.025)))
+
+                // ─ 下部ブリッジ
+                var bridge = Path()
+                bridge.move(to: CGPoint(x: 0, y: bridgeY))
+                bridge.addLine(to: CGPoint(x: sw * 0.24, y: bridgeY + bridgeH * 0.12))
+                bridge.addLine(to: CGPoint(x: sw * 0.40, y: sh))
+                bridge.addLine(to: CGPoint(x: 0, y: sh))
+                bridge.closeSubpath()
+                ctx.fill(bridge, with: .color(Color.black.opacity(0.88)))
+
+                var bridgeR = Path()
+                bridgeR.move(to: CGPoint(x: sw, y: bridgeY))
+                bridgeR.addLine(to: CGPoint(x: sw * 0.76, y: bridgeY + bridgeH * 0.12))
+                bridgeR.addLine(to: CGPoint(x: sw * 0.60, y: sh))
+                bridgeR.addLine(to: CGPoint(x: sw, y: sh))
+                bridgeR.closeSubpath()
+                ctx.fill(bridgeR, with: .color(Color.black.opacity(0.88)))
+
+                // ══ エッジライト（3層: ソフトハロー / シャープライン / 細い二重）
+                let eOff: Double = strutW  // 内辺のX位置
+
+                // グロー層（太くてソフト）
+                var lGlow = Path()
+                lGlow.move(to: CGPoint(x: eOff, y: 0))
+                lGlow.addLine(to: CGPoint(x: 0, y: strutH - 2))
+                ctx.stroke(lGlow, with: .color(accent.opacity(0.22)), lineWidth: 12)
+
+                var rGlow = Path()
+                rGlow.move(to: CGPoint(x: sw - eOff, y: 0))
+                rGlow.addLine(to: CGPoint(x: sw, y: strutH - 2))
+                ctx.stroke(rGlow, with: .color(accent.opacity(0.22)), lineWidth: 12)
+
+                // シャープライン（メイン）
+                var lEdge = Path()
+                lEdge.move(to: CGPoint(x: eOff, y: 0))
+                lEdge.addLine(to: CGPoint(x: 0, y: strutH - 2))
+                ctx.stroke(lEdge, with: .color(accent.opacity(0.70)), lineWidth: 1.5)
+
+                var rEdge = Path()
+                rEdge.move(to: CGPoint(x: sw - eOff, y: 0))
+                rEdge.addLine(to: CGPoint(x: sw, y: strutH - 2))
+                ctx.stroke(rEdge, with: .color(accent.opacity(0.70)), lineWidth: 1.5)
+
+                // 内側二重ライン
+                var lEdge2 = Path()
+                lEdge2.move(to: CGPoint(x: eOff - 4, y: 0))
+                lEdge2.addLine(to: CGPoint(x: 4, y: strutH - 2))
+                ctx.stroke(lEdge2, with: .color(accent.opacity(0.25)), lineWidth: 0.7)
+
+                var rEdge2 = Path()
+                rEdge2.move(to: CGPoint(x: sw - eOff + 4, y: 0))
+                rEdge2.addLine(to: CGPoint(x: sw - 4, y: strutH - 2))
+                ctx.stroke(rEdge2, with: .color(accent.opacity(0.25)), lineWidth: 0.7)
+
+                // 上端ライン
+                var topLine = Path()
+                topLine.move(to: CGPoint(x: eOff, y: 1.5))
+                topLine.addLine(to: CGPoint(x: sw - eOff, y: 1.5))
+                ctx.stroke(topLine, with: .color(accent.opacity(0.38)), lineWidth: 1.2)
+
+                // 上端グロー
+                var topGlow = Path()
+                topGlow.move(to: CGPoint(x: eOff, y: 1.5))
+                topGlow.addLine(to: CGPoint(x: sw - eOff, y: 1.5))
+                ctx.stroke(topGlow, with: .color(accent.opacity(0.14)), lineWidth: 8)
+
+                // ブリッジライン（左・右）
+                var bLineL = Path()
+                bLineL.move(to: CGPoint(x: 0, y: bridgeY))
+                bLineL.addLine(to: CGPoint(x: sw * 0.24, y: bridgeY + bridgeH * 0.12))
+                ctx.stroke(bLineL, with: .color(accent.opacity(0.42)), lineWidth: 1.2)
+
+                var bLineR = Path()
+                bLineR.move(to: CGPoint(x: sw, y: bridgeY))
+                bLineR.addLine(to: CGPoint(x: sw * 0.76, y: bridgeY + bridgeH * 0.12))
+                ctx.stroke(bLineR, with: .color(accent.opacity(0.42)), lineWidth: 1.2)
+
+                // ブリッジグロー
+                var bGlowL = Path()
+                bGlowL.move(to: CGPoint(x: 0, y: bridgeY))
+                bGlowL.addLine(to: CGPoint(x: sw * 0.24, y: bridgeY + bridgeH * 0.12))
+                ctx.stroke(bGlowL, with: .color(accent.opacity(0.12)), lineWidth: 7)
+
+                var bGlowR = Path()
+                bGlowR.move(to: CGPoint(x: sw, y: bridgeY))
+                bGlowR.addLine(to: CGPoint(x: sw * 0.76, y: bridgeY + bridgeH * 0.12))
+                ctx.stroke(bGlowR, with: .color(accent.opacity(0.12)), lineWidth: 7)
+
+                // ストラット横アクセントライン（機械的な刻み）
+                let ticY1: Double = strutH * 0.30
+                let ticY2: Double = strutH * 0.58
+
+                // 左ストラット横アクセント
+                var lTic1 = Path()
+                let lX1at1 = strutW * (1.0 - ticY1/strutH)
+                lTic1.move(to: CGPoint(x: 0, y: ticY1))
+                lTic1.addLine(to: CGPoint(x: lX1at1 * 0.65, y: ticY1))
+                ctx.stroke(lTic1, with: .color(Color.white.opacity(0.08)), lineWidth: 0.8)
+
+                var lTic2 = Path()
+                let lX1at2 = strutW * (1.0 - ticY2/strutH)
+                lTic2.move(to: CGPoint(x: 0, y: ticY2))
+                lTic2.addLine(to: CGPoint(x: lX1at2 * 0.65, y: ticY2))
+                ctx.stroke(lTic2, with: .color(Color.white.opacity(0.06)), lineWidth: 0.6)
+
+                // 右ストラット横アクセント（対称）
+                var rTic1 = Path()
+                rTic1.move(to: CGPoint(x: sw, y: ticY1))
+                rTic1.addLine(to: CGPoint(x: sw - lX1at1 * 0.65, y: ticY1))
+                ctx.stroke(rTic1, with: .color(Color.white.opacity(0.08)), lineWidth: 0.8)
+
+                var rTic2 = Path()
+                rTic2.move(to: CGPoint(x: sw, y: ticY2))
+                rTic2.addLine(to: CGPoint(x: sw - lX1at2 * 0.65, y: ticY2))
+                ctx.stroke(rTic2, with: .color(Color.white.opacity(0.06)), lineWidth: 0.6)
+
+                // コーナーアクセントドット（左右上コーナー）
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: eOff - 3, y: 0, width: 6, height: 6)),
+                    with: .color(accent.opacity(0.80))
+                )
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: sw - eOff - 3, y: 0, width: 6, height: 6)),
+                    with: .color(accent.opacity(0.80))
+                )
+
+                // 内側星空エッジシャドウ（奥行き）
+                var lShadow = Path()
+                lShadow.move(to: CGPoint(x: eOff, y: 0))
+                lShadow.addLine(to: CGPoint(x: eOff + 22, y: 0))
+                lShadow.addLine(to: CGPoint(x: 22, y: strutH - 2))
+                lShadow.addLine(to: CGPoint(x: 0, y: strutH - 2))
+                lShadow.closeSubpath()
+                ctx.fill(lShadow, with: .color(Color.black.opacity(0.35)))
+
+                var rShadow = Path()
+                rShadow.move(to: CGPoint(x: sw - eOff, y: 0))
+                rShadow.addLine(to: CGPoint(x: sw - eOff - 22, y: 0))
+                rShadow.addLine(to: CGPoint(x: sw - 22, y: strutH - 2))
+                rShadow.addLine(to: CGPoint(x: sw, y: strutH - 2))
+                rShadow.closeSubpath()
+                ctx.fill(rShadow, with: .color(Color.black.opacity(0.35)))
+            }
+        }
+    }
+
+    // MARK: - ヘッダー
 
     private var cockpitHeader: some View {
-        HStack(spacing: 8) {
-            // 接続状態インジケーター
-            Button {
-                showStatusDetail = true
-            } label: {
+        HStack(spacing: 0) {
+            // 接続状態ピル
+            Button { showStatusDetail = true } label: {
                 HStack(spacing: 5) {
                     Circle()
                         .fill(indicatorColor)
                         .frame(width: 5, height: 5)
-                        .shadow(color: indicatorColor.opacity(0.9), radius: 3)
+                        .shadow(color: indicatorColor.opacity(0.9), radius: 4)
                     Text(shortStatusLabel)
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
                         .foregroundStyle(Color.white.opacity(0.55))
-                        .tracking(0.6)
+                        .tracking(0.8)
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.07))
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5))
             }
             .buttonStyle(.plain)
 
             Spacer()
 
-            VStack(spacing: 1) {
-                Text("MIND WAVE")
-                    .font(.system(size: 11, weight: .ultraLight, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.70))
-                    .tracking(3.5)
-                Text("STRESS & BIOMETRICS")
+            // センタータイトル（MIND白 / WAVE cyan の2色）
+            VStack(spacing: 2) {
+                HStack(spacing: 0) {
+                    Text("MIND")
+                        .font(.system(size: 17, weight: .ultraLight, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.95))
+                        .tracking(5.0)
+                        .shadow(color: .black.opacity(0.90), radius: 8)
+                        .shadow(color: .black.opacity(0.60), radius: 3)
+                    Text(" WAVE")
+                        .font(.system(size: 17, weight: .ultraLight, design: .monospaced))
+                        .foregroundStyle(scoreAccentColor.opacity(0.96))
+                        .tracking(5.0)
+                        .shadow(color: scoreAccentColor.opacity(0.55), radius: 8)
+                        .shadow(color: scoreAccentColor.opacity(0.22), radius: 20)
+                        .shadow(color: .black.opacity(0.70), radius: 4)
+                        .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+                }
+                Text("STRESS  &  BIOMETRICS")
                     .font(.system(size: 7, weight: .light, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.22))
-                    .tracking(1.8)
+                    .foregroundStyle(Color.white.opacity(0.45))
+                    .tracking(2.8)
+                    .shadow(color: .black.opacity(0.90), radius: 6)
             }
+            .padding(.vertical, 6)
+            .padding(.horizontal, 14)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.black.opacity(0.38))
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.10), Color.cyan.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 0.5
+                        )
+                }
+            )
 
             Spacer()
 
-            HStack(spacing: 14) {
+            // 右側（設定 + dbg）
+            HStack(spacing: 0) {
+                Button {
+                    showSettingsSheet = true
+                    print("[CockpitHome] settings_opened")
+                } label: {
+                    ZStack {
+                        Circle()
+                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
+                            .frame(width: 28, height: 28)
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 13, weight: .light))
+                            .foregroundStyle(Color.white.opacity(0.50))
+                    }
+                    .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.plain)
+
                 #if DEBUG
                 Button {
                     showDebugSheet = true
                     print("[CockpitHome] debug_sheet_opened")
                 } label: {
-                    Image(systemName: "ant.circle")
-                        .font(.system(size: 14))
+                    Text("dbg")
+                        .font(.system(size: 7, weight: .medium, design: .monospaced))
                         .foregroundStyle(Color.white.opacity(0.22))
+                        .frame(width: 32, height: 36)
                 }
                 .buttonStyle(.plain)
+                .contentShape(Rectangle())
                 #endif
-                Button {
-                    showSettingsSheet = true
-                    print("[CockpitHome] settings_opened")
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Color.white.opacity(0.42))
-                }
-                .buttonStyle(.plain)
             }
         }
         .frame(height: 36)
     }
 
-    // MARK: - コックピットダッシュボード
+    // MARK: - ダッシュボード
 
-    private func cockpitDashboard(geo: GeometryProxy) -> some View {
-        VStack(spacing: 0) {
-            // 計測行：PULSE | メインボタン | HRV
-            HStack(alignment: .center, spacing: 0) {
-                pulsePanel
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, 22)
-
-                mainLaunchButton
-
-                hrvPanel
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(.trailing, 22)
-            }
-            .padding(.top, 18)
-
-            // サブボタン（整える / 履歴）
-            secondaryButtons
-                .padding(.top, 14)
-
-            // QUICK WORK カード
-            quickWorkRow
-                .padding(.top, 14)
-
-            Spacer(minLength: 8)
-        }
-        .background(dashboardBackground)
-    }
-
-    // MARK: - ダッシュボード背景
-
-    private var dashboardBackground: some View {
-        CockpitPanelShape(chamfer: 20)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.04, green: 0.07, blue: 0.16),
-                        Color(red: 0.02, green: 0.03, blue: 0.09)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
+    private func cockpitDashboard(dashH: CGFloat) -> some View {
+        let accent = scoreAccentColor
+        return VStack(spacing: 0) {
+            // ── コンソール上端ブリッジ（窓枠→計器盤の接続ライン）
+            Canvas { ctx, size in
+                let w = size.width, h = size.height
+                // 全幅ベースライン（薄）
+                var baseLine = Path()
+                baseLine.move(to: CGPoint(x: 0, y: h - 1))
+                baseLine.addLine(to: CGPoint(x: w, y: h - 1))
+                ctx.stroke(baseLine, with: .color(Color.white.opacity(0.12)), lineWidth: 1.0)
+                // 中央アクセントライン（score連動グロー）
+                var accentLine = Path()
+                accentLine.move(to: CGPoint(x: w * 0.10, y: h - 1))
+                accentLine.addLine(to: CGPoint(x: w * 0.90, y: h - 1))
+                ctx.stroke(accentLine, with: .color(accent.opacity(0.65)), lineWidth: 1.8)
+                ctx.stroke(accentLine, with: .color(accent.opacity(0.22)), lineWidth: 10)
+                // セカンドライン（2px上）
+                var line2 = Path()
+                line2.move(to: CGPoint(x: w * 0.25, y: h - 4))
+                line2.addLine(to: CGPoint(x: w * 0.75, y: h - 4))
+                ctx.stroke(line2, with: .color(accent.opacity(0.30)), lineWidth: 0.8)
+                // 左右接続ノード（大）
+                for xFrac in [0.10, 0.90] as [Double] {
+                    let nx = w * xFrac
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: nx - 4, y: h - 5, width: 8, height: 8)),
+                        with: .color(accent.opacity(0.72))
+                    )
+                    ctx.stroke(
+                        Path(ellipseIn: CGRect(x: nx - 6, y: h - 7, width: 12, height: 12)),
+                        with: .color(accent.opacity(0.25)), lineWidth: 0.8
+                    )
+                }
+                // 中央補助ノード
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w * 0.5 - 2.5, y: h - 4.5, width: 5, height: 5)),
+                    with: .color(accent.opacity(0.45))
                 )
-            )
-            .overlay(
-                CockpitPanelShape(chamfer: 20)
-                    .stroke(Color.cyan.opacity(0.20), lineWidth: 0.8)
-            )
-    }
-
-    // MARK: - PULSE パネル
-
-    private var pulsePanel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("PULSE")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color.cyan.opacity(0.65))
-                .tracking(1.2)
-
-            HStack(alignment: .lastTextBaseline, spacing: 3) {
-                Text(heartRateDisplay)
-                    .font(.system(size: 34, weight: .thin, design: .rounded))
-                    .foregroundStyle(hasRealHeartRate ? Color.cyan : Color.white.opacity(0.22))
-                    .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.3), value: heartRateDisplay)
-                Text("BPM")
-                    .font(.system(size: 9, weight: .light, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.30))
-            }
-
-            Image(systemName: "waveform.path.ecg")
-                .font(.system(size: 13))
-                .foregroundStyle(Color.cyan.opacity(hasRealHeartRate ? 0.45 : 0.18))
-        }
-    }
-
-    // MARK: - HRV パネル
-
-    private var hrvPanel: some View {
-        let hGreen = Color(red: 0.20, green: 0.85, blue: 0.60)
-        let hasHRV = viewModel.didFetchHRV
-        let hrvText = hasHRV ? String(format: "%.0f", viewModel.currentHRV) : "—"
-
-        return VStack(alignment: .trailing, spacing: 4) {
-            Text("HRV")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(hGreen.opacity(0.65))
-                .tracking(1.2)
-
-            HStack(alignment: .lastTextBaseline, spacing: 3) {
-                Text(hrvText)
-                    .font(.system(size: 34, weight: .thin, design: .rounded))
-                    .foregroundStyle(hasHRV ? hGreen : Color.white.opacity(0.22))
-                    .contentTransition(.numericText())
-                    .animation(.easeInOut(duration: 0.3), value: viewModel.currentHRV)
-                Text("ms")
-                    .font(.system(size: 9, weight: .light, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.30))
-            }
-
-            // 信号バー（HRVレベル表示）
-            HStack(alignment: .bottom, spacing: 2) {
-                ForEach(0..<5, id: \.self) { i in
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(i < hrvBarCount
-                            ? hGreen.opacity(0.65)
-                            : Color.white.opacity(0.12))
-                        .frame(width: 4, height: CGFloat(6 + i * 3))
+                // 左右対称小ノード（1/4位置）
+                for xFrac in [0.25, 0.75] as [Double] {
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: w * xFrac - 2, y: h - 3.5, width: 4, height: 4)),
+                        with: .color(accent.opacity(0.35))
+                    )
                 }
             }
+            .frame(height: 18)
+            .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+
+            Spacer(minLength: 2)
+
+            // ── 上段: PULSE | 大型計測ボタン | STATE
+            HStack(alignment: .center, spacing: 8) {
+                pulsePanel
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                mainLaunchButton
+                statePanel
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .padding(.horizontal, 14)
+
+            Spacer(minLength: 0)
+
+            // ── 下段: Quick Work
+            quickWorkRow
+                .frame(height: 50)
+                .padding(.horizontal, 14)
+
+            Spacer(minLength: 0)
+        }
+        .frame(height: dashH)
+        .background(cockpitPanelBackground)
+    }
+
+    // MARK: - コックピットパネル背景
+
+    private var cockpitPanelBackground: some View {
+        let accent = scoreAccentColor
+        let danger = dangerTint
+
+        return ZStack {
+            // 深いメタリックグラデーション（3層）
+            CockpitPanelShape(chamfer: 28)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.06, green: 0.10, blue: 0.22),
+                            Color(red: 0.03, green: 0.05, blue: 0.14),
+                            Color(red: 0.01, green: 0.02, blue: 0.09)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+
+            // 高緊張時: 危険感の薄い赤いオーバーレイ
+            CockpitPanelShape(chamfer: 28)
+                .fill(danger.opacity(0.08))
+                .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
+
+            // 上端ガラス反射ハイライト
+            CockpitPanelShape(chamfer: 28)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.07), .clear],
+                        startPoint: .top,
+                        endPoint: UnitPoint(x: 0.5, y: 0.14)
+                    )
+                )
+
+            // 水平スキャンライン（金属感テクスチャ）
+            CockpitPanelShape(chamfer: 28)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            Color.white.opacity(0.015),
+                            .clear,
+                            Color.white.opacity(0.012),
+                            .clear
+                        ],
+                        startPoint: .init(x: 0.5, y: 0.18),
+                        endPoint: .init(x: 0.5, y: 0.55)
+                    )
+                )
+
+            // 外縁ライン（score連動グラデ）
+            CockpitPanelShape(chamfer: 28)
+                .stroke(
+                    LinearGradient(
+                        colors: [accent.opacity(0.65), accent.opacity(0.15)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1.0
+                )
+                .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+
+            // 上端グロー1層（鋭いライン）
+            CockpitPanelShape(chamfer: 28)
+                .stroke(accent.opacity(0.60), lineWidth: 2.5)
+                .blur(radius: 4)
+                .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+
+            // 上端グロー2層（ソフトハロー）
+            CockpitPanelShape(chamfer: 28)
+                .stroke(accent.opacity(0.22), lineWidth: 12)
+                .blur(radius: 16)
+                .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+
+            // 内側上端シャドウ（奥行き）
+            CockpitPanelShape(chamfer: 28)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.black.opacity(0.32), .clear],
+                        startPoint: .top,
+                        endPoint: UnitPoint(x: 0.5, y: 0.12)
+                    )
+                )
+
+            // 中央環境グロー（計測装置背後 - score連動）
+            GeometryReader { g in
+                RadialGradient(
+                    colors: [
+                        accent.opacity(0.10 + scoreIntensity * 0.10),
+                        accent.opacity(0.04 + scoreIntensity * 0.04),
+                        .clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.22),
+                    startRadius: 20,
+                    endRadius: g.size.width * 0.40
+                )
+                .clipShape(CockpitPanelShape(chamfer: 28))
+                .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+            }
+
+            // サイドアクセントライン（左右縦ライン）
+            GeometryReader { g in
+                let panelH = g.size.height
+                HStack(spacing: 0) {
+                    // 左サイドライン
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [.clear, accent.opacity(0.40), .clear],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .frame(width: 1.0)
+                        .frame(height: panelH * 0.72)
+                        .padding(.leading, 14)
+                        .padding(.top, panelH * 0.12)
+                    }
+                    Spacer()
+                    // 右サイドライン
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [.clear, accent.opacity(0.40), .clear],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        .frame(width: 1.0)
+                        .frame(height: panelH * 0.72)
+                        .padding(.trailing, 14)
+                        .padding(.top, panelH * 0.12)
+                    }
+                }
+                .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+            }
         }
     }
 
-    private var hrvBarCount: Int {
-        guard viewModel.didFetchHRV else { return 0 }
-        let hrv = viewModel.currentHRV
-        if hrv < 20 { return 1 }
-        if hrv < 40 { return 2 }
-        if hrv < 60 { return 3 }
-        if hrv < 80 { return 4 }
-        return 5
+    // MARK: - PULSE 計器パネル（コックピット計器グレード）
+
+    private var pulsePanel: some View {
+        let accent  = scoreAccentColor
+        let hasData = hasRealHeartRate
+        let hrText  = heartRateDisplay
+
+        return ZStack(alignment: .topLeading) {
+            // ── 金属フレーム（Canvas）
+            Canvas { ctx, size in
+                let w = size.width, h = size.height
+                let cr: CGFloat = 9
+                // ベース深みメタリック
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: 0, y: 0, width: w, height: h), cornerRadius: cr),
+                    with: .color(Color(red: 0.05, green: 0.08, blue: 0.20))
+                )
+                // 内側上段ハイライト（ガラス感）
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: 2, y: 2, width: w - 4, height: h * 0.36), cornerRadius: cr - 1),
+                    with: .color(Color.white.opacity(0.024))
+                )
+                // 上端ベベル輝線
+                var topHL = Path()
+                topHL.move(to: CGPoint(x: cr + 1, y: 1.3))
+                topHL.addLine(to: CGPoint(x: w - cr - 1, y: 1.3))
+                ctx.stroke(topHL, with: .color(Color.white.opacity(0.20)), lineWidth: 1.3)
+                // 外縁アウトライン（score連動）
+                ctx.stroke(
+                    Path(roundedRect: CGRect(x: 0.6, y: 0.6, width: w - 1.2, height: h - 1.2), cornerRadius: cr),
+                    with: .color(accent.opacity(0.32)), lineWidth: 0.8
+                )
+                // 左エッジグロー（score連動）
+                var lEdge = Path()
+                lEdge.move(to: CGPoint(x: 1.5, y: cr + 2))
+                lEdge.addLine(to: CGPoint(x: 1.5, y: h - cr - 2))
+                ctx.stroke(lEdge, with: .color(accent.opacity(0.75)), lineWidth: 2.5)
+                ctx.stroke(lEdge, with: .color(accent.opacity(0.22)), lineWidth: 9)
+                // 内側上段シャドウ（奥行き）
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: 2, y: 2, width: w - 4, height: 16), cornerRadius: cr - 1),
+                    with: .color(Color.black.opacity(0.30))
+                )
+                // 下段仕切り線（計器分割）
+                var divider = Path()
+                divider.move(to: CGPoint(x: 9, y: h - 29))
+                divider.addLine(to: CGPoint(x: w - 9, y: h - 29))
+                ctx.stroke(divider, with: .color(Color.white.opacity(0.07)), lineWidth: 0.6)
+                // 右端補助目盛り（8本：精度UP）
+                for i in 0..<8 {
+                    let ty = h * 0.30 + CGFloat(i) * 5.0
+                    let isMajor = (i % 4 == 0)
+                    var tick = Path()
+                    tick.move(to: CGPoint(x: w - (isMajor ? 10 : 7), y: ty))
+                    tick.addLine(to: CGPoint(x: w - 3, y: ty))
+                    ctx.stroke(tick, with: .color(Color.white.opacity(isMajor ? 0.16 : 0.07)), lineWidth: isMajor ? 0.9 : 0.6)
+                }
+                // アーク型ゲージ背景（左下隅）
+                var arc = Path()
+                arc.addArc(center: CGPoint(x: 9, y: h - 9), radius: h * 0.28,
+                           startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
+                ctx.stroke(arc, with: .color(accent.opacity(0.10)), lineWidth: 0.8)
+                // 底辺パネルフィル
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: 2, y: h - 28, width: w - 4, height: 26), cornerRadius: 0),
+                    with: .color(Color.black.opacity(0.10))
+                )
+            }
+            .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
+
+            // ── コンテンツ（SwiftUI）
+            VStack(alignment: .leading, spacing: 0) {
+                // 上段: ラベル + 状態ランプ
+                HStack(spacing: 5) {
+                    ZStack {
+                        Circle()
+                            .fill(hasData ? accent.opacity(0.22) : Color.clear)
+                            .frame(width: 8, height: 8)
+                        Circle()
+                            .fill(hasData ? accent : Color.white.opacity(0.10))
+                            .frame(width: 4, height: 4)
+                            .shadow(color: hasData ? accent.opacity(0.90) : .clear, radius: 4)
+                    }
+                    Text("PULSE")
+                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(hasData ? 0.70 : 0.28))
+                        .tracking(2.0)
+                    Spacer()
+                    Image(systemName: "heart.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(
+                            hasData
+                                ? Color(red: 0.92, green: 0.28, blue: 0.30)
+                                : Color.white.opacity(0.12)
+                        )
+                        .shadow(color: hasData ? Color.red.opacity(0.60) : .clear, radius: 4)
+                }
+                .padding(.top, 8)
+                .padding(.horizontal, 9)
+
+                // 中段: BPM 大型数値
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(hrText)
+                        .font(.system(size: 42, weight: .thin, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(hasData ? Color.white.opacity(0.96) : Color.white.opacity(0.16))
+                        .contentTransition(.numericText())
+                        .animation(.easeInOut(duration: 0.30), value: hrText)
+                        .shadow(color: hasData ? accent.opacity(0.40) : .clear, radius: 10)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Spacer().frame(height: 10)
+                        Text("BPM")
+                            .font(.system(size: 7, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Color.white.opacity(hasData ? 0.42 : 0.12))
+                            .tracking(1.2)
+                    }
+                }
+                .padding(.horizontal, 9)
+                .padding(.top, 0)
+
+                Spacer(minLength: 2)
+
+                // 下段: ECG 波形（Canvas）
+                Canvas { ctx, sz in
+                    let mid = sz.height * 0.52
+                    let amp = hasData ? sz.height * 0.38 : sz.height * 0.04
+                    let xs: [CGFloat] = [0,0.06,0.11,0.16,0.22,0.26,0.31,0.37,0.43,0.48,
+                                         0.50,0.56,0.61,0.66,0.72,0.76,0.81,0.87,0.93,0.97,1.0]
+                    let ys: [CGFloat] = [0,-0.05,-0.22,0.30,0,-0.90,1.0,-0.30,0.32,0,
+                                         0,-0.05,-0.22,0.30,0,-0.90,1.0,-0.30,0.32,0,0]
+                    var p = Path()
+                    for i in 0..<xs.count {
+                        let pt = CGPoint(x: xs[i] * sz.width, y: mid - ys[i] * amp)
+                        i == 0 ? p.move(to: pt) : p.addLine(to: pt)
+                    }
+                    let a: CGFloat = hasData ? 0.62 : 0.10
+                    ctx.stroke(p, with: .color(Color.cyan.opacity(a * 0.28)), lineWidth: 3.2)
+                    ctx.stroke(p, with: .color(Color.cyan.opacity(a)), lineWidth: 0.9)
+                }
+                .frame(height: 20)
+                .padding(.horizontal, 9)
+                .padding(.bottom, 8)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 90)
+        .animation(.easeInOut(duration: 0.40), value: hasData)
     }
 
-    // MARK: - メイン計測ボタン
+    // MARK: - STATE 計器パネル
+
+    private var statePanel: some View {
+        let accent    = scoreAccentColor
+        let hasData   = viewModel.didFetchHeartRate || viewModel.didFetchHRV
+        let stateStr  = stateLabel
+        let barCnt    = stateBarCount
+
+        return ZStack(alignment: .topTrailing) {
+            // ── 金属フレーム（Canvas）
+            Canvas { ctx, size in
+                let w = size.width, h = size.height
+                let cr: CGFloat = 9
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: 0, y: 0, width: w, height: h), cornerRadius: cr),
+                    with: .color(Color(red: 0.04, green: 0.08, blue: 0.19))
+                )
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: 2, y: 2, width: w - 4, height: h * 0.36), cornerRadius: cr - 1),
+                    with: .color(Color.white.opacity(0.020))
+                )
+                var topHL = Path()
+                topHL.move(to: CGPoint(x: cr + 1, y: 1.3))
+                topHL.addLine(to: CGPoint(x: w - cr - 1, y: 1.3))
+                ctx.stroke(topHL, with: .color(Color.white.opacity(0.18)), lineWidth: 1.3)
+                ctx.stroke(
+                    Path(roundedRect: CGRect(x: 0.6, y: 0.6, width: w - 1.2, height: h - 1.2), cornerRadius: cr),
+                    with: .color(accent.opacity(0.30)), lineWidth: 0.8
+                )
+                var rEdge = Path()
+                rEdge.move(to: CGPoint(x: w - 1.5, y: cr + 2))
+                rEdge.addLine(to: CGPoint(x: w - 1.5, y: h - cr - 2))
+                ctx.stroke(rEdge, with: .color(accent.opacity(0.72)), lineWidth: 2.5)
+                ctx.stroke(rEdge, with: .color(accent.opacity(0.22)), lineWidth: 9)
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: 2, y: 2, width: w - 4, height: 16), cornerRadius: cr - 1),
+                    with: .color(Color.black.opacity(0.28))
+                )
+                var divider = Path()
+                divider.move(to: CGPoint(x: 9, y: h - 29))
+                divider.addLine(to: CGPoint(x: w - 9, y: h - 29))
+                ctx.stroke(divider, with: .color(Color.white.opacity(0.07)), lineWidth: 0.6)
+                ctx.fill(
+                    Path(roundedRect: CGRect(x: 2, y: h - 28, width: w - 4, height: 26), cornerRadius: 0),
+                    with: .color(Color.black.opacity(0.10))
+                )
+            }
+            .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
+
+            // ── コンテンツ（SwiftUI）
+            VStack(alignment: .trailing, spacing: 0) {
+                // 上段: ラベル + 状態ランプ
+                HStack(spacing: 5) {
+                    Spacer()
+                    Text("STATE")
+                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                        .foregroundStyle(accent.opacity(hasData ? 0.70 : 0.28))
+                        .tracking(1.5)
+                    ZStack {
+                        Circle()
+                            .fill(hasData ? accent.opacity(0.22) : Color.clear)
+                            .frame(width: 8, height: 8)
+                        Circle()
+                            .fill(hasData ? accent : Color.white.opacity(0.10))
+                            .frame(width: 4, height: 4)
+                            .shadow(color: hasData ? accent.opacity(0.90) : .clear, radius: 4)
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.horizontal, 9)
+
+                // 中段: 状態テキスト
+                Text(stateStr)
+                    .font(.system(size: 22, weight: .thin, design: .monospaced))
+                    .foregroundStyle(hasData ? Color.white.opacity(0.94) : Color.white.opacity(0.16))
+                    .tracking(1.0)
+                    .contentTransition(.identity)
+                    .animation(.easeInOut(duration: 0.40), value: stateStr)
+                    .shadow(color: hasData ? accent.opacity(0.40) : .clear, radius: 10)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 9)
+                    .padding(.top, 6)
+
+                Spacer(minLength: 2)
+
+                // 下段: 強度バー（右揃え・6本）
+                HStack(alignment: .bottom, spacing: 3.0) {
+                    ForEach(0..<6, id: \.self) { i in
+                        let active = i < barCnt
+                        let bh: CGFloat = 4 + CGFloat(i) * 3.8
+                        ZStack {
+                            Capsule()
+                                .fill(active ? accent.opacity(0.12) : Color.clear)
+                                .frame(width: 4, height: bh)
+                            Capsule()
+                                .fill(active
+                                      ? (i == barCnt - 1 ? accent.opacity(0.92) : accent.opacity(0.52))
+                                      : Color.white.opacity(0.07))
+                                .frame(width: 3, height: bh)
+                                .shadow(color: active && i == barCnt - 1 ? accent.opacity(0.60) : .clear, radius: 4)
+                        }
+                    }
+                }
+                .animation(.easeInOut(duration: 0.40), value: barCnt)
+                .padding(.trailing, 9)
+                .padding(.bottom, 8)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: 90)
+        .animation(.easeInOut(duration: 0.40), value: scoreIntensity)
+    }
+
+    private var stateBarCount: Int {
+        guard viewModel.didFetchHeartRate || viewModel.didFetchHRV else { return 0 }
+        return min(Int(scoreIntensity * 6.0 + 0.5), 6)
+    }
+
+    private var stateLabel: String {
+        guard viewModel.didFetchHeartRate || viewModel.didFetchHRV else { return "—" }
+        let t = scoreIntensity
+        if t < 0.25 { return "CALM" }
+        if t < 0.50 { return "RELAX" }
+        if t < 0.70 { return "FOCUS" }
+        if t < 0.85 { return "ALERT" }
+        return "TENSE"
+    }
+
+    // MARK: - 大型計測ボタン（近未来計器ディスプレイ）
 
     private var mainLaunchButton: some View {
-        Button {
+        let ac: Color  = isLive ? .orange : scoreAccentColor
+        let gI: Double = 0.72 + scoreIntensity * 0.26
+
+        return Button {
             viewModel.toggleLiveMonitoring()
             print("[CockpitHome] monitoring toggled")
         } label: {
-            VStack(spacing: 10) {
-                ZStack {
-                    // 外リング（装飾）
-                    Circle()
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                        .frame(width: 108, height: 108)
-                    // アクティブリング
-                    Circle()
-                        .stroke(
-                            isLive ? Color.orange.opacity(0.55) : Color.cyan.opacity(0.50),
-                            lineWidth: 1.5
-                        )
-                        .frame(width: 90, height: 90)
-                        .shadow(color: isLive ? .orange.opacity(0.30) : .cyan.opacity(0.30),
-                                radius: 6)
-                    // 内円
-                    Circle()
-                        .fill(
-                            isLive
-                            ? Color(red: 0.14, green: 0.05, blue: 0.02)
-                            : Color(red: 0.04, green: 0.14, blue: 0.24)
-                        )
-                        .frame(width: 78, height: 78)
-                    // センターアイコン
-                    Image(systemName: "waveform.path.ecg")
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(isLive ? Color.orange : Color.cyan)
-                }
-                Text(isLive ? "計測停止" : "計測開始")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(
-                        isLive ? Color.orange.opacity(0.85) : Color.white.opacity(0.70)
+            ZStack {
+                // ── L1: 最外装メタルベゼル（上から右へ明るい）
+                Circle()
+                    .stroke(
+                        AngularGradient(
+                            colors: [
+                                Color.white.opacity(0.22), Color.white.opacity(0.05),
+                                Color.white.opacity(0.04), Color.white.opacity(0.16),
+                                Color.white.opacity(0.22)
+                            ],
+                            center: .center
+                        ),
+                        lineWidth: 2.0
                     )
-                    .tracking(0.5)
+                    .frame(width: 138, height: 138)
+
+                // ── L2: アウターリング（score連動色）
+                Circle()
+                    .stroke(ac.opacity(0.18), lineWidth: 1.0)
+                    .frame(width: 128, height: 128)
+
+                // ── L3: メイン発光リング（二重シャドウ）
+                Circle()
+                    .stroke(ac.opacity(gI), lineWidth: 2.5)
+                    .frame(width: 116, height: 116)
+                    .shadow(color: ac.opacity(0.80), radius: 8)
+                    .shadow(color: ac.opacity(0.35), radius: 20)
+                    .animation(.easeInOut(duration: 0.8), value: scoreIntensity)
+
+                // ── L4: ミッドリング（細い）
+                Circle()
+                    .stroke(ac.opacity(0.28), lineWidth: 0.8)
+                    .frame(width: 104, height: 104)
+
+                // ── L5: インナーリング（メタル）
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.12), Color.white.opacity(0.04)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1.0
+                    )
+                    .frame(width: 94, height: 94)
+
+                // ── L6: インナーアクセント
+                Circle()
+                    .stroke(ac.opacity(0.16), lineWidth: 0.6)
+                    .frame(width: 82, height: 82)
+
+                // ── ガラス面（深いラジアルグラデ）
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                Color(hue: isLive ? 0.07 : max(0, 0.65 - scoreIntensity * 0.55),
+                                      saturation: 0.85, brightness: 0.18),
+                                Color(red: 0.02, green: 0.04, blue: 0.16),
+                                Color.black.opacity(0.94)
+                            ],
+                            center: UnitPoint(x: 0.32, y: 0.24),
+                            startRadius: 0, endRadius: 40
+                        )
+                    )
+                    .frame(width: 78, height: 78)
+                    .animation(.easeInOut(duration: 0.8), value: scoreIntensity)
+
+                // ガラスハイライト（レンズ効果 - 強化）
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(0.18),
+                                Color.white.opacity(0.06),
+                                .clear
+                            ],
+                            startPoint: UnitPoint(x: 0.22, y: 0.04),
+                            endPoint: UnitPoint(x: 0.62, y: 0.55)
+                        )
+                    )
+                    .frame(width: 78, height: 78)
+
+                // 内側環境グロー（score連動）
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [ac.opacity(0.15 + scoreIntensity * 0.12), .clear],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: 35
+                        )
+                    )
+                    .frame(width: 78, height: 78)
+                    .animation(.easeInOut(duration: 0.8), value: scoreIntensity)
+
+                // ガラス小ハイライト（右下 反射）
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color.white.opacity(0.06), .clear],
+                            center: UnitPoint(x: 0.72, y: 0.78),
+                            startRadius: 0,
+                            endRadius: 18
+                        )
+                    )
+                    .frame(width: 78, height: 78)
+
+                // ── アイコン + テキスト
+                VStack(spacing: 5) {
+                    Image(systemName: isLive ? "waveform" : "waveform.path.ecg")
+                        .font(.system(size: 17, weight: .ultraLight))
+                        .foregroundStyle(ac.opacity(0.97))
+                        .shadow(color: ac, radius: 10)
+                        .shadow(color: ac.opacity(0.50), radius: 22)
+                    Text(isLive ? "停止" : "計測開始")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(isLive ? Color.orange.opacity(0.90) : Color.white.opacity(0.80))
+                        .tracking(1.0)
+                }
             }
+            .frame(width: 138, height: 138)
+            // 呼吸パルスリング（score連動周期）
+            .overlay(
+                Circle()
+                    .stroke(ac.opacity(buttonGlow ? 0.28 : 0.02), lineWidth: 1.4)
+                    .scaleEffect(buttonGlow ? 1.20 : 0.93)
+                    .frame(width: 155, height: 155)
+                    .blur(radius: 2.5)
+            )
+            // 外周スキャンリング（常時薄く）
+            .overlay(
+                Circle()
+                    .stroke(ac.opacity(0.07 + scoreIntensity * 0.10), lineWidth: 0.7)
+                    .frame(width: 162, height: 162)
+                    .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+            )
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.22), value: isLive)
         .accessibilityLabel(isLive ? "計測を停止する" : "ライブ計測を開始する")
-    }
-
-    // MARK: - サブボタン（整える / 履歴）
-
-    private var secondaryButtons: some View {
-        HStack(spacing: 36) {
-            secondaryActionButton(icon: "wind", label: "整える") {
-                selectedTab = 1
-            }
-            secondaryActionButton(icon: "chart.bar", label: "履歴") {
-                selectedTab = 2
-            }
-        }
-    }
-
-    private func secondaryActionButton(
-        icon: String,
-        label: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(spacing: 5) {
-                ZStack {
-                    Circle()
-                        .strokeBorder(Color.white.opacity(0.15), lineWidth: 1)
-                        .frame(width: 46, height: 46)
-                    Image(systemName: icon)
-                        .font(.system(size: 16, weight: .light))
-                        .foregroundStyle(Color.white.opacity(0.55))
+        // ── 外周カリブレーションリング（分度器状目盛り）
+        .overlay(
+            Canvas { ctx, size in
+                let cx = size.width / 2
+                let cy = size.height / 2
+                let outerR = size.width / 2 - 2
+                for i in 0..<24 {
+                    let angle = Double(i) * (.pi / 12.0) - .pi / 2.0
+                    let isCardinal = (i % 6 == 0)
+                    let isOctant   = (i % 3 == 0) && !isCardinal
+                    guard isCardinal || isOctant else { continue }
+                    let tickLen: Double = isCardinal ? 8 : 4
+                    let x1 = cx + outerR * cos(angle)
+                    let y1 = cy + outerR * sin(angle)
+                    let x2 = cx + (outerR - tickLen) * cos(angle)
+                    let y2 = cy + (outerR - tickLen) * sin(angle)
+                    var tick = Path()
+                    tick.move(to: CGPoint(x: x1, y: y1))
+                    tick.addLine(to: CGPoint(x: x2, y: y2))
+                    ctx.stroke(tick,
+                               with: .color(ac.opacity(isCardinal ? 0.62 : 0.32)),
+                               lineWidth: isCardinal ? 1.2 : 0.7)
+                    if isCardinal {
+                        ctx.fill(
+                            Path(ellipseIn: CGRect(x: x1 - 2, y: y1 - 2, width: 4, height: 4)),
+                            with: .color(ac.opacity(0.72))
+                        )
+                    }
                 }
-                Text(label)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.35))
             }
-        }
-        .buttonStyle(.plain)
+            .frame(width: 164, height: 164)
+            .allowsHitTesting(false)
+            .animation(.easeInOut(duration: 1.2), value: isLive)
+        )
     }
 
-    // MARK: - QUICK WORK 3カード行
+    // MARK: - Quick Work
 
     private var quickWorkRow: some View {
-        HStack(spacing: 10) {
-            quickCard(mode: .fourSevenEight, label: "4-7-8",
-                      desc: "深い弛緩",    icon: "moon.stars")
-            quickCard(mode: .box,           label: "BOX",
-                      desc: "集中と安定",  icon: "square")
-            quickCard(mode: .twoOneFour,    label: "2-1-4",
-                      desc: "緊張を手放す", icon: "leaf")
+        HStack(spacing: 7) {
+            quickCard(mode: .fourSevenEight, label: "4-7-8",  desc: "深い弛緩",    icon: "moon.stars.fill", duration: "15 MIN")
+            quickCard(mode: .box,            label: "BOX",    desc: "集中・安定",  icon: "square.fill",     duration: "5 MIN")
+            quickCard(mode: .twoOneFour,     label: "2-1-4",  desc: "緊張を手放す", icon: "leaf.fill",      duration: "5 MIN")
         }
-        .padding(.horizontal, 16)
     }
 
-    private func quickCard(
-        mode: MindWaveBreathingMode,
-        label: String,
-        desc: String,
-        icon: String
-    ) -> some View {
+    private func quickCard(mode: MindWaveBreathingMode, label: String, desc: String, icon: String, duration: String) -> some View {
         Button {
-            print("[CockpitHome] quick work mode=\(mode.displayName)")
             breathingMode = mode
             showBreathingSheet = true
+            print("[CockpitHome] quick_work mode=\(mode.displayName)")
         } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 15))
-                    .foregroundStyle(Color.cyan.opacity(0.72))
-                Spacer(minLength: 2)
-                Text(label)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text(desc)
-                    .font(.system(size: 9))
-                    .foregroundStyle(Color.white.opacity(0.38))
-                    .lineLimit(1)
-            }
-            .padding(11)
-            .frame(maxWidth: .infinity)
-            .frame(height: 70)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(red: 0.04, green: 0.06, blue: 0.15))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.8)
+            ZStack(alignment: .topLeading) {
+                // ── カード本体
+                RoundedRectangle(cornerRadius: 11)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.07, green: 0.15, blue: 0.34),
+                                Color(red: 0.03, green: 0.07, blue: 0.20),
+                                Color(red: 0.02, green: 0.04, blue: 0.14)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-            )
+
+                // 上端スコア連動カラーライン
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [scoreAccentColor.opacity(0.60), scoreAccentColor.opacity(0.08)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(height: 1.2)
+                    Spacer()
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 11))
+                .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+
+                // カードボーダー（スコア連動）
+                RoundedRectangle(cornerRadius: 11)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [scoreAccentColor.opacity(0.35), Color.white.opacity(0.06), scoreAccentColor.opacity(0.12)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.8
+                    )
+                    .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
+
+                // 内側シャドウ（下部）
+                VStack(spacing: 0) {
+                    Spacer()
+                    LinearGradient(
+                        colors: [.clear, Color.black.opacity(0.30)],
+                        startPoint: .center, endPoint: .bottom
+                    )
+                    .frame(height: 20)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 11))
+
+                // ── コンテンツ
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(alignment: .top, spacing: 0) {
+                        ZStack {
+                            Circle()
+                                .fill(scoreAccentColor.opacity(0.12))
+                                .frame(width: 22, height: 22)
+                            Image(systemName: icon)
+                                .font(.system(size: 11, weight: .light))
+                                .foregroundStyle(scoreAccentColor.opacity(0.92))
+                                .shadow(color: Color.cyan.opacity(0.60), radius: 5)
+                                .shadow(color: Color.cyan.opacity(0.25), radius: 12)
+                        }
+                        Spacer(minLength: 0)
+                        Text(duration)
+                            .font(.system(size: 6, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Color.cyan.opacity(0.48))
+                            .tracking(0.3)
+                            .padding(.top, 1)
+                    }
+                    .padding(.bottom, 4)
+
+                    Text(label)
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.92))
+                        .minimumScaleFactor(0.82)
+                    Text(desc)
+                        .font(.system(size: 7.5, weight: .regular))
+                        .foregroundStyle(Color.white.opacity(0.42))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .padding(.top, 2)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 8)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(label)呼吸法")
+        .accessibilityLabel("\(label) 呼吸法 \(duration)")
         .accessibilityHint(desc)
     }
 
@@ -415,28 +1268,20 @@ struct HomeView: View {
                     Divider().overlay(Color.white.opacity(0.12))
 
                     HStack(spacing: 0) {
-                        metricItem(label: "データソース",
-                                   value: dataSourceLabel,
-                                   accent: indicatorColor)
-                        Divider().frame(height: 28)
-                            .background(Color.white.opacity(0.10))
+                        metricItem(label: "データソース", value: dataSourceLabel,  accent: indicatorColor)
+                        Divider().frame(height: 28).background(Color.white.opacity(0.10))
                         metricItem(
-                            label: "HRV",
-                            value: viewModel.didFetchHRV
-                                ? String(format: "%.0f ms", viewModel.currentHRV)
+                            label: "スコア",
+                            value: (viewModel.didFetchHeartRate || viewModel.didFetchHRV)
+                                ? String(format: "%.0f", viewModel.graphicInput.score)
                                 : "—",
-                            accent: viewModel.didFetchHRV
-                                ? Color.cyan
-                                : Color.white.opacity(0.25)
+                            accent: scoreAccentColor
                         )
-                        Divider().frame(height: 28)
-                            .background(Color.white.opacity(0.10))
+                        Divider().frame(height: 28).background(Color.white.opacity(0.10))
                         metricItem(
                             label: "状態",
                             value: viewModel.isLiveMonitoring ? "計測中" : "停止中",
-                            accent: viewModel.isLiveMonitoring
-                                ? Color.cyan
-                                : Color.white.opacity(0.35)
+                            accent: viewModel.isLiveMonitoring ? Color.cyan : Color.white.opacity(0.35)
                         )
                     }
                     .padding(.vertical, 10)
@@ -489,8 +1334,8 @@ struct HomeView: View {
 
     private var shortStatusLabel: String {
         switch viewModel.activeDataSource {
-        case .watchLive:   return viewModel.isLiveMonitoring ? "LIVE" : "WATCH READY"
-        case .healthKit:   return "HEALTHKIT"
+        case .watchLive:   return viewModel.isLiveMonitoring ? "LIVE" : "WATCH"
+        case .healthKit:   return "HK"
         case .mock:        return "DEMO"
         case .unavailable: return "STANDBY"
         }
@@ -519,7 +1364,7 @@ struct HomeView: View {
         switch viewModel.activeDataSource {
         case .watchLive:
             return viewModel.isLiveMonitoring
-                ? (viewModel.didFetchHRV ? "リアルタイム計測中" : "接続中 — HRV取得待ち")
+                ? "リアルタイム計測中"
                 : "計測を開始できます"
         case .healthKit:   return "HealthKitから読み込み中"
         case .mock:        return "デモモード"
@@ -530,7 +1375,7 @@ struct HomeView: View {
     private var narrativeBody: String {
         switch viewModel.activeDataSource {
         case .watchLive:
-            return viewModel.didFetchHRV
+            return (viewModel.didFetchHeartRate || viewModel.didFetchHRV)
                 ? "状態グラフィックが現在の心理的揺らぎを反映しています。"
                 : "Apple Watchを装着したまましばらくお待ちください。"
         case .healthKit:   return "HealthKitに記録された最新データを表示しています。"
