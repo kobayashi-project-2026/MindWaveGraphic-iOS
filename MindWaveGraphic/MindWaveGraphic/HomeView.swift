@@ -105,12 +105,13 @@ struct HomeView: View {
                     LinearGradient(
                         colors: [
                             .clear,
-                            Color(red: 0.03, green: 0.06, blue: 0.18).opacity(0.60),
-                            Color(red: 0.04, green: 0.08, blue: 0.20).opacity(0.90)
+                            Color(red: 0.04, green: 0.07, blue: 0.19).opacity(0.45),
+                            Color(red: 0.05, green: 0.09, blue: 0.21).opacity(0.80),
+                            Color(red: 0.06, green: 0.10, blue: 0.22).opacity(0.96)
                         ],
                         startPoint: .top, endPoint: .bottom
                     )
-                    .frame(height: 56)
+                    .frame(height: 72)
                 }
                 .frame(height: graphicH)
                 .ignoresSafeArea(edges: .top)
@@ -357,6 +358,40 @@ struct HomeView: View {
                 rShadow.addLine(to: CGPoint(x: sw, y: strutH - 2))
                 rShadow.closeSubpath()
                 ctx.fill(rShadow, with: .color(Color.black.opacity(0.35)))
+
+                // ── 高緊張アラートグロー (t>0.65 → 赤/橙がストラット縁に立ち上がる)
+                let alertT = max(0.0, scoreIntensity - 0.65) / 0.35
+                if alertT > 0 {
+                    let alertR = Color(red: 0.88, green: 0.18, blue: 0.04)
+                    // 左ストラット — 広ソフトハロー
+                    var lAlertGlow = Path()
+                    lAlertGlow.move(to: CGPoint(x: eOff, y: 0))
+                    lAlertGlow.addLine(to: CGPoint(x: 0, y: strutH - 2))
+                    ctx.stroke(lAlertGlow, with: .color(alertR.opacity(alertT * 0.38)),
+                               lineWidth: 20)
+                    // 左ストラット — シャープライン
+                    ctx.stroke(lAlertGlow, with: .color(alertR.opacity(alertT * 0.55)),
+                               lineWidth: 1.8)
+
+                    // 右ストラット — 広ソフトハロー
+                    var rAlertGlow = Path()
+                    rAlertGlow.move(to: CGPoint(x: sw - eOff, y: 0))
+                    rAlertGlow.addLine(to: CGPoint(x: sw, y: strutH - 2))
+                    ctx.stroke(rAlertGlow, with: .color(alertR.opacity(alertT * 0.38)),
+                               lineWidth: 20)
+                    // 右ストラット — シャープライン
+                    ctx.stroke(rAlertGlow, with: .color(alertR.opacity(alertT * 0.55)),
+                               lineWidth: 1.8)
+
+                    // 上端アラートライン（強）
+                    var topAlert = Path()
+                    topAlert.move(to: CGPoint(x: eOff, y: 1.5))
+                    topAlert.addLine(to: CGPoint(x: sw - eOff, y: 1.5))
+                    ctx.stroke(topAlert, with: .color(alertR.opacity(alertT * 0.48)),
+                               lineWidth: 11)
+                    ctx.stroke(topAlert, with: .color(alertR.opacity(alertT * 0.72)),
+                               lineWidth: 1.4)
+                }
             }
         }
     }
@@ -606,10 +641,24 @@ struct HomeView: View {
                     )
                 )
 
-            // 高緊張時: 危険感の薄い赤いオーバーレイ
+            // 高緊張時: 危険感の赤いオーバーレイ（視認可能なレベルへ）
             CockpitPanelShape(chamfer: 28)
-                .fill(danger.opacity(0.08))
+                .fill(danger.opacity(0.18))
                 .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
+
+            // 高緊張時: アラートボーダー（パネル縁に赤/橙が立ち上がる）
+            if scoreIntensity > 0.68 {
+                let alertBorderT = (scoreIntensity - 0.68) / 0.32
+                CockpitPanelShape(chamfer: 28)
+                    .stroke(
+                        Color(red: 0.88, green: 0.22, blue: 0.05)
+                            .opacity(alertBorderT * (buttonGlow ? 0.58 : 0.30)),
+                        lineWidth: 2.0
+                    )
+                    .blur(radius: 3)
+                    .animation(.easeInOut(duration: 0.9), value: buttonGlow)
+                    .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
+            }
 
             // 上端ガラス反射ハイライト
             CockpitPanelShape(chamfer: 28)
@@ -1072,7 +1121,8 @@ struct HomeView: View {
                         RadialGradient(
                             colors: [
                                 Color(hue: isLive ? 0.07 : max(0, 0.65 - scoreIntensity * 0.55),
-                                      saturation: 0.85, brightness: 0.18),
+                                      saturation: 0.88,
+                                      brightness: 0.18 + scoreIntensity * 0.16),
                                 Color(red: 0.02, green: 0.04, blue: 0.16),
                                 Color.black.opacity(0.94)
                             ],
@@ -1189,6 +1239,34 @@ struct HomeView: View {
             .frame(width: 164, height: 164)
             .allowsHitTesting(false)
             .animation(.easeInOut(duration: 1.2), value: isLive)
+        )
+        // ── 高緊張アラートリング（scoreIntensity > 0.70 で出現）
+        .overlay(
+            Group {
+                if scoreIntensity > 0.70 {
+                    let alertT = (scoreIntensity - 0.70) / 0.30
+                    Circle()
+                        .stroke(
+                            AngularGradient(
+                                colors: [
+                                    Color(red: 0.92, green: 0.28, blue: 0.04)
+                                        .opacity(buttonGlow ? 0.60 : 0.28),
+                                    Color(red: 0.85, green: 0.08, blue: 0.05)
+                                        .opacity(buttonGlow ? 0.45 : 0.18),
+                                    Color(red: 0.92, green: 0.28, blue: 0.04)
+                                        .opacity(buttonGlow ? 0.60 : 0.28)
+                                ],
+                                center: .center
+                            ),
+                            lineWidth: 1.6
+                        )
+                        .frame(width: 174, height: 174)
+                        .blur(radius: 4)
+                        .opacity(alertT)
+                        .animation(.easeInOut(duration: 0.85), value: buttonGlow)
+                }
+            }
+            .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
         )
     }
 
