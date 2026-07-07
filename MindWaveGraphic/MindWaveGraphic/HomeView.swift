@@ -12,6 +12,7 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject var viewModel: MindWaveViewModel
+    @EnvironmentObject var flowState: AppFlowState
     @Binding var selectedTab: Int
 
     @State private var showSettingsSheet  = false
@@ -518,6 +519,25 @@ struct HomeView: View {
             .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
 
             Spacer(minLength: 2)
+
+            // ── コンテキストチップ（場面・身体状態の簡易表示）
+            if !flowState.measurementContext.isDefault {
+                HStack(spacing: 5) {
+                    Image(systemName: flowState.measurementContext.scene.icon)
+                        .font(.system(size: 9))
+                        .foregroundStyle(Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.75))
+                    Text(flowState.measurementContext.summaryLabel)
+                        .font(.system(size: 9, weight: .light, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.42))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Color.white.opacity(0.06))
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
+                .padding(.horizontal, 14)
+            }
 
             // ── 上段: PULSE | 大型計測ボタン | STATE
             HStack(alignment: .center, spacing: 8) {
@@ -1405,4 +1425,5 @@ private struct BreathingFromHomeWrapper: View {
 #Preview {
     HomeView(selectedTab: .constant(0))
         .environmentObject(MindWaveViewModel())
+        .environmentObject(AppFlowState())
 }

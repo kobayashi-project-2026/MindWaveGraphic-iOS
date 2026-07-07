@@ -97,8 +97,8 @@ struct LogInView: View {
                         if canSubmit {
                             showValidationError = false
                             flowState.isGuestUser = false
-                            flowState.authStatus  = .mainApp
-                            print("[Navigation] logIn -> mainApp")
+                            flowState.authStatus  = .contextCalibration
+                            print("[Navigation] logIn -> contextCalibration")
                         } else {
                             showValidationError = true
                         }

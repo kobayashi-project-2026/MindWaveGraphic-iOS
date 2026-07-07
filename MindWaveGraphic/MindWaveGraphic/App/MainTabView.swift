@@ -16,6 +16,7 @@ struct MainTabView: View {
     @StateObject private var viewModel    = MindWaveViewModel()
     @StateObject private var historyStore = GuideHistoryStore()
     @State       private var selectedTab  = 0
+    @EnvironmentObject private var flowState: AppFlowState
 
     // MARK: - Body
 
@@ -43,6 +44,12 @@ struct MainTabView: View {
         .environmentObject(viewModel)
         .environmentObject(historyStore)
         .preferredColorScheme(.dark)
+        .onAppear {
+            viewModel.measurementContext = flowState.measurementContext
+        }
+        .onChange(of: flowState.measurementContext) { _, newCtx in
+            viewModel.measurementContext = newCtx
+        }
         .onChange(of: selectedTab) { _, newValue in
             print("[UI][Tab] selected index=\(newValue)")
         }

@@ -61,6 +61,9 @@ final class MindWaveViewModel: ObservableObject {
     @Published var didFetchHeartRate: Bool      = false
     @Published var didFetchHRV: Bool            = false
 
+    /// 測定コンテキスト。AppFlowStateから設定され、StressScoreCalculatorへ渡される。
+    @Published var measurementContext: MeasurementContext = .default
+
     // MARK: - 新規サンプル判定（診断用）
 
     @Published var latestHeartRateSampleDate: Date? = nil
@@ -322,7 +325,8 @@ final class MindWaveViewModel: ObservableObject {
                 currentHeartRate: currentHeartRate,
                 averageHeartRate: averageHeartRate,
                 currentHRV:    sample.hrv ?? 0.0,
-                averageHRV:    sample.hrv != nil ? averageHRV : 0.0
+                averageHRV:    sample.hrv != nil ? averageHRV : 0.0,
+                context:       measurementContext
             ).stressScore
         }
         let tensionScore = min(100, max(0, rawScore))

@@ -43,11 +43,15 @@ struct AppRootView: View {
                 // ログイン画面（現段階は本番認証未接続）
                 LogInView(flowState: flowState)
 
+            case .contextCalibration:
+                // 測定前コンテキスト選択：場面・身体状態を選んでスコア補正に利用する
+                ContextCalibrationView(flowState: flowState)
+
             case .mainApp:
                 // フェーズ3：3タブのMainTabViewへ切り替え。
-                // ContentView（4タブ）はそのまま残す。
-                // MindWaveViewModelはMainTabViewで1回だけ生成する。
+                // MeasurementContextをenvironmentObjectで渡す。
                 MainTabView()
+                    .environmentObject(flowState)
             }
         }
         .preferredColorScheme(.dark)

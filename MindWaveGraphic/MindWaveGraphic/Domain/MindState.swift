@@ -24,9 +24,17 @@ enum MindState: String, CaseIterable, Equatable, Sendable {
 
     var displayName: String {
         switch self {
-        case .underAroused:   return "落ちすぎている"
-        case .optimalTension: return "いい緊張状態"
-        case .overTense:      return "悪い緊張状態"
+        case .underAroused:   return "CALM"
+        case .optimalTension: return "READY"
+        case .overTense:      return "ALERT"
+        }
+    }
+
+    var displayNameJP: String {
+        switch self {
+        case .underAroused:   return "落ち着き"
+        case .optimalTension: return "集中中間域"
+        case .overTense:      return "高緊張"
         }
     }
 }

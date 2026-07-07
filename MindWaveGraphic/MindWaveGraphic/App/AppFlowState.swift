@@ -18,12 +18,13 @@ import Combine
 /// 認証前後の画面遷移を管理するenum。
 /// 将来Firebase接続時も、このenumは変更せずに内部処理だけ差し替える。
 enum AuthStatus: Equatable {
-    case logoSplash      // ロゴ画面（起動直後）
-    case accountGuidance // アカウント案内
-    case topMenu         // ログイン方法選択
-    case signUp          // 新規登録
-    case logIn           // ログイン
-    case mainApp         // メインアプリ（既存ContentView）
+    case logoSplash          // ロゴ画面（起動直後）
+    case accountGuidance     // アカウント案内
+    case topMenu             // ログイン方法選択
+    case signUp              // 新規登録
+    case logIn               // ログイン
+    case contextCalibration  // 測定前コンテキスト選択（場面・身体状態）
+    case mainApp             // メインアプリ
 }
 
 // MARK: - AppFlowState
@@ -38,6 +39,9 @@ final class AppFlowState: ObservableObject {
 
     /// ゲストとしてメインアプリへ進んだか
     @Published var isGuestUser: Bool = false
+
+    /// 測定コンテキスト（場面・身体状態）。contextCalibrationで選択、mainAppで参照。
+    @Published var measurementContext: MeasurementContext = .default
 
     // ── メモリ上の一時入力（永続化・ログ出力 禁止） ──
 
@@ -55,11 +59,12 @@ final class AppFlowState: ObservableObject {
     /// 全状態をクリアしてロゴ画面へ戻る。
     /// ログアウト・ゲスト終了時に使用する。
     func returnToSplash() {
-        isGuestUser   = false
-        inputEmail    = ""
-        inputPassword = ""
-        inputUsername = ""
-        authStatus    = .logoSplash
+        isGuestUser         = false
+        measurementContext  = .default
+        inputEmail          = ""
+        inputPassword       = ""
+        inputUsername       = ""
+        authStatus          = .logoSplash
         print("[Navigation] returnToSplash")
     }
 }
