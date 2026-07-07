@@ -63,6 +63,8 @@ struct MainTabView: View {
         ("履歴",     "clock",              "clock.fill"),
     ]
 
+    private let tabIdentifiers = ["tab_home", "tab_guide", "tab_history"]
+
     private var missionBar: some View {
         HStack(spacing: 0) {
             ForEach(items.indices, id: \.self) { idx in
@@ -105,6 +107,7 @@ struct MainTabView: View {
                 .buttonStyle(.plain)
                 .animation(.easeInOut(duration: 0.20), value: active)
                 .accessibilityLabel(items[idx].label)
+                .accessibilityIdentifier(tabIdentifiers[idx])
                 .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
             }
         }

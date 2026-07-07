@@ -99,6 +99,7 @@ struct AccountGuidanceView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("launch_primary_start_button")
 
                     // ログイン（セカンダリ）
                     Button {
@@ -116,6 +117,7 @@ struct AccountGuidanceView: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("launch_login_button")
                 }
                 .padding(.horizontal, AuthDesign.horizontalPadding)
 

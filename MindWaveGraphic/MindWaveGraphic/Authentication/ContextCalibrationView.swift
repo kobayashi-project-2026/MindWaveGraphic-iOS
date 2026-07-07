@@ -22,29 +22,21 @@ struct ContextCalibrationView: View {
             LaunchStarfieldBG()
                 .ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                // ヘッダー
-                header
-                    .padding(.top, 54)
-                    .padding(.bottom, 28)
-
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 24) {
-                        // 場面選択
-                        sceneSection
-
-                        // 身体状態選択
-                        bodySection
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 32)
+            // スクロールコンテンツ。CTAはsafeAreaInsetで分離し、タップ干渉を完全に防ぐ。
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 24) {
+                    header
+                        .padding(.top, 54)
+                        .padding(.bottom, 20)
+                    sceneSection
+                    bodySection
                 }
-
-                // ボタンエリア
-                actionButtons
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 32)
-                    .padding(.top, 8)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+            }
+            // CTAをスクロールエリアの外（画面下部固定）に配置
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                actionButtonsPanel
             }
         }
     }
@@ -126,6 +118,7 @@ struct ContextCalibrationView: View {
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.15), value: selected)
+        .accessibilityIdentifier("context_scene_\(scene.rawValue)")
     }
 
     // MARK: - Body Section
@@ -194,47 +187,74 @@ struct ContextCalibrationView: View {
         }
         .buttonStyle(.plain)
         .animation(.easeInOut(duration: 0.13), value: selected)
+        .accessibilityIdentifier("context_body_\(cond.rawValue)")
     }
 
-    // MARK: - Action Buttons
+    // MARK: - Action Buttons Panel (safeAreaInset底部固定)
 
-    private var actionButtons: some View {
-        VStack(spacing: 10) {
-            Button {
-                applyAndProceed()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle")
-                        .font(.system(size: 15))
-                    Text("この状況で測定する")
-                        .font(.system(size: 15, weight: .medium))
+    private var actionButtonsPanel: some View {
+        VStack(spacing: 0) {
+            // スクロールコンテンツとの視覚的セパレーター
+            LinearGradient(
+                colors: [Color.clear,
+                         Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.10)],
+                startPoint: .leading, endPoint: .trailing
+            )
+            .frame(height: 0.7)
+
+            VStack(spacing: 10) {
+                Button {
+                    applyAndProceed()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.system(size: 15))
+                        Text("この状況で測定する")
+                            .font(.system(size: 15, weight: .medium))
+                    }
+                    .foregroundStyle(.black)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Color(red: 0.35, green: 0.75, blue: 0.95))
+                            .shadow(color: Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.35),
+                                    radius: 12, y: 4)
+                    )
                 }
-                .foregroundStyle(.black)
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(
-                    RoundedRectangle(cornerRadius: 14)
-                        .fill(Color(red: 0.35, green: 0.75, blue: 0.95))
-                        .shadow(color: Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.35),
-                                radius: 12, y: 4)
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("context_primary_start_button")
+
+                Button {
+                    flowState.measurementContext = .default
+                    flowState.authStatus = .mainApp
+                    print("[Navigation] context skipped -> mainApp")
+                } label: {
+                    Text("あとで選ぶ")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Color.white.opacity(0.40))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("context_skip_button")
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 32)
+        }
+        .background(
+            ZStack {
+                Color.black.opacity(0.90)
+                LinearGradient(
+                    colors: [Color(red: 0.02, green: 0.04, blue: 0.12).opacity(0.0),
+                             Color(red: 0.02, green: 0.04, blue: 0.12).opacity(0.80)],
+                    startPoint: .top, endPoint: .bottom
                 )
             }
-            .buttonStyle(.plain)
-
-            Button {
-                // デフォルトコンテキストのままスキップ
-                flowState.measurementContext = .default
-                flowState.authStatus = .mainApp
-                print("[Navigation] context skipped -> mainApp")
-            } label: {
-                Text("あとで選ぶ")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(Color.white.opacity(0.40))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 40)
-            }
-            .buttonStyle(.plain)
-        }
+            .ignoresSafeArea(edges: .bottom)
+        )
     }
 
     // MARK: - Helpers

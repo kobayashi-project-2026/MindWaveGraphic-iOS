@@ -281,6 +281,7 @@ struct GuideView: View {
             .padding(.top, 12)
             .padding(.bottom, 16)
             .accessibilityLabel(selectedScene != nil ? "この場面で整える" : "場面を選んでから開始できます")
+            .accessibilityIdentifier("guide_start_button")
         }
         .background(Color(red: 0.04, green: 0.05, blue: 0.10).ignoresSafeArea(edges: .bottom))
     }
