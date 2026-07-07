@@ -30,22 +30,22 @@ private struct StarLayer {
 // 残像: Far=点, Mid=短尾(中~高), Near=長尾(低でも短尾あり)。
 // 固定放射線にならないよう trailRatio は wrapGate 依存の速度判定で制限される。
 private let kFar = StarLayer(
-    count: 310, xRange: 1900, yRange: 1500, zDepth: 9000,
-    baseSpd: 0.12, strSpd: 3.80,   // 旧: 0.08/2.50 → 1.5x
+    count: 320, xRange: 1900, yRange: 1500, zDepth: 9000,
+    baseSpd: 0.18, strSpd: 4.50,
     dotMul: 0.52, brightFl: 0.07, brightDp: 1.80,
-    trailRatio: 0.003   // ほぼ点（遠景は常に点を維持）
+    trailRatio: 0.004
 )
 private let kMid = StarLayer(
-    count: 175, xRange: 1100, yRange: 860, zDepth: 5200,
-    baseSpd: 0.28, strSpd: 9.20,   // 旧: 0.15/5.00 → 1.9x
+    count: 180, xRange: 1100, yRange: 860, zDepth: 5200,
+    baseSpd: 0.38, strSpd: 11.50,
     dotMul: 1.05, brightFl: 0.09, brightDp: 1.85,
-    trailRatio: 0.038   // 旧: 0.020 → 中景に軽い尾
+    trailRatio: 0.048
 )
 private let kNear = StarLayer(
-    count: 85, xRange: 560, yRange: 430, zDepth: 2400,
-    baseSpd: 0.42, strSpd: 16.00,  // 旧: 0.25/9.00 → 1.7x/1.8x, 高score3.3x
+    count: 90, xRange: 560, yRange: 430, zDepth: 2400,
+    baseSpd: 0.56, strSpd: 22.00,
     dotMul: 1.70, brightFl: 0.12, brightDp: 2.20,
-    trailRatio: 0.080   // 旧: 0.044 → 近景に18~50pt残像（高score時）
+    trailRatio: 0.105
 )
 private let kLayers: [StarLayer] = [kFar, kMid, kNear]
 private let kFocal: Double = 430
@@ -145,7 +145,7 @@ private struct StarFieldView: View {
 
                 // 残像閾値: 低=9.5pt(ほぼ点), 中=4.2pt, 高=0.8pt(ほぼ全星が尾を持つ)
                 let trailThresh: Double = reduceMotion ? 9999
-                    : max(0.6, (1.0 - raw) * 9.5 + 0.6)
+                    : max(0.5, (1.0 - raw) * 7.0 + 0.5)
                 let wrapGate: Double = diag * 0.34
 
                 // ── グローバル色テーマ（score連動）
@@ -164,7 +164,7 @@ private struct StarFieldView: View {
 
                 // 暖色アクセント確率 (score>0.55 から出現, score=1.0 で最大52%)
                 // 近景・中景で危険感の赤/マゼンタ/アンバーが増加
-                let warmChance: Double = max(0.0, (raw - 0.55) / 0.45) * 0.52
+                let warmChance: Double = max(0.0, (raw - 0.50) / 0.50) * 0.62
 
                 // 輝度ブースト: 中scoreで最も美しく輝く(mid peak), 高scoreで強烈
                 let briBoost: Double = {
@@ -180,9 +180,8 @@ private struct StarFieldView: View {
                 for layer in kLayers {
                     let spdMult    = (layer.baseSpd + intn * layer.strSpd) * ms
                     let maxTrailPx = diag * layer.trailRatio
-                    // kNear判定: count==85
-                    let isNearLyr  = (layer.count == 85)
-                    let isMidLyr   = (layer.count == 175)
+                    let isNearLyr  = (layer.count == 90)
+                    let isMidLyr   = (layer.count == 180)
 
                     for li in 0..<layer.count {
                         let s     = Double(seedIdx)
@@ -278,7 +277,7 @@ private struct StarFieldView: View {
                         )
 
                         // 近景・中景の高速星にハロー（輝き感・mid以上で出現）
-                        if (isNearLyr || (isMidLyr && raw > 0.40)) && raw > 0.38 {
+                        if (isNearLyr || (isMidLyr && raw > 0.25)) && raw > 0.20 {
                             let haloFrac = max(0, (raw - 0.38) / 0.62)
                             let haloMul: Double = isNearLyr ? 3.2 : 1.8
                             let haloR    = dotSz * (0.6 + haloFrac * haloMul)
