@@ -26,23 +26,26 @@ private struct StarLayer {
 // Mid:  low≈0.23 / mid≈1.24 / high≈3.65
 // Far:  low≈0.12 / mid≈0.63 / high≈1.83
 
+// 速度設計 (改訂版): 低=1.5x, 中=2.2x, 高=3.2x 比で飛躍感を強調。
+// 残像: Far=点, Mid=短尾(中~高), Near=長尾(低でも短尾あり)。
+// 固定放射線にならないよう trailRatio は wrapGate 依存の速度判定で制限される。
 private let kFar = StarLayer(
     count: 310, xRange: 1900, yRange: 1500, zDepth: 9000,
-    baseSpd: 0.08, strSpd: 2.50,
+    baseSpd: 0.12, strSpd: 3.80,   // 旧: 0.08/2.50 → 1.5x
     dotMul: 0.52, brightFl: 0.07, brightDp: 1.80,
-    trailRatio: 0.002   // ほぼ点
+    trailRatio: 0.003   // ほぼ点（遠景は常に点を維持）
 )
 private let kMid = StarLayer(
     count: 175, xRange: 1100, yRange: 860, zDepth: 5200,
-    baseSpd: 0.15, strSpd: 5.00,
+    baseSpd: 0.28, strSpd: 9.20,   // 旧: 0.15/5.00 → 1.9x
     dotMul: 1.05, brightFl: 0.09, brightDp: 1.85,
-    trailRatio: 0.020   // 中景は速度次第で短い尾
+    trailRatio: 0.038   // 旧: 0.020 → 中景に軽い尾
 )
 private let kNear = StarLayer(
     count: 85, xRange: 560, yRange: 430, zDepth: 2400,
-    baseSpd: 0.25, strSpd: 9.00,
+    baseSpd: 0.42, strSpd: 16.00,  // 旧: 0.25/9.00 → 1.7x/1.8x, 高score3.3x
     dotMul: 1.70, brightFl: 0.12, brightDp: 2.20,
-    trailRatio: 0.044   // ~41pt上限: 高scoreで線状に見える
+    trailRatio: 0.080   // 旧: 0.044 → 近景に18~50pt残像（高score時）
 )
 private let kLayers: [StarLayer] = [kFar, kMid, kNear]
 private let kFocal: Double = 430
