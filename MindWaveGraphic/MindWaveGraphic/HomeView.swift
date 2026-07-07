@@ -520,24 +520,47 @@ struct HomeView: View {
 
             Spacer(minLength: 2)
 
-            // ── コンテキストチップ（場面・身体状態の簡易表示）
-            if !flowState.measurementContext.isDefault {
-                HStack(spacing: 5) {
+            // ── CONTEXTチップ（常時表示・タップで設定変更）
+            Button {
+                flowState.authStatus = .contextCalibration
+            } label: {
+                HStack(spacing: 6) {
+                    Text("CONTEXT")
+                        .font(.system(size: 7, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.65))
+                        .tracking(1.2)
+                    Rectangle()
+                        .fill(Color.white.opacity(0.20))
+                        .frame(width: 0.7, height: 11)
                     Image(systemName: flowState.measurementContext.scene.icon)
-                        .font(.system(size: 9))
-                        .foregroundStyle(Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.75))
-                    Text(flowState.measurementContext.summaryLabel)
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.80))
+                    Text(contextChipDisplayLabel)
                         .font(.system(size: 9, weight: .light, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.42))
+                        .foregroundStyle(Color.white.opacity(0.55))
                         .lineLimit(1)
+                        .frame(maxWidth: 155, alignment: .leading)
+                    Image(systemName: "pencil.circle")
+                        .font(.system(size: 8))
+                        .foregroundStyle(Color.white.opacity(0.28))
                 }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(Color.white.opacity(0.06))
+                .padding(.vertical, 5)
+                .background(Color.white.opacity(0.05))
                 .clipShape(Capsule())
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
-                .padding(.horizontal, 14)
+                .overlay(
+                    Capsule().strokeBorder(
+                        Color(red: 0.35, green: 0.75, blue: 0.95).opacity(
+                            flowState.measurementContext.isDefault ? 0.13 : 0.28
+                        ),
+                        lineWidth: 0.6
+                    )
+                )
             }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 14)
+            .accessibilityIdentifier("home_context_chip")
+            .accessibilityLabel("状況設定: \(contextChipDisplayLabel)。タップで変更")
 
             // ── 上段: PULSE | 大型計測ボタン | STATE
             HStack(alignment: .center, spacing: 8) {
@@ -967,11 +990,20 @@ struct HomeView: View {
     private var stateLabel: String {
         guard viewModel.didFetchHeartRate || viewModel.didFetchHRV else { return "—" }
         let t = scoreIntensity
-        if t < 0.25 { return "CALM" }
-        if t < 0.50 { return "RELAX" }
-        if t < 0.70 { return "FOCUS" }
-        if t < 0.85 { return "ALERT" }
-        return "TENSE"
+        if t < 0.29 { return "CALM" }
+        if t < 0.44 { return "READY" }
+        if t < 0.59 { return "FOCUS" }
+        if t < 0.79 { return "ALERT" }
+        return "OVERLOAD"
+    }
+
+    private var contextChipDisplayLabel: String {
+        let ctx = flowState.measurementContext
+        if ctx.isDefault { return "安静" }
+        var parts: [String] = [ctx.scene.displayName]
+        let bodyConds = ctx.conditions.filter { $0 != .none }.prefix(2)
+        parts.append(contentsOf: bodyConds.map { $0.displayName })
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - 大型計測ボタン（近未来計器ディスプレイ）
