@@ -67,7 +67,7 @@ struct AccountGuidanceView: View {
                     HStack(spacing: 12) {
                         Text("● HealthKit")
                         Text("● Apple Watch")
-                        Text("● HRV")
+                        Text("● Real-time Pulse")
                     }
                     .font(.system(size: 10, weight: .light, design: .monospaced))
                     .foregroundStyle(Color.white.opacity(0.28))
