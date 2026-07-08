@@ -22,36 +22,67 @@ struct HomeView: View {
     @State private var showStatusDetail   = false
     @State private var buttonGlow: Bool    = false
 
-    // MARK: - Score-reactive accent
+    #if DEBUG
+    // DEBUG専用: visual QA状態の上書き（バックエンド無影響）
+    @State private var visualPreviewScore: Double? = nil
+    private let visualQAStates: [(label: String, id: String, score: Double?)] = [
+        ("OFF",  "off",      nil),
+        ("CALM", "calm",     12.0),
+        ("FCUS", "focus",    40.0),
+        ("ALRT", "alert",    70.0),
+        ("OVLD", "overload", 92.0),
+    ]
+    #endif
 
-    // score 0-100 → 0.0-1.0
-    private var scoreIntensity: Double {
-        min(max(viewModel.graphicInput.score / 100.0, 0.0), 1.0)
+    // 表示用入力（DEBUG上書きがあればそちらを優先、バックエンドは無変更）
+    private var displayInput: GraphicInput {
+        #if DEBUG
+        if let score = visualPreviewScore {
+            return GraphicInput(score: score, confidence: 1.0, state: .optimalTension)
+        }
+        #endif
+        return viewModel.graphicInput
     }
 
-    // 低: 深青-インディゴ / 中: シアン-緑 / 高: シアン + アンバー（星空に合わせる）
+    // DEBUG上書き中はデータあり扱いにして STATE パネルを正しく表示する
+    private var displayHasData: Bool {
+        #if DEBUG
+        if visualPreviewScore != nil { return true }
+        #endif
+        return viewModel.didFetchHeartRate || viewModel.didFetchHRV
+    }
+
+    // MARK: - Score-reactive accent
+
+    // score 0-100 → 0.0-1.0 (displayInput で DEBUG上書きを反映)
+    private var scoreIntensity: Double {
+        min(max(displayInput.score / 100.0, 0.0), 1.0)
+    }
+
+    // 低: 深青 / 中: シアン→緑 / 高: 橙→赤/深紅（ALERT明確・OVERLOAD警告赤）
     private var scoreAccentColor: Color {
         let t = scoreIntensity
         if t < 0.30 {
-            // 深い青→インディゴ
+            // 深い青→シアン
             let phase = t / 0.30
             return Color(hue: 0.68 - phase * 0.10, saturation: 0.90, brightness: 0.88)
         } else if t < 0.65 {
-            // シアン〜緑
+            // シアン→グリーン→橙（0.58→0.10）
             let phase = (t - 0.30) / 0.35
-            return Color(hue: 0.58 - phase * 0.11, saturation: 0.92, brightness: 0.94)
+            return Color(hue: 0.58 - phase * 0.48, saturation: 0.92, brightness: 0.97)
         } else {
-            // アンバー（緊張状態）: hue 0.47→0.08
+            // ALERT→OVERLOAD: 橙→深赤/深紅（0.10→0.00）
             let phase = (t - 0.65) / 0.35
-            let h = 0.47 - phase * 0.39
-            return Color(hue: h < 0 ? h + 1 : h, saturation: 0.94, brightness: 0.97)
+            let h = 0.10 - phase * 0.10
+            return Color(hue: h < 0 ? h + 1 : h, saturation: 0.96, brightness: 1.0)
         }
     }
 
-    // 高緊張時の警戒赤味
+    // 高緊張時の警戒赤味（ALERT以降で深紅化）
     private var dangerTint: Color {
-        let t = max(0, scoreIntensity - 0.70) / 0.30
-        return Color(red: 0.70 * t, green: 0.0, blue: 0.02 * t)
+        guard scoreIntensity > 0.60 else { return .clear }
+        let t = min(1.0, (scoreIntensity - 0.60) / 0.40)
+        return Color(red: 0.88 * t, green: 0.0, blue: 0.04 * t)
     }
 
     // 計測ボタン呼吸パルス周期 (低=3.5s, 高=1.2s)
@@ -74,7 +105,7 @@ struct HomeView: View {
                     .ignoresSafeArea()
 
                 // ── 星粒子グラフィック
-                GraphicHostView(input: viewModel.graphicInput)
+                GraphicHostView(input: displayInput)
                     .frame(maxWidth: .infinity)
                     .frame(height: graphicH)
                     .ignoresSafeArea(edges: .top)
@@ -123,6 +154,14 @@ struct HomeView: View {
                     .padding(.horizontal, 18)
                     .zIndex(50)
 
+                #if DEBUG
+                // ── Visual QA パレット（DEBUG専用: タブバー直上に浮遊、大タップ領域）
+                visualQAPalette
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .zIndex(51)
+                    .allowsHitTesting(true)
+                #endif
+
                 // ── ダッシュボード
                 VStack(spacing: 0) {
                     Spacer()
@@ -136,6 +175,12 @@ struct HomeView: View {
             withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
                 buttonGlow = true
             }
+            #if DEBUG
+            if let qaScore = resolveVisualQAScore() {
+                visualPreviewScore = qaScore
+                print("[VisualQA] env override score=\(qaScore)")
+            }
+            #endif
         }
         .sheet(isPresented: $showSettingsSheet) {
             SettingsView().environmentObject(viewModel)
@@ -359,38 +404,54 @@ struct HomeView: View {
                 rShadow.closeSubpath()
                 ctx.fill(rShadow, with: .color(Color.black.opacity(0.35)))
 
-                // ── 高緊張アラートグロー (t>0.65 → 赤/橙がストラット縁に立ち上がる)
-                let alertT = max(0.0, scoreIntensity - 0.65) / 0.35
+                // ── 高緊張アラートグロー (t>0.58 → 赤がストラット縁に強く立ち上がる)
+                let alertT = max(0.0, scoreIntensity - 0.58) / 0.42
                 if alertT > 0 {
-                    let alertR = Color(red: 0.88, green: 0.18, blue: 0.04)
+                    let alertR = Color(red: 0.97, green: 0.06, blue: 0.06)
                     // 左ストラット — 広ソフトハロー
                     var lAlertGlow = Path()
                     lAlertGlow.move(to: CGPoint(x: eOff, y: 0))
                     lAlertGlow.addLine(to: CGPoint(x: 0, y: strutH - 2))
-                    ctx.stroke(lAlertGlow, with: .color(alertR.opacity(alertT * 0.38)),
-                               lineWidth: 20)
-                    // 左ストラット — シャープライン
                     ctx.stroke(lAlertGlow, with: .color(alertR.opacity(alertT * 0.55)),
-                               lineWidth: 1.8)
+                               lineWidth: 30)
+                    // 左ストラット — ミディアムグロー
+                    ctx.stroke(lAlertGlow, with: .color(alertR.opacity(alertT * 0.72)),
+                               lineWidth: 5)
+                    // 左ストラット — シャープコア
+                    ctx.stroke(lAlertGlow, with: .color(alertR.opacity(alertT * 0.90)),
+                               lineWidth: 2.0)
 
                     // 右ストラット — 広ソフトハロー
                     var rAlertGlow = Path()
                     rAlertGlow.move(to: CGPoint(x: sw - eOff, y: 0))
                     rAlertGlow.addLine(to: CGPoint(x: sw, y: strutH - 2))
-                    ctx.stroke(rAlertGlow, with: .color(alertR.opacity(alertT * 0.38)),
-                               lineWidth: 20)
-                    // 右ストラット — シャープライン
                     ctx.stroke(rAlertGlow, with: .color(alertR.opacity(alertT * 0.55)),
-                               lineWidth: 1.8)
+                               lineWidth: 30)
+                    ctx.stroke(rAlertGlow, with: .color(alertR.opacity(alertT * 0.72)),
+                               lineWidth: 5)
+                    ctx.stroke(rAlertGlow, with: .color(alertR.opacity(alertT * 0.90)),
+                               lineWidth: 2.0)
 
-                    // 上端アラートライン（強）
+                    // 上端アラートライン（強：パルスライン）
                     var topAlert = Path()
                     topAlert.move(to: CGPoint(x: eOff, y: 1.5))
                     topAlert.addLine(to: CGPoint(x: sw - eOff, y: 1.5))
-                    ctx.stroke(topAlert, with: .color(alertR.opacity(alertT * 0.48)),
-                               lineWidth: 11)
-                    ctx.stroke(topAlert, with: .color(alertR.opacity(alertT * 0.72)),
-                               lineWidth: 1.4)
+                    ctx.stroke(topAlert, with: .color(alertR.opacity(alertT * 0.62)),
+                               lineWidth: 18)
+                    ctx.stroke(topAlert, with: .color(alertR.opacity(alertT * 0.85)),
+                               lineWidth: 1.6)
+
+                    // ブリッジにも赤みを伝播
+                    var bAlertL = Path()
+                    bAlertL.move(to: CGPoint(x: 0, y: bridgeY))
+                    bAlertL.addLine(to: CGPoint(x: sw * 0.24, y: bridgeY + bridgeH * 0.12))
+                    ctx.stroke(bAlertL, with: .color(alertR.opacity(alertT * 0.38)), lineWidth: 8)
+                    ctx.stroke(bAlertL, with: .color(alertR.opacity(alertT * 0.65)), lineWidth: 1.2)
+                    var bAlertR = Path()
+                    bAlertR.move(to: CGPoint(x: sw, y: bridgeY))
+                    bAlertR.addLine(to: CGPoint(x: sw * 0.76, y: bridgeY + bridgeH * 0.12))
+                    ctx.stroke(bAlertR, with: .color(alertR.opacity(alertT * 0.38)), lineWidth: 8)
+                    ctx.stroke(bAlertR, with: .color(alertR.opacity(alertT * 0.65)), lineWidth: 1.2)
                 }
             }
         }
@@ -501,6 +562,94 @@ struct HomeView: View {
         .frame(height: 36)
     }
 
+    #if DEBUG
+    // MARK: - Visual QA パレット（DEBUG専用：タブバー直上、大きなタップ領域）
+
+    private var visualQAPalette: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                Image(systemName: "waveform.badge.magnifyingglass")
+                    .font(.system(size: 8, weight: .medium))
+                    .foregroundStyle(Color.cyan.opacity(0.60))
+                    .frame(width: 22)
+                Text("QA")
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.55))
+                    .tracking(1.5)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.top, 6)
+            .padding(.bottom, 4)
+
+            HStack(spacing: 5) {
+                ForEach(visualQAStates.indices, id: \.self) { i in
+                    let item = visualQAStates[i]
+                    let active = visualPreviewScore == item.score
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.20)) {
+                            visualPreviewScore = item.score
+                        }
+                    } label: {
+                        Text(item.label)
+                            .font(.system(size: 10, weight: .black, design: .monospaced))
+                            .tracking(0.4)
+                            .foregroundStyle(active ? Color.black : Color.white.opacity(0.75))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 38)
+                            .background(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(active ? Color.cyan : Color.white.opacity(0.10))
+                                    if active {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(LinearGradient(
+                                                colors: [Color.white.opacity(0.20), .clear],
+                                                startPoint: .top, endPoint: .bottom
+                                            ))
+                                    }
+                                }
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(
+                                        active ? Color.white.opacity(0.28) : Color.cyan.opacity(0.22),
+                                        lineWidth: active ? 1.0 : 0.7
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("visual_state_\(item.id)")
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color.black.opacity(0.82))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(Color.cyan.opacity(0.35), lineWidth: 1.0)
+                )
+        )
+        .padding(.horizontal, 16)
+        .padding(.bottom, MainTabView.missionBarReservedHeight + 6)
+    }
+
+    private func resolveVisualQAScore() -> Double? {
+        guard let state = ProcessInfo.processInfo.environment["VISUAL_QA_STATE"] else { return nil }
+        switch state.uppercased() {
+        case "CALM":     return 12.0
+        case "FOCUS":    return 40.0
+        case "ALERT":    return 70.0
+        case "OVERLOAD": return 92.0
+        default:         return nil
+        }
+    }
+    #endif
+
     // MARK: - ダッシュボード
 
     private func cockpitDashboard(dashH: CGFloat) -> some View {
@@ -513,13 +662,13 @@ struct HomeView: View {
                 var baseLine = Path()
                 baseLine.move(to: CGPoint(x: 0, y: h - 1))
                 baseLine.addLine(to: CGPoint(x: w, y: h - 1))
-                ctx.stroke(baseLine, with: .color(Color.white.opacity(0.12)), lineWidth: 1.0)
+                ctx.stroke(baseLine, with: .color(Color.white.opacity(0.16)), lineWidth: 1.0)
                 // 中央アクセントライン（score連動グロー）
                 var accentLine = Path()
                 accentLine.move(to: CGPoint(x: w * 0.10, y: h - 1))
                 accentLine.addLine(to: CGPoint(x: w * 0.90, y: h - 1))
-                ctx.stroke(accentLine, with: .color(accent.opacity(0.65)), lineWidth: 1.8)
-                ctx.stroke(accentLine, with: .color(accent.opacity(0.22)), lineWidth: 10)
+                ctx.stroke(accentLine, with: .color(accent.opacity(0.82)), lineWidth: 2.2)
+                ctx.stroke(accentLine, with: .color(accent.opacity(0.34)), lineWidth: 14)
                 // セカンドライン（2px上）
                 var line2 = Path()
                 line2.move(to: CGPoint(x: w * 0.25, y: h - 4))
@@ -550,7 +699,7 @@ struct HomeView: View {
                     )
                 }
             }
-            .frame(height: 18)
+            .frame(height: 22)
             .animation(.easeInOut(duration: 1.2), value: scoreIntensity)
 
             Spacer(minLength: 2)
@@ -641,22 +790,31 @@ struct HomeView: View {
                     )
                 )
 
-            // 高緊張時: 危険感の赤いオーバーレイ（視認可能なレベルへ）
+            // 高緊張時: 危険感の赤いオーバーレイ（ALERT以降で深紅化）
             CockpitPanelShape(chamfer: 28)
-                .fill(danger.opacity(0.18))
+                .fill(danger.opacity(0.28))
                 .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
 
-            // 高緊張時: アラートボーダー（パネル縁に赤/橙が立ち上がる）
-            if scoreIntensity > 0.68 {
-                let alertBorderT = (scoreIntensity - 0.68) / 0.32
+            // 高緊張時: アラートボーダー（パネル縁に赤が強く立ち上がる）
+            if scoreIntensity > 0.60 {
+                let alertBorderT = min(1.0, (scoreIntensity - 0.60) / 0.40)
+                // 外側ワイドグロー
                 CockpitPanelShape(chamfer: 28)
                     .stroke(
-                        Color(red: 0.88, green: 0.22, blue: 0.05)
-                            .opacity(alertBorderT * (buttonGlow ? 0.58 : 0.30)),
-                        lineWidth: 2.0
+                        Color(red: 0.97, green: 0.06, blue: 0.06)
+                            .opacity(alertBorderT * (buttonGlow ? 0.72 : 0.40)),
+                        lineWidth: 4.0
                     )
-                    .blur(radius: 3)
+                    .blur(radius: 6)
                     .animation(.easeInOut(duration: 0.9), value: buttonGlow)
+                    .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
+                // 内側シャープライン
+                CockpitPanelShape(chamfer: 28)
+                    .stroke(
+                        Color(red: 1.0, green: 0.06, blue: 0.06)
+                            .opacity(alertBorderT * 0.88),
+                        lineWidth: 1.0
+                    )
                     .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
             }
 
@@ -922,7 +1080,7 @@ struct HomeView: View {
 
     private var statePanel: some View {
         let accent    = scoreAccentColor
-        let hasData   = viewModel.didFetchHeartRate || viewModel.didFetchHRV
+        let hasData   = displayHasData
         let stateStr  = stateLabel
         let barCnt    = stateBarCount
 
@@ -1032,12 +1190,12 @@ struct HomeView: View {
     }
 
     private var stateBarCount: Int {
-        guard viewModel.didFetchHeartRate || viewModel.didFetchHRV else { return 0 }
+        guard displayHasData else { return 0 }
         return min(Int(scoreIntensity * 6.0 + 0.5), 6)
     }
 
     private var stateLabel: String {
-        guard viewModel.didFetchHeartRate || viewModel.didFetchHRV else { return "—" }
+        guard displayHasData else { return "—" }
         let t = scoreIntensity
         if t < 0.29 { return "CALM" }
         if t < 0.44 { return "READY" }

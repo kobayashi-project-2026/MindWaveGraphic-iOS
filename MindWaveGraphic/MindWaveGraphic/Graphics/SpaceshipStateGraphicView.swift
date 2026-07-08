@@ -22,27 +22,27 @@ private struct StarLayer {
     let trailRatio: Double
 }
 
-// 速度設計 (改訂版 visual refine)
-// Near: low≈0.64 / mid≈3.20 / high≈17.8   ratio 1 / 5.0× / 27.8×
-// Mid:  low≈0.44 / mid≈2.08 / high≈11.5
-// Far:  low≈0.20 / mid≈0.93 / high≈5.20
+// 速度設計 (alert-refine / warp-evolve 版)
+// Near: low≈0.64 / mid≈4.0 / high≈22.6    longer trails, faster warp feel
+// Mid:  low≈0.44 / mid≈2.66 / high≈14.8
+// Far:  low≈0.20 / mid≈1.16 / high≈6.45
 private let kFar = StarLayer(
     count: 320, xRange: 1900, yRange: 1500, zDepth: 9000,
-    baseSpd: 0.28, strSpd: 7.00,
+    baseSpd: 0.28, strSpd: 10.00,
     dotMul: 0.48, brightFl: 0.068, brightDp: 1.80,
-    trailRatio: 0.007
+    trailRatio: 0.012
 )
 private let kMid = StarLayer(
     count: 180, xRange: 1100, yRange: 860, zDepth: 5200,
-    baseSpd: 0.62, strSpd: 18.00,
+    baseSpd: 0.62, strSpd: 24.00,
     dotMul: 0.95, brightFl: 0.09, brightDp: 1.85,
-    trailRatio: 0.075
+    trailRatio: 0.14
 )
 private let kNear = StarLayer(
     count: 90, xRange: 560, yRange: 430, zDepth: 2400,
-    baseSpd: 0.92, strSpd: 36.00,
+    baseSpd: 0.92, strSpd: 48.00,
     dotMul: 1.55, brightFl: 0.11, brightDp: 2.20,
-    trailRatio: 0.162
+    trailRatio: 0.30
 )
 private let kLayers: [StarLayer] = [kFar, kMid, kNear]
 private let kFocal: Double = 430
@@ -103,18 +103,34 @@ struct SpaceshipStateGraphicView: View {
                 )
             }
 
-            // 高緊張: 周辺部に赤みの染み
-            if t > 0.75 {
-                let extremePhase = (t - 0.75) / 0.25
+            // ALERT以降: 周辺部に赤みの染み（強化版）
+            if t > 0.58 {
+                let extremePhase = (t - 0.58) / 0.42
                 RadialGradient(
                     colors: [
                         .clear,
-                        Color(red: 0.24 * extremePhase, green: 0.0, blue: 0.025 * extremePhase)
-                            .opacity(0.20)
+                        Color(red: 0.50 * extremePhase, green: 0.0, blue: 0.04 * extremePhase)
+                            .opacity(0.42)
                     ],
                     center: UnitPoint(x: 0.5, y: 0.5),
-                    startRadius: 85,
-                    endRadius: 290
+                    startRadius: 62,
+                    endRadius: 320
+                )
+            }
+
+            // OVERLOAD: 外縁に深い深紅のリング（圧迫感）
+            if t > 0.80 {
+                let ovldPhase = (t - 0.80) / 0.20
+                RadialGradient(
+                    colors: [
+                        .clear,
+                        .clear,
+                        Color(red: 0.70 * ovldPhase, green: 0.0, blue: 0.02)
+                            .opacity(0.28 * ovldPhase)
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.5),
+                    startRadius: 160,
+                    endRadius: 370
                 )
             }
         }
@@ -168,8 +184,8 @@ private struct StarFieldView: View {
                         }
                     }()
 
-                    // 暖色アクセント確率 (score>0.48 から出現, score=1.0 で最大60%)
-                    let warmChance: Double = max(0.0, (raw - 0.48) / 0.52) * 0.60
+                    // 暖色アクセント確率 (score>0.38 から出現, score=1.0 で最大90%)
+                    let warmChance: Double = max(0.0, (raw - 0.38) / 0.62) * 0.90
 
                     // 輝度ブースト
                     let briBoost: Double = {
@@ -283,8 +299,8 @@ private struct StarFieldView: View {
                                 let velSafe = max(velocity, 0.5)
                                 let nx = dvx / velSafe
                                 let ny = dvy / velSafe
-                                // 最小長 3pt 保証 → 低速でも星として見える
-                                let streakLen = max(3.0, min(velocity * 0.88, maxTrailPx))
+                                // 最小長 3pt 保証、高速ワープ感のため伸長係数を引き上げ
+                                let streakLen = max(3.0, min(velocity * 1.30, maxTrailPx))
                                 let txEnd = xj - CGFloat(nx) * streakLen
                                 let tyEnd = y  - CGFloat(ny) * streakLen
 
@@ -294,15 +310,15 @@ private struct StarFieldView: View {
                                 stk.move(to:    CGPoint(x: xj,    y: y))
                                 stk.addLine(to: CGPoint(x: txEnd, y: tyEnd))
 
-                                // 外側ソフトグロー
+                                // 外側ソフトグロー（wider → より輝く尾）
                                 ctx.stroke(stk, with: .color(starCol.opacity(alpha * 0.17)),
-                                           lineWidth: sw * 4.5)
+                                           lineWidth: sw * 5.5)
                                 // 内側グロー
-                                ctx.stroke(stk, with: .color(starCol.opacity(alpha * 0.50)),
-                                           lineWidth: sw * 2.0)
-                                // コア
-                                ctx.stroke(stk, with: .color(starCol.opacity(alpha * 0.94)),
-                                           lineWidth: sw * 0.65)
+                                ctx.stroke(stk, with: .color(starCol.opacity(alpha * 0.52)),
+                                           lineWidth: sw * 1.8)
+                                // コア（薄く＝シャープ）
+                                ctx.stroke(stk, with: .color(starCol.opacity(alpha * 0.96)),
+                                           lineWidth: sw * 0.50)
                                 // 先端ドット（明るい点光源）
                                 let hr = max(0.45, dotSz * 0.38)
                                 ctx.fill(
@@ -410,43 +426,59 @@ private struct StarFieldView: View {
     private var vanishingPointGlow: some View {
         let raw = min(max(visualStress / 6.0, 0.0), 1.0)
         return ZStack {
-            // コアグロー（狭い白/シアン）
+            // コアグロー（狭い白/シアン — 強化版）
             RadialGradient(
                 colors: [
-                    Color.white.opacity(0.055 + raw * 0.048),
-                    Color.cyan.opacity(0.025 + raw * 0.020),
+                    Color.white.opacity(0.092 + raw * 0.110),
+                    Color.cyan.opacity(0.042 + raw * 0.055),
                     .clear
                 ],
                 center: UnitPoint(x: 0.5, y: vpYRatio),
                 startRadius: 2,
-                endRadius: 88
+                endRadius: 95
             )
             .blendMode(.screen)
 
-            // 広いアンビエント（星雲感）
+            // 広いアンビエント（星雲感 — 強化版）
             RadialGradient(
                 colors: [
-                    Color.cyan.opacity(0.032 + raw * 0.024),
+                    Color.cyan.opacity(0.055 + raw * 0.065),
                     .clear
                 ],
                 center: UnitPoint(x: 0.5, y: vpYRatio),
-                startRadius: 22,
-                endRadius: 195
+                startRadius: 18,
+                endRadius: 220
             )
             .blendMode(.screen)
 
-            // 高緊張: 暖色（橙/赤）アラートグロー
-            if raw > 0.56 {
-                let alertP = (raw - 0.56) / 0.44
+            // ALERT以降: 暖色（橙/赤）アラートグロー（強化版）
+            if raw > 0.46 {
+                let alertP = (raw - 0.46) / 0.54
                 RadialGradient(
                     colors: [
-                        Color(hue: 0.068, saturation: 0.90, brightness: 1.0)
-                            .opacity(alertP * 0.080),
+                        Color(hue: 0.04, saturation: 0.95, brightness: 1.0)
+                            .opacity(alertP * 0.145),
                         .clear
                     ],
                     center: UnitPoint(x: 0.5, y: vpYRatio),
                     startRadius: 0,
-                    endRadius: 160
+                    endRadius: 180
+                )
+                .blendMode(.screen)
+            }
+
+            // OVERLOAD: 赤/深紅コアフラッシュ
+            if raw > 0.78 {
+                let ovldP = (raw - 0.78) / 0.22
+                RadialGradient(
+                    colors: [
+                        Color(red: 1.0, green: 0.05, blue: 0.05)
+                            .opacity(ovldP * 0.18),
+                        .clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: vpYRatio),
+                    startRadius: 0,
+                    endRadius: 90
                 )
                 .blendMode(.screen)
             }
