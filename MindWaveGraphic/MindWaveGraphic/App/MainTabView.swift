@@ -34,12 +34,20 @@ struct MainTabView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: MainTabView.missionBarReservedHeight).allowsHitTesting(false)
+                // HomeView (tab 0) は下部コックピットパネルが自前でパディングを持つため0にする
+                Color.clear
+                    .frame(height: selectedTab == 0 ? 0 : MainTabView.missionBarReservedHeight)
+                    .allowsHitTesting(false)
             }
 
-            missionBar
-                .padding(.horizontal, 16)
-                .padding(.bottom, 18)
+            // HomeView (tab 0) ではmissionBarを非表示にする
+            // HomeViewのCockpitNavLeverが代わりにナビゲーションを担当する
+            if selectedTab != 0 {
+                missionBar
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 18)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
         }
         .environmentObject(viewModel)
         .environmentObject(historyStore)
