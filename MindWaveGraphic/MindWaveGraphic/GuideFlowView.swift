@@ -596,23 +596,110 @@ struct GuideFlowView: View {
     }
 
     private var sessionVisual: some View {
-        ZStack {
-            if selectedExercise == .ripple {
-                RippleGuideVisual()
-            } else {
-                FlowGuideVisual()
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                if selectedExercise == .ripple {
+                    RippleGuideVisual()
+                } else {
+                    FlowGuideVisual()
+                }
+                if selectedExercise == .ripple && sessionIsRunning {
+                    let phaseText = ((sessionDurationSeconds - sessionElapsed) % 8) < 4
+                        ? "ゆっくり吸う" : "静かに吐く"
+                    Text(phaseText)
+                        .font(.system(size: 13, weight: .light))
+                        .foregroundStyle(.white.opacity(0.42))
+                        .offset(y: 148)
+                        .animation(.easeInOut(duration: 0.6), value: phaseText)
+                }
             }
-            if selectedExercise == .ripple && sessionIsRunning {
-                let phaseText = ((sessionDurationSeconds - sessionElapsed) % 8) < 4
-                    ? "ゆっくり吸う" : "静かに吐く"
-                Text(phaseText)
-                    .font(.system(size: 13, weight: .light))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .offset(y: 148)
-                    .animation(.easeInOut(duration: 0.6), value: phaseText)
-            }
+
+            // ミニ緊張状態ウィンドウ（右上に常時表示）
+            miniStateWindow
+                .padding(.top, 8)
+                .padding(.trailing, 12)
         }
         .frame(height: 260)
+    }
+
+    // MARK: - ミニ緊張状態ウィンドウ
+
+    private var miniStateWindow: some View {
+        let input  = viewModel.graphicInput
+        let score  = min(max(input.score / 100.0, 0.0), 1.0)
+        let hasData = viewModel.didFetchHeartRate || viewModel.didFetchHRV
+
+        let stateName: String
+        let stateColor: Color
+        if !hasData {
+            stateName = "—"
+            stateColor = Color.white.opacity(0.38)
+        } else if score < 0.25 {
+            stateName = "CALM"
+            stateColor = Color(hue: 0.62, saturation: 0.80, brightness: 0.88)
+        } else if score < 0.55 {
+            stateName = "FOCUS"
+            stateColor = Color(hue: 0.48, saturation: 0.85, brightness: 0.90)
+        } else if score < 0.78 {
+            stateName = "ALERT"
+            stateColor = Color(hue: 0.08, saturation: 0.92, brightness: 0.98)
+        } else {
+            stateName = "OVLD"
+            stateColor = Color(hue: 0.01, saturation: 0.96, brightness: 1.0)
+        }
+
+        return VStack(alignment: .trailing, spacing: 5) {
+            // ヘッダー
+            HStack(spacing: 4) {
+                Text("STRESS")
+                    .font(.system(size: 6.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.35))
+                    .tracking(0.6)
+                Circle()
+                    .fill(stateColor)
+                    .frame(width: 4.5, height: 4.5)
+                    .shadow(color: stateColor.opacity(0.85), radius: 4)
+            }
+
+            // スコアバー
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.white.opacity(0.10))
+                        .frame(height: 3.5)
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(
+                            LinearGradient(
+                                colors: [stateColor.opacity(0.75), stateColor],
+                                startPoint: .leading, endPoint: .trailing
+                            )
+                        )
+                        .frame(width: g.size.width * (hasData ? score : 0), height: 3.5)
+                        .animation(.easeInOut(duration: 1.2), value: score)
+                }
+            }
+            .frame(height: 3.5)
+
+            // 状態ラベル
+            Text(stateName)
+                .font(.system(size: 9, weight: .black, design: .monospaced))
+                .foregroundStyle(stateColor)
+                .tracking(0.4)
+                .animation(.easeInOut(duration: 0.8), value: stateName)
+        }
+        .frame(width: 64)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 9)
+                .fill(Color.black.opacity(0.68))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 9)
+                        .strokeBorder(stateColor.opacity(0.28), lineWidth: 0.8)
+                )
+        )
+        .shadow(color: stateColor.opacity(0.18), radius: 8)
+        .animation(.easeInOut(duration: 1.2), value: hasData)
     }
 
     private var sessionTimeString: String {
