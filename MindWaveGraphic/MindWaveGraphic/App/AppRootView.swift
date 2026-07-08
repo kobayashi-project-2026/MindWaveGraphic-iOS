@@ -21,41 +21,56 @@ struct AppRootView: View {
 
     var body: some View {
         Group {
-            switch flowState.authStatus {
-
-            case .logoSplash:
-                // ロゴ画面：起動直後に表示し、約1.5秒後に自動遷移
-                PureLogoSplashView(flowState: flowState)
-
-            case .accountGuidance:
-                // アカウント案内：ログイン/新規登録 または ゲスト利用の選択
-                AccountGuidanceView(flowState: flowState)
-
-            case .topMenu:
-                // 方法選択：新規登録 or 登録済みでログイン
-                TopMenuView(flowState: flowState)
-
-            case .signUp:
-                // 新規登録画面（現段階は本番認証未接続）
-                SignUpView(flowState: flowState)
-
-            case .logIn:
-                // ログイン画面（現段階は本番認証未接続）
-                LogInView(flowState: flowState)
-
-            case .contextCalibration:
-                // 測定前コンテキスト選択：場面・身体状態を選んでスコア補正に利用する
-                ContextCalibrationView(flowState: flowState)
-
-            case .mainApp:
-                // フェーズ3：3タブのMainTabViewへ切り替え。
-                // MeasurementContextをenvironmentObjectで渡す。
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["SKIP_ONBOARDING"] == "1" {
+                // PureLogoSplashViewを生成しないことでタイマーが発火せず authStatus が上書きされない
                 MainTabView()
                     .environmentObject(flowState)
+                    .onAppear { flowState.isGuestUser = true }
+            } else {
+                authFlow
             }
+            #else
+            authFlow
+            #endif
         }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.3), value: flowState.authStatus)
+    }
+
+    @ViewBuilder
+    private var authFlow: some View {
+        switch flowState.authStatus {
+
+        case .logoSplash:
+            // ロゴ画面：起動直後に表示し、約1.5秒後に自動遷移
+            PureLogoSplashView(flowState: flowState)
+
+        case .accountGuidance:
+            // アカウント案内：ログイン/新規登録 または ゲスト利用の選択
+            AccountGuidanceView(flowState: flowState)
+
+        case .topMenu:
+            // 方法選択：新規登録 or 登録済みでログイン
+            TopMenuView(flowState: flowState)
+
+        case .signUp:
+            // 新規登録画面（現段階は本番認証未接続）
+            SignUpView(flowState: flowState)
+
+        case .logIn:
+            // ログイン画面（現段階は本番認証未接続）
+            LogInView(flowState: flowState)
+
+        case .contextCalibration:
+            // 測定前コンテキスト選択：場面・身体状態を選んでスコア補正に利用する
+            ContextCalibrationView(flowState: flowState)
+
+        case .mainApp:
+            // フェーズ3：3タブのMainTabViewへ切り替え。
+            MainTabView()
+                .environmentObject(flowState)
+        }
     }
 }
 
