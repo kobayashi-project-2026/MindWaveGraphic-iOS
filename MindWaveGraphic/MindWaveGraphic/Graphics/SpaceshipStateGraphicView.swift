@@ -22,27 +22,27 @@ private struct StarLayer {
     let trailRatio: Double
 }
 
-// 速度設計 (alert-refine / warp-evolve 版)
-// Near: low≈0.64 / mid≈4.0 / high≈22.6    longer trails, faster warp feel
-// Mid:  low≈0.44 / mid≈2.66 / high≈14.8
-// Far:  low≈0.20 / mid≈1.16 / high≈6.45
+// 速度設計 (density-boost / warp-strengthen 版)
+// Near: low≈0.70 / mid≈4.5 / high≈28.0    longer trails, stronger warp feel
+// Mid:  low≈0.48 / mid≈3.0 / high≈17.6
+// Far:  low≈0.22 / mid≈1.35 / high≈7.50
 private let kFar = StarLayer(
-    count: 320, xRange: 1900, yRange: 1500, zDepth: 9000,
-    baseSpd: 0.28, strSpd: 10.00,
-    dotMul: 0.48, brightFl: 0.068, brightDp: 1.80,
-    trailRatio: 0.012
+    count: 420, xRange: 1900, yRange: 1500, zDepth: 9000,
+    baseSpd: 0.28, strSpd: 12.00,
+    dotMul: 0.52, brightFl: 0.072, brightDp: 1.80,
+    trailRatio: 0.016
 )
 private let kMid = StarLayer(
-    count: 180, xRange: 1100, yRange: 860, zDepth: 5200,
-    baseSpd: 0.62, strSpd: 24.00,
-    dotMul: 0.95, brightFl: 0.09, brightDp: 1.85,
-    trailRatio: 0.14
+    count: 240, xRange: 1100, yRange: 860, zDepth: 5200,
+    baseSpd: 0.62, strSpd: 28.00,
+    dotMul: 1.00, brightFl: 0.09, brightDp: 1.88,
+    trailRatio: 0.18
 )
 private let kNear = StarLayer(
-    count: 90, xRange: 560, yRange: 430, zDepth: 2400,
-    baseSpd: 0.92, strSpd: 48.00,
-    dotMul: 1.55, brightFl: 0.11, brightDp: 2.20,
-    trailRatio: 0.30
+    count: 120, xRange: 560, yRange: 430, zDepth: 2400,
+    baseSpd: 0.92, strSpd: 60.00,
+    dotMul: 1.60, brightFl: 0.11, brightDp: 2.20,
+    trailRatio: 0.38
 )
 private let kLayers: [StarLayer] = [kFar, kMid, kNear]
 private let kFocal: Double = 430
@@ -422,32 +422,34 @@ private struct StarFieldView: View {
         }
     }
 
-    // 消失点グロー: 星が向かう中心点の光源感
+    // 消失点グロー: 星が向かう中心点の光源感（強化版）
     private var vanishingPointGlow: some View {
         let raw = min(max(visualStress / 6.0, 0.0), 1.0)
         return ZStack {
-            // コアグロー（狭い白/シアン — 強化版）
+            // コアグロー（白/シアン — 明確な消失点）
             RadialGradient(
                 colors: [
-                    Color.white.opacity(0.092 + raw * 0.110),
-                    Color.cyan.opacity(0.042 + raw * 0.055),
+                    Color.white.opacity(0.18 + raw * 0.18),
+                    Color.cyan.opacity(0.09 + raw * 0.10),
+                    Color.cyan.opacity(0.025 + raw * 0.04),
                     .clear
                 ],
                 center: UnitPoint(x: 0.5, y: vpYRatio),
                 startRadius: 2,
-                endRadius: 95
+                endRadius: 110
             )
             .blendMode(.screen)
 
-            // 広いアンビエント（星雲感 — 強化版）
+            // 広いアンビエント（星雲感）
             RadialGradient(
                 colors: [
-                    Color.cyan.opacity(0.055 + raw * 0.065),
+                    Color.cyan.opacity(0.09 + raw * 0.10),
+                    Color.blue.opacity(0.04 + raw * 0.04),
                     .clear
                 ],
                 center: UnitPoint(x: 0.5, y: vpYRatio),
-                startRadius: 18,
-                endRadius: 220
+                startRadius: 20,
+                endRadius: 260
             )
             .blendMode(.screen)
 
