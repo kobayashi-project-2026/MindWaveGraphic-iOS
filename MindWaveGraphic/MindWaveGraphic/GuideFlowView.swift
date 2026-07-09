@@ -648,58 +648,68 @@ struct GuideFlowView: View {
             stateColor = Color(hue: 0.01, saturation: 0.96, brightness: 1.0)
         }
 
-        return VStack(alignment: .trailing, spacing: 5) {
-            // ヘッダー
+        let hrText: String = {
+            if let w = viewModel.latestWatchHeartRate { return String(format: "%.0f", w) }
+            if viewModel.didFetchHeartRate            { return String(format: "%.0f", viewModel.currentHeartRate) }
+            if viewModel.activeDataSource == .mock    { return "72" }
+            return "—"
+        }()
+
+        return VStack(alignment: .trailing, spacing: 4) {
+            // 上段: STATE
             HStack(spacing: 4) {
-                Text("STRESS")
-                    .font(.system(size: 6.5, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.35))
+                Text("STATE")
+                    .font(.system(size: 6, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.32))
                     .tracking(0.6)
                 Circle()
                     .fill(stateColor)
-                    .frame(width: 4.5, height: 4.5)
+                    .frame(width: 4, height: 4)
                     .shadow(color: stateColor.opacity(0.85), radius: 4)
             }
 
-            // スコアバー
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.white.opacity(0.10))
-                        .frame(height: 3.5)
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(
-                            LinearGradient(
-                                colors: [stateColor.opacity(0.75), stateColor],
-                                startPoint: .leading, endPoint: .trailing
-                            )
-                        )
-                        .frame(width: g.size.width * (hasData ? score : 0), height: 3.5)
-                        .animation(.easeInOut(duration: 1.2), value: score)
-                }
-            }
-            .frame(height: 3.5)
-
-            // 状態ラベル
             Text(stateName)
-                .font(.system(size: 9, weight: .black, design: .monospaced))
+                .font(.system(size: 10, weight: .black, design: .monospaced))
                 .foregroundStyle(stateColor)
                 .tracking(0.4)
                 .animation(.easeInOut(duration: 0.8), value: stateName)
+
+            // 区切り
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(height: 0.5)
+
+            // 下段: PULSE
+            Text("PULSE")
+                .font(.system(size: 6, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.32))
+                .tracking(0.6)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(hrText)
+                    .font(.system(size: 13, weight: .thin, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.white.opacity(hasData || viewModel.activeDataSource == .mock ? 0.92 : 0.28))
+                Text("bpm")
+                    .font(.system(size: 6, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.30))
+            }
         }
-        .frame(width: 64)
+        .frame(width: 72)
         .padding(.horizontal, 9)
-        .padding(.vertical, 7)
+        .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 9)
-                .fill(Color.black.opacity(0.68))
+                .fill(Color.black.opacity(0.72))
                 .overlay(
                     RoundedRectangle(cornerRadius: 9)
-                        .strokeBorder(stateColor.opacity(0.28), lineWidth: 0.8)
+                        .strokeBorder(stateColor.opacity(0.32), lineWidth: 0.8)
                 )
         )
-        .shadow(color: stateColor.opacity(0.18), radius: 8)
+        .shadow(color: stateColor.opacity(0.22), radius: 8)
         .animation(.easeInOut(duration: 1.2), value: hasData)
+        .accessibilityIdentifier("guide_session_mini_state_window")
     }
 
     private var sessionTimeString: String {
