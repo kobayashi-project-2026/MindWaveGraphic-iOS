@@ -42,13 +42,13 @@ private struct StarLayer {
 // Near: 近景ワープ・高速ストリーク・星が見えて移動している
 // ─────────────────────────────────────────────────────────────
 private let kFar = StarLayer(
-    count: 820, xRange: 2000, yRange: 1600, zDepth: 9500,
+    count: 1000, xRange: 2600, yRange: 1600, zDepth: 9500,
     baseSpd: 0.40, strSpd: 14.0,
     sizeMul: 0.42, brightFl: 0.090, brightDp: 2.10,
     trailRatio: 0.012
 )
 private let kMid = StarLayer(
-    count: 240, xRange: 1000, yRange:  780, zDepth: 5500,
+    count: 240, xRange: 1280, yRange:  780, zDepth: 5500,
     baseSpd: 0.92, strSpd: 66.0,
     sizeMul: 0.92, brightFl: 0.098, brightDp: 2.20,
     trailRatio: 0.18
@@ -102,6 +102,18 @@ struct SpaceshipStateGraphicView: View {
                 ],
                 startPoint: .top, endPoint: .bottom
             )
+
+            // 常時ブルーネビュラ（ストレスに依存しない宇宙の奥行き）
+            RadialGradient(
+                colors: [
+                    Color(hue: 0.638, saturation: 0.88, brightness: 0.78).opacity(0.07),
+                    Color(hue: 0.645, saturation: 0.90, brightness: 0.72).opacity(0.03),
+                    .clear
+                ],
+                center: UnitPoint(x: 0.5, y: 0.38),
+                startRadius: 30, endRadius: 220
+            )
+            .blendMode(.screen)
 
             // OVERLOAD: 消失点近傍にごく薄い暖色（控えめに）
             if t > 0.72 {

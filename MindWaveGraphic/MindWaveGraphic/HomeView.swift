@@ -328,6 +328,16 @@ struct HomeView: View {
                 var div = Path()
                 div.move(to: CGPoint(x: 6, y: h - 24)); div.addLine(to: CGPoint(x: w - 6, y: h - 24))
                 ctx.stroke(div, with: .color(Color.white.opacity(0.060)), lineWidth: 0.5)
+                // ゲージ目盛り
+                for ti in 0..<5 {
+                    let tx = w * (0.16 + Double(ti) * 0.175)
+                    let tLen: CGFloat = ti == 2 ? 6.5 : 3.5
+                    var tk = Path()
+                    tk.move(to: CGPoint(x: tx, y: h - 23))
+                    tk.addLine(to: CGPoint(x: tx, y: h - 23 + tLen))
+                    ctx.stroke(tk, with: .color(Color.white.opacity(ti == 2 ? 0.18 : 0.09)),
+                               lineWidth: ti == 2 ? 0.7 : 0.5)
+                }
             }
             .animation(.easeInOut(duration: 0.9), value: scoreIntensity)
 
@@ -560,6 +570,16 @@ struct HomeView: View {
                 var div = Path()
                 div.move(to: CGPoint(x: 6, y: h - 24)); div.addLine(to: CGPoint(x: w - 6, y: h - 24))
                 ctx.stroke(div, with: .color(Color.white.opacity(0.060)), lineWidth: 0.5)
+                // ゲージ目盛り
+                for ti in 0..<5 {
+                    let tx = w * (0.16 + Double(ti) * 0.175)
+                    let tLen: CGFloat = ti == 2 ? 6.5 : 3.5
+                    var tk = Path()
+                    tk.move(to: CGPoint(x: tx, y: h - 23))
+                    tk.addLine(to: CGPoint(x: tx, y: h - 23 + tLen))
+                    ctx.stroke(tk, with: .color(Color.white.opacity(ti == 2 ? 0.18 : 0.09)),
+                               lineWidth: ti == 2 ? 0.7 : 0.5)
+                }
             }
             .animation(.easeInOut(duration: 0.9), value: scoreIntensity)
 
@@ -851,6 +871,25 @@ private struct CockpitFrameCanvas: View {
             rI.closeSubpath()
             ctx.fill(rI, with: .color(Color(red: 0.015, green: 0.030, blue: 0.090).opacity(0.28)))
 
+            // ガラス反射光（ストラット内側の光沢感）
+            let refOp = 0.055 + scoreIntensity * 0.030
+            var refL1 = Path()
+            refL1.move(to: CGPoint(x: strutW * 0.03, y: sh * 0.07))
+            refL1.addLine(to: CGPoint(x: strutW * 0.58, y: sh * 0.05))
+            ctx.stroke(refL1, with: .color(Color.white.opacity(refOp)), lineWidth: 0.65)
+            var refL2 = Path()
+            refL2.move(to: CGPoint(x: strutW * 0.03, y: sh * 0.17))
+            refL2.addLine(to: CGPoint(x: strutW * 0.46, y: sh * 0.15))
+            ctx.stroke(refL2, with: .color(Color.white.opacity(refOp * 0.50)), lineWidth: 0.45)
+            var refR1 = Path()
+            refR1.move(to: CGPoint(x: sw - strutW * 0.03, y: sh * 0.07))
+            refR1.addLine(to: CGPoint(x: sw - strutW * 0.58, y: sh * 0.05))
+            ctx.stroke(refR1, with: .color(Color.white.opacity(refOp)), lineWidth: 0.65)
+            var refR2 = Path()
+            refR2.move(to: CGPoint(x: sw - strutW * 0.03, y: sh * 0.17))
+            refR2.addLine(to: CGPoint(x: sw - strutW * 0.46, y: sh * 0.15))
+            ctx.stroke(refR2, with: .color(Color.white.opacity(refOp * 0.50)), lineWidth: 0.45)
+
             let bridgeH = sh - bridgeY
             var bL = Path()
             bL.move(to: CGPoint(x: 0, y: bridgeY))
@@ -886,6 +925,30 @@ private struct CockpitFrameCanvas: View {
             tL.move(to: CGPoint(x: eOff, y: 1))
             tL.addLine(to: CGPoint(x: sw - eOff, y: 1))
             ctx.stroke(tL, with: .color(Color.white.opacity(0.07)), lineWidth: 0.6)
+
+            // HUDコーナーブラケット（ビューポート上角マーカー）
+            let bLen: CGFloat = 13
+            let bOff: CGFloat = eOff + 5
+            let bY:   CGFloat = 12
+            let bCol = Color(hue: 0.625, saturation: 0.55, brightness: 0.85)
+                .opacity(0.30 + scoreIntensity * 0.14)
+            var bTL1 = Path()
+            bTL1.move(to: CGPoint(x: bOff, y: bY))
+            bTL1.addLine(to: CGPoint(x: bOff + bLen, y: bY))
+            ctx.stroke(bTL1, with: .color(bCol), lineWidth: 0.8)
+            var bTL2 = Path()
+            bTL2.move(to: CGPoint(x: bOff, y: bY))
+            bTL2.addLine(to: CGPoint(x: bOff, y: bY + bLen))
+            ctx.stroke(bTL2, with: .color(bCol), lineWidth: 0.8)
+            let bOffR = sw - eOff - 5
+            var bTR1 = Path()
+            bTR1.move(to: CGPoint(x: bOffR, y: bY))
+            bTR1.addLine(to: CGPoint(x: bOffR - bLen, y: bY))
+            ctx.stroke(bTR1, with: .color(bCol), lineWidth: 0.8)
+            var bTR2 = Path()
+            bTR2.move(to: CGPoint(x: bOffR, y: bY))
+            bTR2.addLine(to: CGPoint(x: bOffR, y: bY + bLen))
+            ctx.stroke(bTR2, with: .color(bCol), lineWidth: 0.8)
 
             let alertT = max(0.0, scoreIntensity - 0.66) / 0.34
             if alertT > 0.01 {
@@ -939,6 +1002,19 @@ private struct MetalPanelBackground: View {
                     ],
                     startPoint: .top, endPoint: .bottom
                 ))
+
+            // 水平マイクロスキャンライン（電子計器パネル感）
+            Canvas { ctx, size in
+                for i in 0..<8 {
+                    let y = size.height * (0.16 + Double(i) * 0.105)
+                    var sl = Path()
+                    sl.move(to: CGPoint(x: size.width * 0.04, y: y))
+                    sl.addLine(to: CGPoint(x: size.width * 0.96, y: y))
+                    ctx.stroke(sl, with: .color(Color.white.opacity(0.013)), lineWidth: 0.4)
+                }
+            }
+            .clipShape(CockpitPanelShape(chamfer: 22))
+            .allowsHitTesting(false)
 
             CockpitPanelShape(chamfer: 22)
                 .fill(LinearGradient(
