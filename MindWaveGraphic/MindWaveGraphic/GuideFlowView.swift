@@ -29,6 +29,13 @@ struct GuideFlowView: View {
             _step          = State(initialValue: .exerciseSelection)
             _selectedScene = State(initialValue: scene)
         }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session" {
+            _step             = State(initialValue: .session)
+            _selectedScene    = State(initialValue: .interview)
+            _selectedExercise = State(initialValue: .ripple)
+        }
+        #endif
     }
 
     // MARK: - Flow State
@@ -655,7 +662,18 @@ struct GuideFlowView: View {
             return "—"
         }()
 
-        return VStack(alignment: .trailing, spacing: 4) {
+        return VStack(alignment: .trailing, spacing: 3) {
+            // ── 上端スキャンライン (計器感)
+            Canvas { ctx, size in
+                var hl = Path()
+                hl.move(to: CGPoint(x: 3, y: 1.0))
+                hl.addLine(to: CGPoint(x: size.width - 3, y: 1.0))
+                ctx.stroke(hl, with: .color(stateColor.opacity(0.55)), lineWidth: 0.8)
+                ctx.stroke(hl, with: .color(stateColor.opacity(0.12)), lineWidth: 4)
+            }
+            .frame(height: 3)
+            .animation(.easeInOut(duration: 0.8), value: stateName)
+
             // 上段: STATE
             HStack(spacing: 4) {
                 Text("STATE")
@@ -665,19 +683,21 @@ struct GuideFlowView: View {
                 Circle()
                     .fill(stateColor)
                     .frame(width: 4, height: 4)
-                    .shadow(color: stateColor.opacity(0.85), radius: 4)
+                    .shadow(color: stateColor.opacity(0.90), radius: 5)
             }
 
             Text(stateName)
-                .font(.system(size: 10, weight: .black, design: .monospaced))
+                .font(.system(size: 12, weight: .black, design: .monospaced))
                 .foregroundStyle(stateColor)
+                .shadow(color: stateColor.opacity(0.45), radius: 4)
                 .tracking(0.4)
                 .animation(.easeInOut(duration: 0.8), value: stateName)
 
             // 区切り
             Rectangle()
-                .fill(Color.white.opacity(0.08))
+                .fill(Color.white.opacity(0.10))
                 .frame(height: 0.5)
+                .padding(.vertical, 1)
 
             // 下段: PULSE
             Text("PULSE")
@@ -688,26 +708,51 @@ struct GuideFlowView: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(hrText)
-                    .font(.system(size: 13, weight: .thin, design: .rounded))
+                    .font(.system(size: 15, weight: .thin, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(Color.white.opacity(hasData || viewModel.activeDataSource == .mock ? 0.92 : 0.28))
+                    .foregroundStyle(Color.white.opacity(hasData || viewModel.activeDataSource == .mock ? 0.94 : 0.28))
+                    .contentTransition(.numericText())
                 Text("bpm")
                     .font(.system(size: 6, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.30))
+                    .foregroundStyle(Color.white.opacity(0.32))
             }
+
+            // ミニECGスパークライン
+            Canvas { ctx, sz in
+                let mid = sz.height * 0.50
+                let amp = (hasData || viewModel.activeDataSource == .mock) ? sz.height * 0.44 : sz.height * 0.05
+                let xs: [CGFloat] = [0,0.06,0.11,0.17,0.23,0.27,0.32,0.38,0.44,
+                                     0.48,0.50,0.56,0.62,0.67,0.73,0.77,0.82,0.88,0.94,0.97,1.0]
+                let ys: [CGFloat] = [0,-0.04,-0.20,0.28,0,-0.85,1.0,-0.28,0.30,
+                                     0,0,-0.04,-0.20,0.28,0,-0.85,1.0,-0.28,0.30,0,0]
+                var p = Path()
+                for i in 0..<xs.count {
+                    let pt = CGPoint(x: xs[i] * sz.width, y: mid - ys[i] * amp)
+                    i == 0 ? p.move(to: pt) : p.addLine(to: pt)
+                }
+                let a: CGFloat = (hasData || viewModel.activeDataSource == .mock) ? 0.72 : 0.08
+                ctx.stroke(p, with: .color(stateColor.opacity(a * 0.20)), lineWidth: 2.5)
+                ctx.stroke(p, with: .color(stateColor.opacity(a)), lineWidth: 0.70)
+            }
+            .frame(height: 14)
         }
-        .frame(width: 72)
+        .frame(width: 78)
         .padding(.horizontal, 9)
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
         .background(
-            RoundedRectangle(cornerRadius: 9)
-                .fill(Color.black.opacity(0.72))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9)
-                        .strokeBorder(stateColor.opacity(0.32), lineWidth: 0.8)
-                )
+            ZStack {
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(Color(red: 0.02, green: 0.04, blue: 0.12).opacity(0.88))
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(LinearGradient(
+                        colors: [Color.white.opacity(0.05), .clear],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.18)
+                    ))
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(stateColor.opacity(0.42), lineWidth: 0.9)
+            }
         )
-        .shadow(color: stateColor.opacity(0.22), radius: 8)
+        .shadow(color: stateColor.opacity(0.28), radius: 10)
         .animation(.easeInOut(duration: 1.2), value: hasData)
         .accessibilityIdentifier("guide_session_mini_state_window")
     }

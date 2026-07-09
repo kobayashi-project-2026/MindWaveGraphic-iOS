@@ -44,7 +44,17 @@ struct GuideView: View {
             Spacer().frame(height: MainTabView.missionBarReservedHeight)
         }
         .background(background)
-        .onAppear { print("[UI][Guide] view_appeared") }
+        .onAppear {
+            print("[UI][Guide] view_appeared")
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session" {
+                selectedScene = .interview
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    showFlowView = true
+                }
+            }
+            #endif
+        }
         .fullScreenCover(isPresented: $showFlowView) {
             GuideFlowView(selectedTab: $selectedTab, initialScene: selectedScene)
                 .environmentObject(viewModel)
