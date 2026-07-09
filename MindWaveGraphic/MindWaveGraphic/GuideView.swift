@@ -73,18 +73,29 @@ struct GuideView: View {
     private var background: some View {
         ZStack {
             Color(red: 0.02, green: 0.02, blue: 0.06).ignoresSafeArea()
-            // HUDグリッド（少し強化）
+            // HUDグリッド
             CyberGridShape(cellSize: 44)
-                .stroke(Color.cyan.opacity(0.038), lineWidth: 0.5)
+                .stroke(Color.cyan.opacity(0.052), lineWidth: 0.5)
                 .ignoresSafeArea()
+            // 上部消失点グロー（宇宙感の奥行き）
+            RadialGradient(
+                colors: [
+                    Color(hue: 0.62, saturation: 0.90, brightness: 0.85).opacity(0.06),
+                    .clear
+                ],
+                center: UnitPoint(x: 0.5, y: 0.0),
+                startRadius: 0, endRadius: 240
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
             // 下部から上向きのコックピットパネル反射グロー
             VStack {
                 Spacer()
                 LinearGradient(
-                    colors: [Color(red: 0.02, green: 0.07, blue: 0.22).opacity(0.45), .clear],
+                    colors: [Color(red: 0.02, green: 0.07, blue: 0.22).opacity(0.55), .clear],
                     startPoint: .bottom, endPoint: .top
                 )
-                .frame(height: 160)
+                .frame(height: 180)
                 .allowsHitTesting(false)
             }
             .ignoresSafeArea(edges: .bottom)
@@ -170,7 +181,18 @@ struct GuideView: View {
                 .accessibilityLabel("選択を解除する")
             }
             .padding(14)
-            .background(Color(red: 0.05, green: 0.08, blue: 0.14))
+            .background(
+                ZStack {
+                    Color(red: 0.04, green: 0.07, blue: 0.14)
+                    HStack(spacing: 0) {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.cyan.opacity(0.75))
+                            .frame(width: 2.5)
+                        Spacer()
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+            )
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.cyan.opacity(0.30), lineWidth: 1))
             .animation(.easeInOut(duration: 0.2), value: selectedScene)
@@ -266,6 +288,43 @@ struct GuideView: View {
                             Spacer()
                         }
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    // STATUSラベル（右上）
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Text(selected ? "SEL" : "RDY")
+                                .font(.system(size: 6, weight: .bold, design: .monospaced))
+                                .foregroundStyle(selected ? Color.cyan.opacity(0.60) : Color.white.opacity(0.14))
+                                .tracking(0.8)
+                                .padding(.top, 7)
+                                .padding(.trailing, 8)
+                        }
+                        Spacer()
+                    }
+                    .allowsHitTesting(false)
+                    // 選択時: コーナーHUDブラケット
+                    if selected {
+                        Canvas { ctx, size in
+                            let m: CGFloat = 7
+                            let l: CGFloat = 9
+                            let corners: [(x: CGFloat, y: CGFloat, dx: CGFloat, dy: CGFloat)] = [
+                                (m, m, 1, 1), (size.width - m, m, -1, 1),
+                                (m, size.height - m, 1, -1), (size.width - m, size.height - m, -1, -1)
+                            ]
+                            for c in corners {
+                                var ph = Path()
+                                ph.move(to: CGPoint(x: c.x, y: c.y))
+                                ph.addLine(to: CGPoint(x: c.x + c.dx * l, y: c.y))
+                                ctx.stroke(ph, with: .color(Color.cyan.opacity(0.58)), lineWidth: 1.0)
+                                var pv = Path()
+                                pv.move(to: CGPoint(x: c.x, y: c.y))
+                                pv.addLine(to: CGPoint(x: c.x, y: c.y + c.dy * l))
+                                ctx.stroke(pv, with: .color(Color.cyan.opacity(0.58)), lineWidth: 1.0)
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .allowsHitTesting(false)
                     }
                 }
             )

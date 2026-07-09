@@ -201,7 +201,7 @@ struct GuideFlowView: View {
             .ignoresSafeArea()
             // 極薄HUDグリッド（Home/整える/履歴と同じ宇宙船世界観）
             CyberGridShape(cellSize: 54)
-                .stroke(Color.cyan.opacity(0.016), lineWidth: 0.4)
+                .stroke(Color.cyan.opacity(0.022), lineWidth: 0.4)
                 .ignoresSafeArea()
             // サイドエッジの薄い宇宙の気配
             HStack(spacing: 0) {
@@ -218,6 +218,17 @@ struct GuideFlowView: View {
                 .frame(width: 12)
             }
             .ignoresSafeArea()
+            // 消失点グロー（呼吸集中モードの宇宙感）
+            RadialGradient(
+                colors: [
+                    Color(hue: 0.62, saturation: 0.85, brightness: 0.80).opacity(0.05),
+                    .clear
+                ],
+                center: UnitPoint(x: 0.5, y: 0.30),
+                startRadius: 0, endRadius: 210
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
         }
     }
 
@@ -588,6 +599,23 @@ struct GuideFlowView: View {
 
     private var sessionContent: some View {
         VStack(spacing: 0) {
+            // BREATH MODE HUDラベル
+            HStack(spacing: 8) {
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.20))
+                    .frame(height: 0.5)
+                Text("BREATH MODE")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.40))
+                    .tracking(2.2)
+                    .fixedSize()
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.20))
+                    .frame(height: 0.5)
+            }
+            .padding(.horizontal, 36)
+            .padding(.top, 6)
+
             Spacer()
             sessionVisual
             Spacer()
@@ -624,6 +652,13 @@ struct GuideFlowView: View {
     private var sessionVisual: some View {
         ZStack(alignment: .topTrailing) {
             ZStack {
+                // 外側HUDリング（呼吸UIのコックピット計器感）
+                Circle()
+                    .stroke(Color.cyan.opacity(0.05), lineWidth: 0.7)
+                    .frame(width: 232, height: 232)
+                Circle()
+                    .stroke(Color.white.opacity(0.03), lineWidth: 0.4)
+                    .frame(width: 250, height: 250)
                 if selectedExercise == .ripple {
                     RippleGuideVisual()
                 } else {

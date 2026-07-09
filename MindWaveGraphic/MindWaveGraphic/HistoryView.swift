@@ -34,10 +34,10 @@ struct HistoryView: View {
                 VStack {
                     Spacer()
                     LinearGradient(
-                        colors: [Color(red: 0.02, green: 0.06, blue: 0.20).opacity(0.40), .clear],
+                        colors: [Color(red: 0.02, green: 0.06, blue: 0.20).opacity(0.52), .clear],
                         startPoint: .bottom, endPoint: .top
                     )
-                    .frame(height: 150)
+                    .frame(height: 170)
                     .allowsHitTesting(false)
                 }
                 .ignoresSafeArea(edges: .bottom)
@@ -193,8 +193,47 @@ struct HistoryView: View {
                             .foregroundStyle(Color.cyan.opacity(0.40))
                             .tracking(1.5)
                     }
-                    .padding(.bottom, 18)
+                    .padding(.bottom, 5)
+
+                    // サブステータス行
+                    HStack(spacing: 0) {
+                        Rectangle()
+                            .fill(Color.cyan.opacity(0.10))
+                            .frame(height: 0.5)
+                        Text("  AWAITING BIOMETRIC INPUT  ")
+                            .font(.system(size: 6.5, weight: .light, design: .monospaced))
+                            .foregroundStyle(Color.white.opacity(0.16))
+                            .tracking(0.8)
+                            .fixedSize()
+                        Rectangle()
+                            .fill(Color.cyan.opacity(0.10))
+                            .frame(height: 0.5)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
                 }
+
+                // コーナーHUDブラケット（ターミナルパネル四隅マーカー）
+                Canvas { ctx, size in
+                    let m: CGFloat = 9
+                    let l: CGFloat = 14
+                    let corners: [(x: CGFloat, y: CGFloat, dx: CGFloat, dy: CGFloat)] = [
+                        (m, m, 1, 1), (size.width - m, m, -1, 1),
+                        (m, size.height - m, 1, -1), (size.width - m, size.height - m, -1, -1)
+                    ]
+                    for c in corners {
+                        var ph = Path()
+                        ph.move(to: CGPoint(x: c.x, y: c.y))
+                        ph.addLine(to: CGPoint(x: c.x + c.dx * l, y: c.y))
+                        ctx.stroke(ph, with: .color(Color.cyan.opacity(0.28)), lineWidth: 0.9)
+                        var pv = Path()
+                        pv.move(to: CGPoint(x: c.x, y: c.y))
+                        pv.addLine(to: CGPoint(x: c.x, y: c.y + c.dy * l))
+                        ctx.stroke(pv, with: .color(Color.cyan.opacity(0.28)), lineWidth: 0.9)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .allowsHitTesting(false)
             }
             .padding(.horizontal, 4)
 
