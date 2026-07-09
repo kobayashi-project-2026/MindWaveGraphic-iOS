@@ -2,115 +2,111 @@
 //  GuideRelaxationVisuals.swift
 //  MindWaveGraphic
 //
-//  友人のコードの波紋・流れる帯アニメーションを既存UIへ統合したもの。
-//  RippleGuideVisual と FlowGuideVisual を提供する。
-//  MindWaveのデザイン（黒〜濃紺、青/シアン系）に合わせて再実装。
-//  Reduce Motion 対応・VoiceOver ラベル付き。
+//  呼吸ガイドビジュアル。4-7-8 / BOX / 2-1-4 の3呼吸法に対応した
+//  BreathingCircleVisual を提供する。
 //
 
 import SwiftUI
 
-// MARK: - Ripple
+// MARK: - BreathingCircleVisual
 
-/// 波紋呼吸ガイドビジュアル。3つの波紋円が時間差で外側へ広がる。
-/// 友人コードの概念（Circle + scaleEffect + opacity animation）を
-/// MindWaveデザインへ統合。青〜シアン系、背景は黒〜濃紺。
-struct RippleGuideVisual: View {
-    var body: some View {
-        ZStack {
-            ForEach(0..<3, id: \.self) { index in
-                MindWaveRippleCircle(delay: Double(index) * 1.4)
-            }
-        }
-        .accessibilityLabel("呼吸を整える波紋アニメーション")
-        .accessibilityAddTraits(.isImage)
-    }
-}
-
-/// 波紋の1リング。外側へ広がりながら透明になる。
-/// delay パラメータで各リングの開始タイミングをずらす。
-/// Reduce Motion ON のときはアニメーションを停止し、静止した半透明リングのみ表示する。
-struct MindWaveRippleCircle: View {
-    let delay: Double
-    @State private var animate = false
+/// 呼吸に合わせて拡縮するサークルビジュアル。
+/// exercise の cycleTotal / breathPhase を使い、1秒刻みでフェーズを計算する。
+struct BreathingCircleVisual: View {
+    let exercise: GuideExercise
+    let elapsedSeconds: Int
+    let isRunning: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
-        Circle()
-            .stroke(
-                LinearGradient(
-                    colors: [
-                        Color.cyan.opacity(0.65),
-                        Color.blue.opacity(0.35)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                lineWidth: 1.8
-            )
-            .scaleEffect(reduceMotion ? 1.5 : (animate ? 4.2 : 0.1))
-            .opacity(reduceMotion ? 0.3 : (animate ? 0 : 0.85))
-            .animation(
-                reduceMotion
-                    ? nil
-                    : .easeOut(duration: 4.5)
-                        .repeatForever(autoreverses: false)
-                        .delay(delay),
-                value: animate
-            )
-            .onAppear { animate = true }
+    private var phaseText: String {
+        guard isRunning else { return "準備" }
+        return exercise.breathPhase(elapsed: elapsedSeconds).text
     }
-}
 
-// MARK: - Flow
+    private var circleScale: CGFloat {
+        guard isRunning else { return 0.68 }
+        return exercise.breathPhase(elapsed: elapsedSeconds).scale
+    }
 
-/// 流れる帯ガイドビジュアル。5本の横長帯が左右へゆっくり往復する。
-/// 友人コードの概念（RoundedRectangle + offset animation）を
-/// GeometryReader で画面幅対応にし、MindWaveデザインへ統合。
-/// Reduce Motion ON のときは帯の移動を停止する。
-struct FlowGuideVisual: View {
-    @State private var move = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var cycleCount: Int {
+        guard isRunning, exercise.cycleTotal > 0 else { return 0 }
+        return elapsedSeconds / exercise.cycleTotal + 1
+    }
 
     var body: some View {
-        GeometryReader { geometry in
-            // 画面幅の80%を使用、最大360ptに制限
-            let bandWidth = min(geometry.size.width * 0.80, 360)
-            let spacing: CGFloat = 20
+        VStack(spacing: 14) {
+            ZStack {
+                // 外側アンビエントグロー
+                Circle()
+                    .fill(Color.cyan.opacity(0.04))
+                    .frame(width: 195, height: 195)
+                    .scaleEffect(reduceMotion ? 1.0 : circleScale * 1.14)
+                    .blur(radius: 18)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.85), value: circleScale)
 
-            VStack(spacing: spacing) {
-                ForEach(0..<5, id: \.self) { index in
-                    flowBand(width: bandWidth, index: index)
+                // 外縁HUDリング（装飾）
+                Circle()
+                    .stroke(Color.cyan.opacity(0.06), lineWidth: 0.6)
+                    .frame(width: 176, height: 176)
+
+                // メインストロークリング
+                Circle()
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.cyan.opacity(0.82),
+                                Color(hue: 0.60, saturation: 0.70, brightness: 0.80).opacity(0.45)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 2.2
+                    )
+                    .frame(width: 152, height: 152)
+                    .scaleEffect(reduceMotion ? 0.85 : circleScale)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.85), value: circleScale)
+
+                // 内側フィル（息の量感）
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color.cyan.opacity(0.10), Color.cyan.opacity(0.02)],
+                            center: .center, startRadius: 0, endRadius: 76
+                        )
+                    )
+                    .frame(width: 150, height: 150)
+                    .scaleEffect(reduceMotion ? 0.85 : circleScale)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.85), value: circleScale)
+
+                // 中央テキスト
+                VStack(spacing: 5) {
+                    Text(phaseText)
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(.white.opacity(0.90))
+                        .animation(.easeInOut(duration: 0.30), value: phaseText)
+                    Text(exercise.timingLabel)
+                        .font(.system(size: 10, weight: .light, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.52))
+                        .tracking(1.8)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .onAppear { move = true }
-        .accessibilityLabel("ゆっくり流れるリラクゼーションアニメーション")
-        .accessibilityAddTraits(.isImage)
-    }
+            .frame(width: 200, height: 200)
 
-    private func flowBand(width: CGFloat, index: Int) -> some View {
-        RoundedRectangle(cornerRadius: 50)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color.white.opacity(0.22),
-                        Color.cyan.opacity(0.15)
-                    ],
-                    startPoint: .leading,
-                    endPoint: .trailing
-                )
-            )
-            .frame(width: width, height: 18)
-            .offset(x: reduceMotion ? 0 : (move ? 28 : -28))
-            .animation(
-                reduceMotion
-                    ? nil
-                    : .easeInOut(duration: 3.2)
-                        .repeatForever(autoreverses: true)
-                        .delay(Double(index) * 0.30),
-                value: move
-            )
+            // サイクルカウンター
+            if isRunning {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 7, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.22))
+                    Text("CYCLE \(cycleCount)")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.28))
+                        .tracking(1.5)
+                }
+                .transition(.opacity)
+            }
+        }
+        .accessibilityLabel("\(exercise.title) 呼吸ガイド \(phaseText)")
+        .accessibilityAddTraits(.isImage)
     }
 }

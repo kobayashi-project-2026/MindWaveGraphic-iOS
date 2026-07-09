@@ -255,7 +255,7 @@ struct RecordDetailView: View {
     NavigationStack {
         RecordDetailView(record: GuideSessionRecord(
             id: UUID(), startedAt: Date(),
-            scene: .interview, exercise: .ripple,
+            scene: .interview, exercise: .breathing478,
             durationSeconds: 180,
             before: snap, after: nil,
             hrvUpdated: false,

@@ -33,7 +33,7 @@ struct GuideFlowView: View {
         if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session" {
             _step             = State(initialValue: .session)
             _selectedScene    = State(initialValue: .interview)
-            _selectedExercise = State(initialValue: .ripple)
+            _selectedExercise = State(initialValue: .breathing478)
         }
         #endif
     }
@@ -549,7 +549,7 @@ struct GuideFlowView: View {
 
     private var exerciseListContent: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 // おすすめバナー
                 if let scene = selectedScene {
                     HStack(spacing: 8) {
@@ -574,20 +574,29 @@ struct GuideFlowView: View {
                 }
 
                 Text("ガイドを選んでください")
-                    .font(.system(size: 13, weight: .light))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(.system(size: 12, weight: .light))
+                    .foregroundStyle(.white.opacity(0.40))
 
-                ForEach(GuideExercise.allCases) { exercise in
-                    ExerciseCard(
-                        exercise:      exercise,
-                        isSelected:    selectedExercise == exercise,
-                        isRecommended: selectedScene?.recommendedExercise == exercise
-                    ) {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            selectedExercise = exercise
+                // 横3列コンパクトカード
+                HStack(spacing: 10) {
+                    ForEach(GuideExercise.allCases) { exercise in
+                        ExerciseCardCompact(
+                            exercise:      exercise,
+                            isSelected:    selectedExercise == exercise,
+                            isRecommended: selectedScene?.recommendedExercise == exercise
+                        ) {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                selectedExercise = exercise
+                            }
+                            MindWaveDebugLogger.log(.flow, "exercise selected exercise=\(exercise.rawValue)")
                         }
-                        MindWaveDebugLogger.log(.flow, "exercise selected exercise=\(exercise.rawValue)")
                     }
+                }
+
+                // 選択済み呼吸法のディテールパネル
+                if let exercise = selectedExercise {
+                    ExerciseDetailPanel(exercise: exercise)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .padding(.horizontal, 20)
@@ -652,26 +661,20 @@ struct GuideFlowView: View {
     private var sessionVisual: some View {
         ZStack(alignment: .topTrailing) {
             ZStack {
-                // 外側HUDリング（呼吸UIのコックピット計器感）
+                // 外側HUDリング（コックピット計器感）
                 Circle()
-                    .stroke(Color.cyan.opacity(0.05), lineWidth: 0.7)
-                    .frame(width: 232, height: 232)
+                    .stroke(Color.cyan.opacity(0.05), lineWidth: 0.6)
+                    .frame(width: 236, height: 236)
                 Circle()
-                    .stroke(Color.white.opacity(0.03), lineWidth: 0.4)
-                    .frame(width: 250, height: 250)
-                if selectedExercise == .ripple {
-                    RippleGuideVisual()
-                } else {
-                    FlowGuideVisual()
-                }
-                if selectedExercise == .ripple && sessionIsRunning {
-                    let phaseText = ((sessionDurationSeconds - sessionElapsed) % 8) < 4
-                        ? "ゆっくり吸う" : "静かに吐く"
-                    Text(phaseText)
-                        .font(.system(size: 13, weight: .light))
-                        .foregroundStyle(.white.opacity(0.42))
-                        .offset(y: 148)
-                        .animation(.easeInOut(duration: 0.6), value: phaseText)
+                    .stroke(Color.white.opacity(0.025), lineWidth: 0.4)
+                    .frame(width: 254, height: 254)
+
+                if let exercise = selectedExercise {
+                    BreathingCircleVisual(
+                        exercise: exercise,
+                        elapsedSeconds: sessionDurationSeconds - sessionElapsed,
+                        isRunning: sessionIsRunning
+                    )
                 }
             }
 
@@ -680,7 +683,7 @@ struct GuideFlowView: View {
                 .padding(.top, 8)
                 .padding(.trailing, 12)
         }
-        .frame(height: 260)
+        .frame(height: 270)
     }
 
     // MARK: - ミニ緊張状態ウィンドウ
@@ -789,6 +792,29 @@ struct GuideFlowView: View {
                 ctx.stroke(p, with: .color(stateColor.opacity(a)), lineWidth: 0.70)
             }
             .frame(height: 14)
+
+            // 右→左へ流れる星流（ストレス状態カラーに連動）
+            let capturedStateColor = stateColor
+            TimelineView(.animation) { tl in
+                Canvas { ctx, sz in
+                    let t = tl.date.timeIntervalSinceReferenceDate
+                    let speeds: [Double] = [22, 15, 30, 18, 26]
+                    let yRatios: [Double] = [0.20, 0.50, 0.30, 0.70, 0.45]
+                    let radii: [CGFloat] = [1.2, 0.7, 1.0, 0.8, 1.3]
+                    let alphas: [CGFloat] = [0.20, 0.13, 0.17, 0.10, 0.22]
+                    for i in 0..<5 {
+                        let xBase = t * speeds[i]
+                        let x = sz.width - CGFloat(xBase.truncatingRemainder(dividingBy: Double(sz.width + 6)))
+                        let y = sz.height * CGFloat(yRatios[i])
+                        let r = radii[i]
+                        ctx.fill(
+                            Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
+                            with: .color(capturedStateColor.opacity(alphas[i]))
+                        )
+                    }
+                }
+            }
+            .frame(height: 8)
         }
         .frame(width: 78)
         .padding(.horizontal, 9)
@@ -1252,6 +1278,116 @@ private struct ExerciseCard: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(exercise.title)\(isRecommended ? "（おすすめ）" : "")")
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+// MARK: - ExerciseCardCompact（横3列コンパクトカード）
+
+private struct ExerciseCardCompact: View {
+    let exercise:      GuideExercise
+    let isSelected:    Bool
+    let isRecommended: Bool
+    let action:        () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 7) {
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? Color.cyan.opacity(0.18) : Color.white.opacity(0.06))
+                        .frame(width: 42, height: 42)
+                    Image(systemName: exercise.icon)
+                        .font(.system(size: 18, weight: .light))
+                        .foregroundStyle(isSelected ? Color.cyan.opacity(0.95) : Color.white.opacity(0.55))
+                }
+                Text(exercise.title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(isSelected ? .white : .white.opacity(0.72))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(exercise.timingLabel)
+                    .font(.system(size: 8, weight: .light, design: .monospaced))
+                    .foregroundStyle(isSelected ? Color.cyan.opacity(0.70) : Color.white.opacity(0.32))
+                    .tracking(0.5)
+                if isRecommended {
+                    Text("REC")
+                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.85))
+                        .tracking(0.5)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(Color.cyan.opacity(0.12))
+                        )
+                }
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(isSelected ? Color.cyan.opacity(0.90) : .white.opacity(0.18))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 6)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13)
+                        .fill(isSelected
+                              ? Color(red: 0.02, green: 0.18, blue: 0.30)
+                              : Color.white.opacity(0.04))
+                    RoundedRectangle(cornerRadius: 13)
+                        .strokeBorder(
+                            isSelected ? Color.cyan.opacity(0.45) : Color.white.opacity(0.08),
+                            lineWidth: isSelected ? 1.0 : 0.7
+                        )
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 13)
+                            .stroke(Color.cyan.opacity(0.22), lineWidth: 2)
+                            .blur(radius: 4)
+                    }
+                }
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(exercise.title)\(isRecommended ? "（おすすめ）" : "")")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+// MARK: - ExerciseDetailPanel（選択済み呼吸法の詳細）
+
+private struct ExerciseDetailPanel: View {
+    let exercise: GuideExercise
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: exercise.icon)
+                .font(.system(size: 16))
+                .foregroundStyle(Color.cyan.opacity(0.72))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(exercise.title)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.white.opacity(0.85))
+                    Text(exercise.timingLabel)
+                        .font(.system(size: 10, weight: .light, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.60))
+                        .tracking(0.8)
+                }
+                Text(exercise.description)
+                    .font(.system(size: 11, weight: .light))
+                    .foregroundStyle(.white.opacity(0.40))
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.cyan.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.cyan.opacity(0.22), lineWidth: 0.7)
+                )
+        )
     }
 }
 

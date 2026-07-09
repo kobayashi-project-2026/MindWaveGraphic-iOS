@@ -314,7 +314,7 @@ struct FeedbackRecordView: View {
     )
     FeedbackRecordView(
         before: snap, after: snapAfter,
-        scene: .interview, exercise: .ripple,
+        scene: .interview, exercise: .breathing478,
         durationSeconds: 60,
         onSave: { _ in },
         onCancel: {}

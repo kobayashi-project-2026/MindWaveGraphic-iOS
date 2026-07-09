@@ -74,10 +74,11 @@ enum MeasurementScene: String, CaseIterable, Identifiable {
     /// シーンごとのおすすめガイド（ユーザーは任意に変更できる）
     var recommendedExercise: GuideExercise {
         switch self {
-        case .interview, .sports, .speech: return .ripple
-        case .study, .daily:              return .flow
-        case .social, .meeting:           return .ripple
-        case .other:                      return .ripple
+        case .interview, .speech: return .breathing478
+        case .sports:             return .box
+        case .social, .meeting:   return .box
+        case .study:              return .breathing214
+        case .daily, .other:      return .breathing478
         }
     }
 }
