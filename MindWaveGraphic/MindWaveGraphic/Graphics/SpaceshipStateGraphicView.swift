@@ -42,20 +42,20 @@ private struct StarLayer {
 // Near: 近景ワープ・高速ストリーク・星が見えて移動している
 // ─────────────────────────────────────────────────────────────
 private let kFar = StarLayer(
-    count: 700, xRange: 2000, yRange: 1600, zDepth: 9500,
-    baseSpd: 0.32, strSpd: 10.0,
+    count: 820, xRange: 2000, yRange: 1600, zDepth: 9500,
+    baseSpd: 0.40, strSpd: 14.0,
     sizeMul: 0.42, brightFl: 0.090, brightDp: 2.10,
     trailRatio: 0.012
 )
 private let kMid = StarLayer(
     count: 240, xRange: 1000, yRange:  780, zDepth: 5500,
-    baseSpd: 0.75, strSpd: 52.0,
+    baseSpd: 0.92, strSpd: 66.0,
     sizeMul: 0.92, brightFl: 0.098, brightDp: 2.20,
     trailRatio: 0.18
 )
 private let kNear = StarLayer(
     count: 110, xRange:  420, yRange:  330, zDepth: 2200,
-    baseSpd: 1.20, strSpd: 145.0,
+    baseSpd: 1.48, strSpd: 178.0,
     sizeMul: 1.65, brightFl: 0.140, brightDp: 2.80,
     trailRatio: 0.30
 )
@@ -142,13 +142,13 @@ struct SpaceshipStateGraphicView: View {
         return ZStack {
             // 消失点起点の引力ビネット
             RadialGradient(
-                colors: [.clear, .clear, Color.black.opacity(0.14 + t * 0.44)],
+                colors: [.clear, .clear, Color.black.opacity(0.10 + t * 0.36)],
                 center: UnitPoint(x: 0.5, y: 0.35),
                 startRadius: 85, endRadius: 360
             )
             // 四隅コーナー暗化（コックピット窓感）
             RadialGradient(
-                colors: [.clear, Color.black.opacity(0.22 + t * 0.24)],
+                colors: [.clear, Color.black.opacity(0.18 + t * 0.20)],
                 center: .center,
                 startRadius: 195, endRadius: 395
             )
@@ -423,7 +423,7 @@ private struct StarFieldCanvas: View {
 
         // ストリーク長: ストレスに応じて伸びる (CALM: short, OVERLOAD: medium)
         // 最大を diag*trailRatio*1.5 でキャップ → 画面幅の ~40% 程度
-        let stretchFactor = 0.8 + intn * 2.8   // 0.8x → 3.6x
+        let stretchFactor = 0.88 + intn * 3.0   // 0.88x → 3.88x
         let streakLen = max(5.0, min(velocity * stretchFactor, maxTrailPx * 1.5))
 
         // ストリーク末尾座標
@@ -476,8 +476,8 @@ private struct StarFieldCanvas: View {
                    lineWidth: sw * 0.68)
 
         // 5. 先端の微小輝点 (大きな丸ではなく、非常に小さい点)
-        // 「星の位置」を示す最小限の点 (1.2-2.0px)
-        let tipR = max(0.40, dotSz * 0.28)  // ← 従来の 0.52 から大幅縮小
+        // 「星の位置」を示す最小限の点 (1.0-1.8px)
+        let tipR = max(0.35, dotSz * 0.24)  // 点に見せる・棒に見えない
         ctx.fill(
             Path(ellipseIn: CGRect(x: x - tipR, y: y - tipR,
                                    width: tipR * 2, height: tipR * 2)),

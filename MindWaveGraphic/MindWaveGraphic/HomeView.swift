@@ -272,12 +272,22 @@ struct HomeView: View {
             sub.addLine(to: CGPoint(x: w * 0.82, y: size.height - 5))
             ctx.stroke(sub, with: .color(ac.opacity(0.18)), lineWidth: 0.6)
 
-            for xf in [0.05, 0.95] as [Double] {
+            for xf in [0.05, 0.28, 0.72, 0.95] as [Double] {
                 ctx.fill(
                     Path(ellipseIn: CGRect(x: w*xf - 3, y: size.height - 4.5, width: 6, height: 6)),
-                    with: .color(ac.opacity(0.68))
+                    with: .color(ac.opacity(xf == 0.05 || xf == 0.95 ? 0.72 : 0.42))
+                )
+                // リベット内影
+                ctx.fill(
+                    Path(ellipseIn: CGRect(x: w*xf - 1.5, y: size.height - 3.0, width: 3, height: 3)),
+                    with: .color(Color.black.opacity(0.55))
                 )
             }
+            // パネル右端スロット刻み
+            var notch = Path()
+            notch.move(to: CGPoint(x: w * 0.88, y: size.height - 2))
+            notch.addLine(to: CGPoint(x: w * 0.92, y: size.height - 2))
+            ctx.stroke(notch, with: .color(ac.opacity(0.30)), lineWidth: 1.0)
         }
         .frame(height: 16)
         .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
@@ -305,13 +315,19 @@ struct HomeView: View {
                     Path(roundedRect: CGRect(x: 0.4, y: 0.4, width: w-0.8, height: h-0.8), cornerRadius: cr),
                     with: .color(ac.opacity(0.28)), lineWidth: 0.7
                 )
+                // 極細グリッド (計器内部感)
+                for gy in stride(from: 14.0, through: h - 8, by: 14.0) {
+                    var gl = Path()
+                    gl.move(to: CGPoint(x: 5, y: gy)); gl.addLine(to: CGPoint(x: w - 5, y: gy))
+                    ctx.stroke(gl, with: .color(Color.white.opacity(0.022)), lineWidth: 0.4)
+                }
                 var le = Path()
                 le.move(to: CGPoint(x: 1.2, y: cr+2)); le.addLine(to: CGPoint(x: 1.2, y: h-cr-2))
-                ctx.stroke(le, with: .color(ac.opacity(0.70)), lineWidth: 2.0)
+                ctx.stroke(le, with: .color(ac.opacity(0.72)), lineWidth: 2.2)
                 ctx.stroke(le, with: .color(ac.opacity(0.18)), lineWidth: 7)
                 var div = Path()
                 div.move(to: CGPoint(x: 6, y: h - 24)); div.addLine(to: CGPoint(x: w - 6, y: h - 24))
-                ctx.stroke(div, with: .color(Color.white.opacity(0.055)), lineWidth: 0.5)
+                ctx.stroke(div, with: .color(Color.white.opacity(0.060)), lineWidth: 0.5)
             }
             .animation(.easeInOut(duration: 0.9), value: scoreIntensity)
 
@@ -531,13 +547,19 @@ struct HomeView: View {
                     Path(roundedRect: CGRect(x: 0.4, y: 0.4, width: w-0.8, height: h-0.8), cornerRadius: cr),
                     with: .color(ac.opacity(0.26)), lineWidth: 0.7
                 )
+                // 極細グリッド (計器内部感)
+                for gy in stride(from: 14.0, through: h - 8, by: 14.0) {
+                    var gl = Path()
+                    gl.move(to: CGPoint(x: 5, y: gy)); gl.addLine(to: CGPoint(x: w - 5, y: gy))
+                    ctx.stroke(gl, with: .color(Color.white.opacity(0.022)), lineWidth: 0.4)
+                }
                 var re = Path()
                 re.move(to: CGPoint(x: w - 1.2, y: cr+2)); re.addLine(to: CGPoint(x: w - 1.2, y: h-cr-2))
-                ctx.stroke(re, with: .color(ac.opacity(0.68)), lineWidth: 2.0)
+                ctx.stroke(re, with: .color(ac.opacity(0.70)), lineWidth: 2.2)
                 ctx.stroke(re, with: .color(ac.opacity(0.16)), lineWidth: 7)
                 var div = Path()
                 div.move(to: CGPoint(x: 6, y: h - 24)); div.addLine(to: CGPoint(x: w - 6, y: h - 24))
-                ctx.stroke(div, with: .color(Color.white.opacity(0.055)), lineWidth: 0.5)
+                ctx.stroke(div, with: .color(Color.white.opacity(0.060)), lineWidth: 0.5)
             }
             .animation(.easeInOut(duration: 0.9), value: scoreIntensity)
 
@@ -920,13 +942,20 @@ private struct MetalPanelBackground: View {
 
             CockpitPanelShape(chamfer: 22)
                 .fill(LinearGradient(
-                    colors: [Color.white.opacity(0.042), .clear],
-                    startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.11)
+                    colors: [Color.white.opacity(0.055), .clear],
+                    startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.14)
                 ))
 
             CockpitPanelShape(chamfer: 22)
-                .stroke(ac.opacity(0.36), lineWidth: 0.8)
+                .stroke(ac.opacity(0.38), lineWidth: 0.8)
                 .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
+
+            // 上端ハイライトリップ（計器パネル感）
+            CockpitPanelShape(chamfer: 22)
+                .fill(LinearGradient(
+                    colors: [Color.white.opacity(0.08), .clear],
+                    startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.04)
+                ))
 
             if scoreIntensity > 0.58 {
                 let t = min(1.0, (scoreIntensity - 0.58) / 0.42)
