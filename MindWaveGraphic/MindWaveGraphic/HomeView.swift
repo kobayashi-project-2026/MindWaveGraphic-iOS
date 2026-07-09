@@ -89,10 +89,10 @@ struct HomeView: View {
                 // 4. ヘッダー上端グラデーション (可読性確保)
                 VStack(spacing: 0) {
                     LinearGradient(
-                        colors: [Color.black.opacity(0.60), .clear],
+                        colors: [Color.black.opacity(0.38), .clear],
                         startPoint: .top, endPoint: .bottom
                     )
-                    .frame(height: 80)
+                    .frame(height: 60)
                     Spacer()
                 }
                 .frame(height: graphicH)
@@ -817,7 +817,7 @@ private struct CockpitFrameCanvas: View {
         Canvas { ctx, size in
             let sw = size.width
             let sh = size.height
-            let strutW  = sw * 0.148
+            let strutW  = sw * 0.118
             let strutH  = sh * 0.93
             let bridgeY = sh * 0.85
 
@@ -834,7 +834,7 @@ private struct CockpitFrameCanvas: View {
             lI.addLine(to: CGPoint(x: 0, y: strutH * 0.65))
             lI.addLine(to: CGPoint(x: 0, y: strutH))
             lI.closeSubpath()
-            ctx.fill(lI, with: .color(Color(red: 0.015, green: 0.030, blue: 0.090).opacity(0.75)))
+            ctx.fill(lI, with: .color(Color(red: 0.015, green: 0.030, blue: 0.090).opacity(0.28)))
 
             var rS = Path()
             rS.move(to: CGPoint(x: sw, y: 0))
@@ -849,7 +849,7 @@ private struct CockpitFrameCanvas: View {
             rI.addLine(to: CGPoint(x: sw, y: strutH * 0.65))
             rI.addLine(to: CGPoint(x: sw, y: strutH))
             rI.closeSubpath()
-            ctx.fill(rI, with: .color(Color(red: 0.015, green: 0.030, blue: 0.090).opacity(0.75)))
+            ctx.fill(rI, with: .color(Color(red: 0.015, green: 0.030, blue: 0.090).opacity(0.28)))
 
             let bridgeH = sh - bridgeY
             var bL = Path()
@@ -873,14 +873,14 @@ private struct CockpitFrameCanvas: View {
             var lE = Path()
             lE.move(to: CGPoint(x: eOff, y: 0))
             lE.addLine(to: CGPoint(x: 0, y: strutH - 1))
-            ctx.stroke(lE, with: .color(Color.white.opacity(0.10)), lineWidth: 0.7)
-            ctx.stroke(lE, with: .color(Color.white.opacity(0.04)), lineWidth: 4.5)
+            ctx.stroke(lE, with: .color(Color(hue: 0.625, saturation: 0.75, brightness: 0.85).opacity(0.10 + scoreIntensity * 0.06)), lineWidth: 9)
+            ctx.stroke(lE, with: .color(Color.white.opacity(0.14)), lineWidth: 0.7)
 
             var rE = Path()
             rE.move(to: CGPoint(x: sw - eOff, y: 0))
             rE.addLine(to: CGPoint(x: sw, y: strutH - 1))
-            ctx.stroke(rE, with: .color(Color.white.opacity(0.10)), lineWidth: 0.7)
-            ctx.stroke(rE, with: .color(Color.white.opacity(0.04)), lineWidth: 4.5)
+            ctx.stroke(rE, with: .color(Color(hue: 0.625, saturation: 0.75, brightness: 0.85).opacity(0.10 + scoreIntensity * 0.06)), lineWidth: 9)
+            ctx.stroke(rE, with: .color(Color.white.opacity(0.14)), lineWidth: 0.7)
 
             var tL = Path()
             tL.move(to: CGPoint(x: eOff, y: 1))
@@ -975,9 +975,9 @@ private struct MetalPanelBackground: View {
     }
 }
 
-// MARK: - CockpitLeverNav
+// MARK: - CockpitLeverNav (shared across Home/Guide/History panels)
 
-private struct CockpitLeverNav: View {
+struct CockpitLeverNav: View {
     @Binding var selectedTab: Int
     let accentColor: Color
 

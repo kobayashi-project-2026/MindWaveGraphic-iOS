@@ -63,127 +63,97 @@ struct MainTabView: View {
         }
     }
 
-    // MARK: - ミッションバー（洗練されたタブバー）
+    // MARK: - Accent color (matches HomeView)
 
-    private let items: [(label: String, icon: String, activeIcon: String)] = [
-        ("ホーム",   "waveform.path.ecg",  "waveform.path.ecg"),
-        ("整える",   "wind",               "wind"),
-        ("履歴",     "clock",              "clock.fill"),
-    ]
+    private var scoreIntensity: Double {
+        min(max(viewModel.graphicInput.score / 100.0, 0), 1)
+    }
 
-    private let tabIdentifiers = ["tab_home", "tab_guide", "tab_history"]
+    private var accentColor: Color {
+        let t = scoreIntensity
+        if t < 0.35 { return Color(hue: 0.620, saturation: 0.92, brightness: 0.92) }
+        if t < 0.62 {
+            let p = (t - 0.35) / 0.27
+            return Color(hue: 0.620 - p * 0.455, saturation: 0.92, brightness: 0.98)
+        }
+        let p = (t - 0.62) / 0.38
+        return Color(hue: max(0, 0.165 - p * 0.165), saturation: 0.96, brightness: 1.0)
+    }
+
+    // MARK: - Cockpit navigation panel (same lever as HomeView)
 
     private var missionBar: some View {
-        HStack(spacing: 0) {
-            ForEach(items.indices, id: \.self) { idx in
-                let active = selectedTab == idx
-                Button {
-                    selectedTab = idx
-                } label: {
-                    VStack(spacing: 3) {
-                        // アイコン（アクティブ時は発光）
-                        Image(systemName: active ? items[idx].activeIcon : items[idx].icon)
-                            .font(.system(size: 18, weight: active ? .semibold : .light))
-                            .foregroundStyle(active ? Color.cyan : Color.white.opacity(0.35))
-                            .shadow(color: active ? Color.cyan.opacity(0.75) : .clear, radius: 7)
+        let ac = accentColor
+        let si = scoreIntensity
 
-                        // 選択インジケーター（ライン＋ドット）
-                        HStack(spacing: 3) {
-                            RoundedRectangle(cornerRadius: 1)
-                                .fill(active ? Color.cyan : Color.clear)
-                                .frame(width: 14, height: 1.5)
-                            if active {
-                                Circle()
-                                    .fill(Color.cyan)
-                                    .frame(width: 2.5, height: 2.5)
-                                    .shadow(color: Color.cyan, radius: 3)
-                            } else {
-                                Color.clear.frame(width: 5.5, height: 2.5)
-                            }
-                        }
-                        .frame(height: 3)
+        return ZStack {
+            // ベース金属パネル
+            RoundedRectangle(cornerRadius: 18)
+                .fill(LinearGradient(
+                    colors: [
+                        Color(red: 0.045, green: 0.075, blue: 0.18),
+                        Color(red: 0.025, green: 0.042, blue: 0.10),
+                        Color(red: 0.010, green: 0.018, blue: 0.055)
+                    ],
+                    startPoint: .top, endPoint: .bottom
+                ))
 
-                        Text(items[idx].label)
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(active ? Color.cyan.opacity(0.85) : Color.white.opacity(0.26))
-                            .tracking(0.3)
+            // 上端ハイライトリップ
+            RoundedRectangle(cornerRadius: 18)
+                .fill(LinearGradient(
+                    colors: [Color.white.opacity(0.065), .clear],
+                    startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.14)
+                ))
+
+            // アクセントボーダー
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(ac.opacity(0.36), lineWidth: 0.8)
+                .animation(.easeInOut(duration: 1.0), value: si)
+
+            // ALERT: 外周赤グロー
+            if si > 0.58 {
+                let t = min(1.0, (si - 0.58) / 0.42)
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color(red: 0.96, green: 0.05, blue: 0.05).opacity(t * 0.62), lineWidth: 0.9)
+                    .animation(.easeInOut(duration: 0.9), value: si)
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color(red: 1.0, green: 0.04, blue: 0.04).opacity(t * 0.32), lineWidth: 2.5)
+                    .blur(radius: 4)
+                    .animation(.easeInOut(duration: 0.9), value: si)
+            }
+
+            VStack(spacing: 0) {
+                // パネルリップライン（HomeViewの panelTopRip と同じ役割）
+                Canvas { ctx, size in
+                    let w = size.width
+                    var main = Path()
+                    main.move(to: CGPoint(x: w * 0.07, y: size.height - 1.0))
+                    main.addLine(to: CGPoint(x: w * 0.93, y: size.height - 1.0))
+                    ctx.stroke(main, with: .color(ac.opacity(0.60)), lineWidth: 1.2)
+                    ctx.stroke(main, with: .color(ac.opacity(0.14)), lineWidth: 7)
+                    for xf in [0.07, 0.35, 0.65, 0.93] as [Double] {
+                        ctx.fill(
+                            Path(ellipseIn: CGRect(x: w*xf - 2.2, y: size.height - 3.2, width: 4.4, height: 4.4)),
+                            with: .color(ac.opacity(xf == 0.07 || xf == 0.93 ? 0.58 : 0.32))
+                        )
+                        ctx.fill(
+                            Path(ellipseIn: CGRect(x: w*xf - 1.0, y: size.height - 2.0, width: 2.2, height: 2.2)),
+                            with: .color(Color.black.opacity(0.55))
+                        )
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .animation(.easeInOut(duration: 0.20), value: active)
-                .accessibilityLabel(items[idx].label)
-                .accessibilityIdentifier(tabIdentifiers[idx])
-                .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
+                .frame(height: 12)
+                .animation(.easeInOut(duration: 1.0), value: si)
+
+                // Home / 整える / 履歴 のレバー（HomeView と同一コンポーネント）
+                CockpitLeverNav(selectedTab: $selectedTab, accentColor: ac)
+                    .padding(.horizontal, 12)
+                    .frame(height: 44)
             }
         }
         .frame(height: 60)
-        .background(
-            ZStack {
-                // ベース素材
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(.ultraThinMaterial)
-
-                // 深い紺グラデーション
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.04, green: 0.06, blue: 0.18).opacity(0.90),
-                                Color(red: 0.02, green: 0.03, blue: 0.10).opacity(0.92)
-                            ],
-                            startPoint: .top, endPoint: .bottom
-                        )
-                    )
-
-                // 上端シアンエッジライン（パネルとの一体化）
-                VStack(spacing: 0) {
-                    LinearGradient(
-                        colors: [Color.cyan.opacity(0.50), Color.cyan.opacity(0.10)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .frame(height: 1.0)
-                    .blur(radius: 0.5)
-                    Spacer()
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-
-                // 外枠ライン
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [Color.cyan.opacity(0.25), Color.white.opacity(0.05)],
-                            startPoint: .top, endPoint: .bottom
-                        ),
-                        lineWidth: 0.8
-                    )
-
-                // 左右端メカニカルアクセント
-                HStack {
-                    VStack {
-                        Spacer()
-                        Rectangle()
-                            .fill(Color.cyan.opacity(0.35))
-                            .frame(width: 6, height: 1.5)
-                        Spacer()
-                    }
-                    .frame(width: 16)
-                    Spacer()
-                    VStack {
-                        Spacer()
-                        Rectangle()
-                            .fill(Color.cyan.opacity(0.35))
-                            .frame(width: 6, height: 1.5)
-                        Spacer()
-                    }
-                    .frame(width: 16)
-                }
-            }
-            .shadow(color: Color.cyan.opacity(0.10), radius: 12, x: 0, y: -3)
-            .shadow(color: .black.opacity(0.65), radius: 24, x: 0, y: 12)
-        )
+        .shadow(color: ac.opacity(0.10), radius: 10, x: 0, y: -2)
+        .shadow(color: .black.opacity(0.60), radius: 20, x: 0, y: 10)
     }
 }
 
