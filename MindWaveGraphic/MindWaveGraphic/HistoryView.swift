@@ -53,44 +53,88 @@ struct HistoryView: View {
     // MARK: - ページヘッダー
 
     private var pageHeader: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
+            // HUD ラベル行
+            HStack(spacing: 8) {
+                Text("MISSION LOG")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.55))
+                    .tracking(1.8)
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.18))
+                    .frame(height: 0.6)
+                    .frame(maxWidth: .infinity)
+                if !historyStore.records.isEmpty {
+                    HStack(spacing: 3) {
+                        Circle()
+                            .fill(Color.cyan.opacity(0.65))
+                            .frame(width: 3.5, height: 3.5)
+                            .shadow(color: Color.cyan.opacity(0.80), radius: 3)
+                        Text("\(historyStore.records.count) REC")
+                            .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color.cyan.opacity(0.55))
+                            .tracking(1.0)
+                    }
+                } else {
+                    Text("STANDBY")
+                        .font(.system(size: 7.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.22))
+                        .tracking(1.2)
+                }
+            }
             Text("履歴")
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(Color.white)
-            HStack(spacing: 8) {
-                Text("SESSION LOG")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.cyan.opacity(0.60))
-                    .tracking(1.2)
-                if !historyStore.records.isEmpty {
-                    Text("·")
-                        .foregroundStyle(Color.white.opacity(0.25))
-                    Text("\(historyStore.records.count) 件")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.35))
-                }
-            }
+            Text("過去のセッションを確認します")
+                .font(.system(size: 12))
+                .foregroundStyle(Color.white.opacity(0.32))
+                .tracking(0.1)
         }
     }
 
     // MARK: - 空状態
 
     private var emptyState: some View {
-        VStack(spacing: 20) {
-            Spacer().frame(height: 24)
-            Image(systemName: "chart.line.uptrend.xyaxis.circle")
-                .font(.system(size: 44, weight: .ultraLight))
-                .foregroundStyle(Color.white.opacity(0.20))
+        VStack(spacing: 18) {
+            Spacer().frame(height: 28)
+
+            // レーダースキャン風アイコン
+            ZStack {
+                ForEach(0..<3, id: \.self) { i in
+                    Circle()
+                        .stroke(Color.cyan.opacity(0.05 + Double(i) * 0.025), lineWidth: 0.6)
+                        .frame(width: CGFloat(44 + i * 22), height: CGFloat(44 + i * 22))
+                }
+                Circle()
+                    .fill(Color.cyan.opacity(0.04))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "waveform.badge.magnifyingglass")
+                    .font(.system(size: 26, weight: .ultraLight))
+                    .foregroundStyle(Color.cyan.opacity(0.35))
+            }
+
             VStack(spacing: 8) {
-                Text("まだ記録がありません")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.50))
+                Text("NO MISSION DATA")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.25))
+                    .tracking(2.2)
                 Text("「整える」タブから呼吸ガイドを実施し、\nセッション終了後に保存すると記録されます。")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.white.opacity(0.30))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.white.opacity(0.28))
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
             }
+
+            // 区切りライン
+            Canvas { ctx, size in
+                var l = Path()
+                l.move(to: CGPoint(x: size.width * 0.25, y: size.height / 2))
+                l.addLine(to: CGPoint(x: size.width * 0.75, y: size.height / 2))
+                ctx.stroke(l, with: .color(Color.cyan.opacity(0.12)), lineWidth: 0.6)
+            }
+            .frame(height: 4)
+            .frame(maxWidth: .infinity)
+
             Spacer().frame(height: 8)
         }
         .frame(maxWidth: .infinity)
@@ -205,9 +249,29 @@ private struct SessionRecordCard: View {
         }
         .padding(16)
         .frame(minHeight: 72)
-        .background(Color(red: 0.05, green: 0.07, blue: 0.11))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.07), lineWidth: 1))
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color(red: 0.04, green: 0.06, blue: 0.11))
+                // 上端ハイライトリップ
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(LinearGradient(
+                        colors: [Color.white.opacity(0.045), .clear],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.25)
+                    ))
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.8)
+                // ステートカラー左エッジ（計器パネル感）
+                HStack(spacing: 0) {
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(stateColor(for: record.before.score).opacity(0.72))
+                        .frame(width: 2.5)
+                        .shadow(color: stateColor(for: record.before.score).opacity(0.45), radius: 5)
+                    Spacer()
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        )
     }
 
     @ViewBuilder

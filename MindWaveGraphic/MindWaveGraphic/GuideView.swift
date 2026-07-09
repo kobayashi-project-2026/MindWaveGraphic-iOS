@@ -82,13 +82,32 @@ struct GuideView: View {
     // MARK: - ページヘッダー
 
     private var pageHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 5) {
+            // HUD ラベル行
+            HStack(spacing: 8) {
+                Text("MISSION CTRL")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.55))
+                    .tracking(1.8)
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.18))
+                    .frame(height: 0.6)
+                    .frame(maxWidth: .infinity)
+                HStack(spacing: 3) {
+                    ForEach(0..<3, id: \.self) { i in
+                        Circle()
+                            .fill(Color.cyan.opacity(i == 2 ? 0.55 : 0.18))
+                            .frame(width: 3, height: 3)
+                    }
+                }
+            }
             Text("整える")
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(Color.white)
             Text("シチュエーションを選んで呼吸ガイドを開始します")
-                .font(.system(size: 13))
-                .foregroundStyle(Color.white.opacity(0.45))
+                .font(.system(size: 12))
+                .foregroundStyle(Color.white.opacity(0.38))
+                .tracking(0.1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -193,17 +212,35 @@ struct GuideView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 130)
             .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(selected
-                          ? Color(red: 0.04, green: 0.10, blue: 0.14)
-                          : Color(red: 0.05, green: 0.07, blue: 0.11))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .strokeBorder(
-                                selected ? Color.cyan.opacity(0.45) : Color.white.opacity(0.07),
-                                lineWidth: selected ? 1.5 : 1
-                            )
-                    )
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(selected
+                              ? Color(red: 0.04, green: 0.10, blue: 0.14)
+                              : Color(red: 0.04, green: 0.06, blue: 0.11))
+                    // 上端ハイライトリップ（計器パネル感）
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(LinearGradient(
+                            colors: [Color.white.opacity(selected ? 0.07 : 0.04), .clear],
+                            startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.18)
+                        ))
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(
+                            selected ? Color.cyan.opacity(0.48) : Color.white.opacity(0.08),
+                            lineWidth: selected ? 1.5 : 0.8
+                        )
+                    // 選択時: 左エッジ発光
+                    if selected {
+                        HStack(spacing: 0) {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color.cyan.opacity(0.75))
+                                .frame(width: 2.5)
+                                .blur(radius: 1)
+                                .shadow(color: Color.cyan.opacity(0.50), radius: 5)
+                            Spacer()
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
             )
         }
         .buttonStyle(.plain)
@@ -260,29 +297,57 @@ struct GuideView: View {
 
     private var ctaSection: some View {
         VStack(spacing: 0) {
-            Rectangle()
-                .fill(Color.white.opacity(0.12))
-                .frame(height: 1)
+            // パネルリップライン（HomeView panelTopRip と同じ意匠）
+            Canvas { ctx, size in
+                let w = size.width
+                var main = Path()
+                main.move(to: CGPoint(x: w * 0.05, y: size.height * 0.5))
+                main.addLine(to: CGPoint(x: w * 0.95, y: size.height * 0.5))
+                ctx.stroke(main, with: .color(Color.cyan.opacity(0.28)), lineWidth: 1.0)
+                ctx.stroke(main, with: .color(Color.cyan.opacity(0.08)), lineWidth: 6)
+                for xf in [0.05, 0.30, 0.70, 0.95] as [Double] {
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: w*xf - 2, y: size.height*0.5 - 2, width: 4, height: 4)),
+                        with: .color(Color.cyan.opacity(xf == 0.05 || xf == 0.95 ? 0.45 : 0.22))
+                    )
+                }
+            }
+            .frame(height: 8)
             Button {
                 guard selectedScene != nil else { return }
                 print("[UI][Guide] session_start_requested scene=\(selectedScene!.rawValue)")
                 showFlowView = true
             } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "wind")
-                        .font(.system(size: 15))
-                    Text(selectedScene != nil ? "この場面で整える" : "場面を選んでください")
-                        .font(.system(size: 15, weight: .semibold))
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(selectedScene != nil
+                              ? LinearGradient(colors: [Color.cyan, Color.cyan.opacity(0.82)],
+                                               startPoint: .top, endPoint: .bottom)
+                              : LinearGradient(colors: [Color(red: 0.08, green: 0.12, blue: 0.22),
+                                                        Color(red: 0.05, green: 0.08, blue: 0.16)],
+                                               startPoint: .top, endPoint: .bottom))
+                    // 上端ハイライトリップ
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(LinearGradient(
+                            colors: [Color.white.opacity(selectedScene != nil ? 0.18 : 0.07), .clear],
+                            startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.22)
+                        ))
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(
+                            selectedScene != nil ? Color.white.opacity(0.20) : Color.cyan.opacity(0.28),
+                            lineWidth: 0.8
+                        )
+                    HStack(spacing: 10) {
+                        Image(systemName: "wind")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(selectedScene != nil ? "この場面で整える" : "場面を選んでください")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                            .tracking(0.3)
+                    }
+                    .foregroundStyle(selectedScene != nil ? Color.black : Color.white.opacity(0.38))
                 }
-                .foregroundStyle(selectedScene != nil ? Color.black : Color.white.opacity(0.60))
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
-                .background(selectedScene != nil ? Color.cyan : Color(red: 0.10, green: 0.13, blue: 0.22))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(selectedScene != nil ? .clear : Color.white.opacity(0.30), lineWidth: 1)
-                )
             }
             .disabled(selectedScene == nil)
             .buttonStyle(.plain)
