@@ -73,9 +73,36 @@ struct GuideView: View {
     private var background: some View {
         ZStack {
             Color(red: 0.02, green: 0.02, blue: 0.06).ignoresSafeArea()
+            // HUDグリッド（少し強化）
             CyberGridShape(cellSize: 44)
-                .stroke(Color.cyan.opacity(0.025), lineWidth: 0.5)
+                .stroke(Color.cyan.opacity(0.038), lineWidth: 0.5)
                 .ignoresSafeArea()
+            // 下部から上向きのコックピットパネル反射グロー
+            VStack {
+                Spacer()
+                LinearGradient(
+                    colors: [Color(red: 0.02, green: 0.07, blue: 0.22).opacity(0.45), .clear],
+                    startPoint: .bottom, endPoint: .top
+                )
+                .frame(height: 160)
+                .allowsHitTesting(false)
+            }
+            .ignoresSafeArea(edges: .bottom)
+            // サイドエッジの宇宙の気配
+            HStack(spacing: 0) {
+                LinearGradient(
+                    colors: [Color.cyan.opacity(0.07), .clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 18)
+                Spacer()
+                LinearGradient(
+                    colors: [.clear, Color.cyan.opacity(0.07)],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 18)
+            }
+            .ignoresSafeArea()
         }
     }
 

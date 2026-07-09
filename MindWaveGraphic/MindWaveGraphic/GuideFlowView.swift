@@ -199,6 +199,25 @@ struct GuideFlowView: View {
                 startPoint: .top, endPoint: .bottom
             )
             .ignoresSafeArea()
+            // 極薄HUDグリッド（Home/整える/履歴と同じ宇宙船世界観）
+            CyberGridShape(cellSize: 54)
+                .stroke(Color.cyan.opacity(0.016), lineWidth: 0.4)
+                .ignoresSafeArea()
+            // サイドエッジの薄い宇宙の気配
+            HStack(spacing: 0) {
+                LinearGradient(
+                    colors: [Color.cyan.opacity(0.05), .clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 12)
+                Spacer()
+                LinearGradient(
+                    colors: [.clear, Color.cyan.opacity(0.05)],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: 12)
+            }
+            .ignoresSafeArea()
         }
     }
 

@@ -28,8 +28,35 @@ struct HistoryView: View {
             ZStack {
                 Color(red: 0.02, green: 0.02, blue: 0.06).ignoresSafeArea()
                 CyberGridShape(cellSize: 44)
-                    .stroke(Color.cyan.opacity(0.025), lineWidth: 0.5)
+                    .stroke(Color.cyan.opacity(0.038), lineWidth: 0.5)
                     .ignoresSafeArea()
+                // 下部コックピットパネル反射グロー
+                VStack {
+                    Spacer()
+                    LinearGradient(
+                        colors: [Color(red: 0.02, green: 0.06, blue: 0.20).opacity(0.40), .clear],
+                        startPoint: .bottom, endPoint: .top
+                    )
+                    .frame(height: 150)
+                    .allowsHitTesting(false)
+                }
+                .ignoresSafeArea(edges: .bottom)
+                // サイドエッジ
+                HStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [Color.cyan.opacity(0.07), .clear],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: 18)
+                    Spacer()
+                    LinearGradient(
+                        colors: [.clear, Color.cyan.opacity(0.07)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: 18)
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 20) {
@@ -95,50 +122,86 @@ struct HistoryView: View {
     // MARK: - 空状態
 
     private var emptyState: some View {
-        VStack(spacing: 18) {
-            Spacer().frame(height: 28)
+        VStack(spacing: 0) {
+            Spacer().frame(height: 24)
 
-            // レーダースキャン風アイコン
+            // 透明パネル枠（ターミナル画面感）
             ZStack {
-                ForEach(0..<3, id: \.self) { i in
-                    Circle()
-                        .stroke(Color.cyan.opacity(0.05 + Double(i) * 0.025), lineWidth: 0.6)
-                        .frame(width: CGFloat(44 + i * 22), height: CGFloat(44 + i * 22))
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(red: 0.03, green: 0.05, blue: 0.12).opacity(0.60))
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(LinearGradient(
+                        colors: [Color.white.opacity(0.04), .clear],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.20)
+                    ))
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.cyan.opacity(0.18), lineWidth: 0.8)
+
+                VStack(spacing: 20) {
+                    // パネル上端バー
+                    HStack(spacing: 6) {
+                        Text("SYS")
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color.cyan.opacity(0.40))
+                            .tracking(1.5)
+                        Rectangle()
+                            .fill(Color.cyan.opacity(0.14))
+                            .frame(height: 0.5)
+                        Text("LOG")
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color.cyan.opacity(0.40))
+                            .tracking(1.5)
+                    }
+                    .padding(.top, 16)
+                    .padding(.horizontal, 20)
+
+                    // レーダースキャン風アイコン
+                    ZStack {
+                        ForEach(0..<3, id: \.self) { i in
+                            Circle()
+                                .stroke(Color.cyan.opacity(0.06 + Double(i) * 0.03), lineWidth: 0.7)
+                                .frame(width: CGFloat(44 + i * 22), height: CGFloat(44 + i * 22))
+                        }
+                        Circle()
+                            .fill(Color.cyan.opacity(0.05))
+                            .frame(width: 44, height: 44)
+                        Image(systemName: "waveform.badge.magnifyingglass")
+                            .font(.system(size: 26, weight: .ultraLight))
+                            .foregroundStyle(Color.cyan.opacity(0.40))
+                    }
+
+                    VStack(spacing: 8) {
+                        Text("NO MISSION DATA")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Color.white.opacity(0.28))
+                            .tracking(2.2)
+                        Text("「整える」タブから呼吸ガイドを実施し、\nセッション終了後に保存すると記録されます。")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.white.opacity(0.30))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(4)
+                    }
+
+                    // ステータス行
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.cyan.opacity(0.55))
+                            .frame(width: 4, height: 4)
+                            .shadow(color: Color.cyan.opacity(0.70), radius: 3)
+                        Text("LOG CHANNEL READY")
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(Color.cyan.opacity(0.40))
+                            .tracking(1.5)
+                    }
+                    .padding(.bottom, 18)
                 }
-                Circle()
-                    .fill(Color.cyan.opacity(0.04))
-                    .frame(width: 44, height: 44)
-                Image(systemName: "waveform.badge.magnifyingglass")
-                    .font(.system(size: 26, weight: .ultraLight))
-                    .foregroundStyle(Color.cyan.opacity(0.35))
             }
+            .padding(.horizontal, 4)
 
-            VStack(spacing: 8) {
-                Text("NO MISSION DATA")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.25))
-                    .tracking(2.2)
-                Text("「整える」タブから呼吸ガイドを実施し、\nセッション終了後に保存すると記録されます。")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.28))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-            }
-
-            // 区切りライン
-            Canvas { ctx, size in
-                var l = Path()
-                l.move(to: CGPoint(x: size.width * 0.25, y: size.height / 2))
-                l.addLine(to: CGPoint(x: size.width * 0.75, y: size.height / 2))
-                ctx.stroke(l, with: .color(Color.cyan.opacity(0.12)), lineWidth: 0.6)
-            }
-            .frame(height: 4)
-            .frame(maxWidth: .infinity)
-
-            Spacer().frame(height: 8)
+            Spacer().frame(height: 12)
         }
         .frame(maxWidth: .infinity)
-        .padding(.top, 20)
+        .padding(.top, 16)
     }
 
     // MARK: - 記録一覧
