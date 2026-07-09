@@ -15,7 +15,7 @@ struct MainTabView: View {
 
     @StateObject private var viewModel    = MindWaveViewModel()
     @StateObject private var historyStore = GuideHistoryStore()
-    @State       private var selectedTab  = 0
+    @State       private var selectedTab  = Int(ProcessInfo.processInfo.environment["INITIAL_TAB"] ?? "0") ?? 0
     @EnvironmentObject private var flowState: AppFlowState
 
     // MARK: - Body
