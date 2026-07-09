@@ -18,6 +18,10 @@ struct MainTabView: View {
     @State       private var selectedTab  = Int(ProcessInfo.processInfo.environment["INITIAL_TAB"] ?? "0") ?? 0
     @EnvironmentObject private var flowState: AppFlowState
 
+    // タブ切替フラッシュ
+    @State private var transitionOpacity: Double = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     // MARK: - Body
 
     var body: some View {
@@ -40,6 +44,33 @@ struct MainTabView: View {
                     .allowsHitTesting(false)
             }
 
+            // コックピットサイドエッジHUD（整える/履歴タブのみ）
+            // 宇宙船の側壁がある感覚を演出する
+            if selectedTab != 0 {
+                HStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [accentColor.opacity(0.12), accentColor.opacity(0.04), .clear],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: 16)
+                    Spacer()
+                    LinearGradient(
+                        colors: [.clear, accentColor.opacity(0.04), accentColor.opacity(0.12)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    .frame(width: 16)
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .animation(.easeInOut(duration: 0.30), value: selectedTab)
+            }
+
+            // タブ切替フラッシュ（レバー操作の "スキャン確認" 感）
+            Color(hue: 0.62, saturation: 0.60, brightness: 0.90)
+                .opacity(transitionOpacity)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+
             // HomeView (tab 0) ではmissionBarを非表示にする
             // HomeViewのCockpitNavLeverが代わりにナビゲーションを担当する
             if selectedTab != 0 {
@@ -58,8 +89,13 @@ struct MainTabView: View {
         .onChange(of: flowState.measurementContext) { _, newCtx in
             viewModel.measurementContext = newCtx
         }
-        .onChange(of: selectedTab) { _, newValue in
+        .onChange(of: selectedTab) { old, newValue in
             print("[UI][Tab] selected index=\(newValue)")
+            guard old != newValue, !reduceMotion else { return }
+            withAnimation(.linear(duration: 0.07)) { transitionOpacity = 0.07 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
+                withAnimation(.easeOut(duration: 0.24)) { transitionOpacity = 0 }
+            }
         }
     }
 
