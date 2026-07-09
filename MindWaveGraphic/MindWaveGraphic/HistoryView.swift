@@ -124,6 +124,24 @@ private struct SessionRecordCard: View {
         return f.string(from: record.startedAt)
     }
 
+    private func stateLabel(for score: Double) -> String {
+        switch score {
+        case ..<25: return "CALM"
+        case ..<55: return "FOCUS"
+        case ..<78: return "ALERT"
+        default:    return "OVLD"
+        }
+    }
+
+    private func stateColor(for score: Double) -> Color {
+        switch score {
+        case ..<25: return Color(hue: 0.62, saturation: 0.80, brightness: 0.88)
+        case ..<55: return Color(hue: 0.48, saturation: 0.85, brightness: 0.90)
+        case ..<78: return Color(hue: 0.08, saturation: 0.92, brightness: 0.98)
+        default:    return Color(hue: 0.01, saturation: 0.96, brightness: 1.0)
+        }
+    }
+
     private var durationLabel: String {
         let m = record.durationSeconds / 60
         let s = record.durationSeconds % 60
@@ -214,16 +232,18 @@ private struct SessionRecordCard: View {
         } else if let after = record.after {
             VStack(alignment: .trailing, spacing: 2) {
                 HStack(spacing: 3) {
-                    Text(String(format: "%.0f", record.before.score))
-                        .foregroundStyle(Color.white.opacity(0.50))
+                    Text(stateLabel(for: record.before.score))
+                        .foregroundStyle(stateColor(for: record.before.score).opacity(0.55))
                     Image(systemName: after.score < record.before.score ? "arrow.down" : "arrow.right")
                         .font(.system(size: 9))
-                        .foregroundStyle(after.score < record.before.score ? Color(red: 0.20, green: 0.85, blue: 0.60) : Color.white.opacity(0.35))
-                    Text(String(format: "%.0f", after.score))
-                        .foregroundStyle(Color.white)
+                        .foregroundStyle(after.score < record.before.score
+                                         ? Color(red: 0.20, green: 0.85, blue: 0.60)
+                                         : Color.white.opacity(0.35))
+                    Text(stateLabel(for: after.score))
+                        .foregroundStyle(stateColor(for: after.score))
                 }
-                .font(.system(size: 14, weight: .medium, design: .rounded))
-                Text("SCORE")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                Text("STATE")
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(Color.white.opacity(0.30))
             }

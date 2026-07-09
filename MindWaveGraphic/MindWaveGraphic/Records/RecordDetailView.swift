@@ -84,12 +84,12 @@ struct RecordDetailView: View {
                         }
                     }
 
-                    // ── 前後スコア ────────────────────────────────────
-                    MindWaveCyberPanel(title: "SCORE COMPARISON") {
+                    // ── 前後状態 ────────────────────────────────────
+                    MindWaveCyberPanel(title: "SESSION STATE") {
                         HStack(spacing: 0) {
-                            cyberScoreColumn("セッション前", score: record.before.score)
+                            cyberStateColumn("セッション前", score: record.before.score)
                             Divider().background(MindWaveCyberTheme.borderColor).frame(width: 1)
-                            cyberScoreColumn("セッション後", score: record.after?.score)
+                            cyberStateColumn("セッション後", score: record.after?.score)
                         }
                         .padding(.vertical, 4)
 
@@ -100,12 +100,9 @@ struct RecordDetailView: View {
                                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                                     .foregroundStyle(MindWaveCyberTheme.textTertiary)
                                 Spacer()
-                                Text(String(format: "%+.1f", delta))
-                                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                                    .foregroundStyle(deltaColor(delta))
                                 Text(deltaSummary(delta))
-                                    .font(.system(size: 11, weight: .light))
-                                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(deltaColor(delta))
                             }
                             .padding(.top, 6)
                         }
@@ -135,7 +132,7 @@ struct RecordDetailView: View {
                         }
                     }
 
-                    // ── 変化要約（変更なし）──────────────────────────
+                    // ── 変化要約 ──────────────────────────
                     if let delta = scoreDelta {
                         MindWaveCyberPanel(title: "SUMMARY") {
                             HStack(spacing: 12) {
@@ -146,7 +143,9 @@ struct RecordDetailView: View {
                                     Text(deltaSummary(delta))
                                         .font(.system(size: 14, weight: .medium))
                                         .foregroundStyle(MindWaveCyberTheme.textPrimary)
-                                    Text("緊張度が\(String(format: "%.1f", abs(delta)))ポイント\(delta < 0 ? "下がりました" : delta > 0 ? "上がりました" : "変化なし")")
+                                    Text(delta < -5 ? "呼吸セッション後、状態が改善しました"
+                                         : delta > 5 ? "呼吸セッション後、状態が変化しました"
+                                         : "呼吸セッション完了")
                                         .font(.system(size: 12, weight: .light))
                                         .foregroundStyle(MindWaveCyberTheme.textSecondary)
                                 }
@@ -201,22 +200,44 @@ struct RecordDetailView: View {
     }
 
     private func cyberScoreColumn(_ label: String, score: Double?) -> some View {
+        cyberStateColumn(label, score: score)
+    }
+
+    private func cyberStateColumn(_ label: String, score: Double?) -> some View {
         VStack(spacing: 6) {
             Text(label)
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(MindWaveCyberTheme.textTertiary)
             if let s = score {
-                Text(scoreText(s))
-                    .font(.system(size: 32, weight: .thin, design: .rounded))
-                    .foregroundStyle(MindWaveTheme.stressColor(score: s))
+                Text(stateLabel(for: s))
+                    .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(stateColor(for: s))
             } else {
                 Text("未取得")
-                    .font(.system(size: 16, weight: .light))
+                    .font(.system(size: 14, weight: .light))
                     .foregroundStyle(MindWaveCyberTheme.textTertiary)
             }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
+    }
+
+    private func stateLabel(for score: Double) -> String {
+        switch score {
+        case ..<25: return "CALM"
+        case ..<55: return "FOCUS"
+        case ..<78: return "ALERT"
+        default:    return "OVLD"
+        }
+    }
+
+    private func stateColor(for score: Double) -> Color {
+        switch score {
+        case ..<25: return Color(hue: 0.62, saturation: 0.80, brightness: 0.88)
+        case ..<55: return Color(hue: 0.48, saturation: 0.85, brightness: 0.90)
+        case ..<78: return Color(hue: 0.08, saturation: 0.92, brightness: 0.98)
+        default:    return Color(hue: 0.01, saturation: 0.96, brightness: 1.0)
+        }
     }
 }
 
