@@ -99,19 +99,53 @@ struct GuideView: View {
                 .allowsHitTesting(false)
             }
             .ignoresSafeArea(edges: .bottom)
-            // サイドエッジの宇宙の気配
+            // コックピットサイドストラット（計器パネル感）
             HStack(spacing: 0) {
-                LinearGradient(
-                    colors: [Color.cyan.opacity(0.07), .clear],
-                    startPoint: .leading, endPoint: .trailing
-                )
-                .frame(width: 18)
+                ZStack(alignment: .leading) {
+                    LinearGradient(
+                        colors: [Color.cyan.opacity(0.07), .clear],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    Canvas { ctx, size in
+                        let sh = size.height
+                        // ストラット内側エッジライン
+                        var el = Path()
+                        el.move(to: CGPoint(x: size.width - 1, y: sh * 0.10))
+                        el.addLine(to: CGPoint(x: size.width - 1, y: sh * 0.90))
+                        ctx.stroke(el, with: .color(Color.cyan.opacity(0.22)), lineWidth: 0.6)
+                        // リベット（等間隔3点）
+                        for i in 0..<3 {
+                            let y = sh * (0.25 + Double(i) * 0.25)
+                            ctx.fill(
+                                Path(ellipseIn: CGRect(x: size.width - 5, y: y - 1.5, width: 3, height: 3)),
+                                with: .color(Color.cyan.opacity(0.28))
+                            )
+                        }
+                    }
+                }
+                .frame(width: 22)
                 Spacer()
-                LinearGradient(
-                    colors: [.clear, Color.cyan.opacity(0.07)],
-                    startPoint: .leading, endPoint: .trailing
-                )
-                .frame(width: 18)
+                ZStack(alignment: .trailing) {
+                    LinearGradient(
+                        colors: [.clear, Color.cyan.opacity(0.07)],
+                        startPoint: .leading, endPoint: .trailing
+                    )
+                    Canvas { ctx, size in
+                        let sh = size.height
+                        var el = Path()
+                        el.move(to: CGPoint(x: 1, y: sh * 0.10))
+                        el.addLine(to: CGPoint(x: 1, y: sh * 0.90))
+                        ctx.stroke(el, with: .color(Color.cyan.opacity(0.22)), lineWidth: 0.6)
+                        for i in 0..<3 {
+                            let y = sh * (0.25 + Double(i) * 0.25)
+                            ctx.fill(
+                                Path(ellipseIn: CGRect(x: 2, y: y - 1.5, width: 3, height: 3)),
+                                with: .color(Color.cyan.opacity(0.28))
+                            )
+                        }
+                    }
+                }
+                .frame(width: 22)
             }
             .ignoresSafeArea()
         }

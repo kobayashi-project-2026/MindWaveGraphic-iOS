@@ -307,6 +307,10 @@ private struct SessionRecordCard: View {
                     Text(record.exercise.title)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color.white)
+                    Text(record.exercise.timingLabel)
+                        .font(.system(size: 9, weight: .light, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.50))
+                        .tracking(0.5)
                     if record.before.isMockData {
                         Text("DEMO")
                             .font(.system(size: 9, weight: .medium, design: .monospaced))
