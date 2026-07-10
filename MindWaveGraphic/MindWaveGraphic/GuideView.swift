@@ -293,24 +293,30 @@ struct GuideView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 130)
+            .frame(height: 140)
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: 12)
                         .fill(selected
-                              ? Color(red: 0.04, green: 0.10, blue: 0.14)
-                              : Color(red: 0.04, green: 0.06, blue: 0.11))
+                              ? Color(red: 0.04, green: 0.10, blue: 0.18)
+                              : Color(red: 0.03, green: 0.06, blue: 0.14))
                     // 上端ハイライトリップ（計器パネル感）
                     RoundedRectangle(cornerRadius: 12)
                         .fill(LinearGradient(
-                            colors: [Color.white.opacity(selected ? 0.07 : 0.04), .clear],
+                            colors: [Color.white.opacity(selected ? 0.09 : 0.05), .clear],
                             startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.18)
                         ))
                     RoundedRectangle(cornerRadius: 12)
                         .strokeBorder(
-                            selected ? Color.cyan.opacity(0.48) : Color.white.opacity(0.08),
-                            lineWidth: selected ? 1.5 : 0.8
+                            selected ? Color.cyan.opacity(0.55) : Color.cyan.opacity(0.18),
+                            lineWidth: selected ? 1.5 : 1.0
                         )
+                    // 非選択時でも外周にわずかなグロー
+                    if !selected {
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.cyan.opacity(0.08), lineWidth: 3)
+                            .blur(radius: 3)
+                    }
                     // 選択時: 左エッジ発光
                     if selected {
                         HStack(spacing: 0) {
@@ -329,7 +335,7 @@ struct GuideView: View {
                             Spacer()
                             Text(selected ? "SEL" : "RDY")
                                 .font(.system(size: 6, weight: .bold, design: .monospaced))
-                                .foregroundStyle(selected ? Color.cyan.opacity(0.60) : Color.white.opacity(0.14))
+                                .foregroundStyle(selected ? Color.cyan.opacity(0.60) : Color.cyan.opacity(0.30))
                                 .tracking(0.8)
                                 .padding(.top, 7)
                                 .padding(.trailing, 8)

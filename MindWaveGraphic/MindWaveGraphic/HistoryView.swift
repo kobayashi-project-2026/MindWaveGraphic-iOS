@@ -104,8 +104,8 @@ struct HistoryView: View {
                     }
                 } else {
                     Text("STANDBY")
-                        .font(.system(size: 7.5, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.22))
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.45))
                         .tracking(1.2)
                 }
             }
@@ -128,14 +128,17 @@ struct HistoryView: View {
             // 透明パネル枠（ターミナル画面感）
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color(red: 0.03, green: 0.05, blue: 0.12).opacity(0.60))
+                    .fill(Color(red: 0.03, green: 0.06, blue: 0.16).opacity(0.80))
                 RoundedRectangle(cornerRadius: 14)
                     .fill(LinearGradient(
-                        colors: [Color.white.opacity(0.04), .clear],
+                        colors: [Color.white.opacity(0.06), .clear],
                         startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.20)
                     ))
                 RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(Color.cyan.opacity(0.18), lineWidth: 0.8)
+                    .stroke(Color.cyan.opacity(0.12), lineWidth: 4)
+                    .blur(radius: 4)
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.cyan.opacity(0.32), lineWidth: 1.0)
 
                 VStack(spacing: 20) {
                     // パネル上端バー
@@ -166,14 +169,15 @@ struct HistoryView: View {
                             .fill(Color.cyan.opacity(0.05))
                             .frame(width: 44, height: 44)
                         Image(systemName: "waveform.badge.magnifyingglass")
-                            .font(.system(size: 26, weight: .ultraLight))
-                            .foregroundStyle(Color.cyan.opacity(0.40))
+                            .font(.system(size: 40, weight: .ultraLight))
+                            .foregroundStyle(Color.cyan.opacity(0.60))
+                            .shadow(color: Color.cyan.opacity(0.35), radius: 12)
                     }
 
                     VStack(spacing: 8) {
                         Text("NO MISSION DATA")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.28))
+                            .foregroundStyle(Color.white.opacity(0.50))
                             .tracking(2.2)
                         Text("「整える」タブから呼吸ガイドを実施し、\nセッション終了後に保存すると記録されます。")
                             .font(.system(size: 12))
@@ -190,7 +194,7 @@ struct HistoryView: View {
                             .shadow(color: Color.cyan.opacity(0.70), radius: 3)
                         Text("LOG CHANNEL READY")
                             .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.cyan.opacity(0.40))
+                            .foregroundStyle(Color.cyan.opacity(0.65))
                             .tracking(1.5)
                     }
                     .padding(.bottom, 5)
@@ -225,11 +229,11 @@ struct HistoryView: View {
                         var ph = Path()
                         ph.move(to: CGPoint(x: c.x, y: c.y))
                         ph.addLine(to: CGPoint(x: c.x + c.dx * l, y: c.y))
-                        ctx.stroke(ph, with: .color(Color.cyan.opacity(0.28)), lineWidth: 0.9)
+                        ctx.stroke(ph, with: .color(Color.cyan.opacity(0.50)), lineWidth: 1.0)
                         var pv = Path()
                         pv.move(to: CGPoint(x: c.x, y: c.y))
                         pv.addLine(to: CGPoint(x: c.x, y: c.y + c.dy * l))
-                        ctx.stroke(pv, with: .color(Color.cyan.opacity(0.28)), lineWidth: 0.9)
+                        ctx.stroke(pv, with: .color(Color.cyan.opacity(0.50)), lineWidth: 1.0)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 14))
