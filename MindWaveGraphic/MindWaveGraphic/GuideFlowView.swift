@@ -176,6 +176,17 @@ struct GuideFlowView: View {
             }
         }
         .onReceive(flowTimer) { _ in tickTimer() }
+        #if DEBUG
+        .onAppear {
+            // シミュレーター撮影補助: GUIDE_AUTOSTART=1 で session を自動開始
+            if ProcessInfo.processInfo.environment["GUIDE_AUTOSTART"] == "1",
+               step == .session {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    sessionIsRunning = true
+                }
+            }
+        }
+        #endif
         .sheet(isPresented: $showFeedbackView) {
             if let before = beforeSnapshot,
                let scene  = selectedScene,
