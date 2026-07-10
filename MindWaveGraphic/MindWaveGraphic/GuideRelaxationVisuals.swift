@@ -68,7 +68,7 @@ struct BreathingCircleVisual: View {
             ZStack {
                 // ── 最外 アンビエントグロー（スケール連動）
                 Circle()
-                    .fill(Color.cyan.opacity(isRunning ? 0.08 : 0.04))
+                    .fill(Color.cyan.opacity(isRunning ? 0.08 : 0.07))
                     .frame(width: 304, height: 304)
                     .scaleEffect(reduceMotion ? 1.0 : circleScale * 1.10)
                     .blur(radius: 30)
@@ -116,26 +116,26 @@ struct BreathingCircleVisual: View {
                     .stroke(
                         LinearGradient(
                             colors: [
-                                Color.cyan.opacity(isRunning ? 0.92 : 0.65),
+                                Color.cyan.opacity(isRunning ? 0.92 : 0.80),
                                 Color(hue: 0.60, saturation: 0.72, brightness: 0.85)
-                                    .opacity(isRunning ? 0.58 : 0.40)
+                                    .opacity(isRunning ? 0.58 : 0.52)
                             ],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
-                        lineWidth: isRunning ? 3.5 : 2.5
+                        lineWidth: isRunning ? 3.5 : 3.2
                     )
                     .frame(width: 240, height: 240)
                     .scaleEffect(reduceMotion ? 0.88 : circleScale)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.92), value: circleScale)
-                    .shadow(color: Color.cyan.opacity(isRunning ? 0.28 : 0.16), radius: 10)
+                    .shadow(color: Color.cyan.opacity(isRunning ? 0.28 : 0.22), radius: 10)
 
                 // ── 内側フィル（息の量感）
                 Circle()
                     .fill(
                         RadialGradient(
                             colors: [
-                                Color.cyan.opacity(isRunning ? 0.14 : 0.07),
+                                Color.cyan.opacity(isRunning ? 0.14 : 0.12),
                                 Color.cyan.opacity(0.01)
                             ],
                             center: .center, startRadius: 0, endRadius: 118
@@ -165,11 +165,11 @@ struct BreathingCircleVisual: View {
                         // 未開始アイコン
                         Image(systemName: exercise.icon)
                             .font(.system(size: 42, weight: .ultraLight))
-                            .foregroundStyle(Color.cyan.opacity(0.72))
-                            .shadow(color: Color.cyan.opacity(0.45), radius: 16)
+                            .foregroundStyle(Color.cyan.opacity(0.88))
+                            .shadow(color: Color.cyan.opacity(0.60), radius: 18)
                         Text("準備")
-                            .font(.system(size: 14, weight: .light))
-                            .foregroundStyle(.white.opacity(0.42))
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.70))
                             .tracking(3.0)
                     }
                 }
