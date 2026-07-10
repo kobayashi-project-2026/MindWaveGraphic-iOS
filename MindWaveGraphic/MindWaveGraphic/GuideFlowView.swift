@@ -83,6 +83,21 @@ struct GuideFlowView: View {
                         .padding(.bottom, 10)
                 }
 
+                // セッション時: コックピットHUDセパレーター
+                if step == .session {
+                    Canvas { ctx, sz in
+                        let w = sz.width
+                        var line = Path()
+                        line.move(to: CGPoint(x: w * 0.04, y: 1))
+                        line.addLine(to: CGPoint(x: w * 0.96, y: 1))
+                        ctx.stroke(line, with: .color(Color.cyan.opacity(0.22)), lineWidth: 0.8)
+                        ctx.stroke(line, with: .color(Color.cyan.opacity(0.06)), lineWidth: 5)
+                    }
+                    .frame(height: 4)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 6)
+                }
+
                 // ── スクロール可能なコンテンツ（CTA は下部固定に移動）
                 Group {
                     switch step {
@@ -187,6 +202,20 @@ struct GuideFlowView: View {
 
     // MARK: - Background
 
+    private var sessionScoreIntensity: Double {
+        min(max(viewModel.graphicInput.score / 100.0, 0), 1)
+    }
+
+    private var sessionStateColor: Color {
+        let sc = sessionScoreIntensity
+        let hasData = viewModel.didFetchHeartRate || viewModel.didFetchHRV
+        if !hasData { return Color(hue: 0.62, saturation: 0.80, brightness: 0.88) }
+        if sc < 0.25 { return Color(hue: 0.62, saturation: 0.80, brightness: 0.88) }
+        if sc < 0.55 { return Color(hue: 0.48, saturation: 0.85, brightness: 0.90) }
+        if sc < 0.78 { return Color(hue: 0.08, saturation: 0.92, brightness: 0.98) }
+        return Color(hue: 0.01, saturation: 0.96, brightness: 1.0)
+    }
+
     private var flowBackground: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -229,6 +258,11 @@ struct GuideFlowView: View {
             )
             .ignoresSafeArea()
             .allowsHitTesting(false)
+            // セッション時のみ: Home同系統の状態星流（背景に薄く）
+            if step == .session {
+                SessionAmbientStarfield(score: sessionScoreIntensity, stateColor: sessionStateColor)
+                    .ignoresSafeArea()
+            }
         }
     }
 
@@ -754,33 +788,57 @@ struct GuideFlowView: View {
         }
         .padding(.horizontal, 8)
         .frame(minHeight: 330)
-        // ── 左右コックピットサイドライン
+        // ── 左右コックピットサイドフレーム（リベット付き）
         .overlay(alignment: .leading) {
-            VStack(spacing: 0) {
-                Spacer()
-                Rectangle()
-                    .fill(LinearGradient(
-                        colors: [.clear, Color.cyan.opacity(0.24), Color.cyan.opacity(0.12), .clear],
-                        startPoint: .top, endPoint: .bottom
-                    ))
-                    .frame(width: 1, height: 200)
-                    .padding(.leading, 10)
-                Spacer()
+            Canvas { ctx, size in
+                let sh = size.height
+                ctx.fill(
+                    Path(CGRect(x: 0, y: 0, width: size.width, height: sh)),
+                    with: .color(Color.cyan.opacity(0.04))
+                )
+                var el = Path()
+                el.move(to: CGPoint(x: size.width - 0.5, y: sh * 0.06))
+                el.addLine(to: CGPoint(x: size.width - 0.5, y: sh * 0.94))
+                ctx.stroke(el, with: .color(Color.cyan.opacity(0.32)), lineWidth: 0.8)
+                for i in 0..<3 {
+                    let y = sh * (0.22 + Double(i) * 0.28)
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: size.width - 6, y: y - 2.2, width: 4.5, height: 4.5)),
+                        with: .color(Color.cyan.opacity(0.40))
+                    )
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: size.width - 5, y: y - 1.2, width: 2.4, height: 2.4)),
+                        with: .color(Color.black.opacity(0.50))
+                    )
+                }
             }
+            .frame(width: 20)
             .allowsHitTesting(false)
         }
         .overlay(alignment: .trailing) {
-            VStack(spacing: 0) {
-                Spacer()
-                Rectangle()
-                    .fill(LinearGradient(
-                        colors: [.clear, Color.cyan.opacity(0.24), Color.cyan.opacity(0.12), .clear],
-                        startPoint: .top, endPoint: .bottom
-                    ))
-                    .frame(width: 1, height: 200)
-                    .padding(.trailing, 10)
-                Spacer()
+            Canvas { ctx, size in
+                let sh = size.height
+                ctx.fill(
+                    Path(CGRect(x: 0, y: 0, width: size.width, height: sh)),
+                    with: .color(Color.cyan.opacity(0.04))
+                )
+                var el = Path()
+                el.move(to: CGPoint(x: 0.5, y: sh * 0.06))
+                el.addLine(to: CGPoint(x: 0.5, y: sh * 0.94))
+                ctx.stroke(el, with: .color(Color.cyan.opacity(0.32)), lineWidth: 0.8)
+                for i in 0..<3 {
+                    let y = sh * (0.22 + Double(i) * 0.28)
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: 1.5, y: y - 2.2, width: 4.5, height: 4.5)),
+                        with: .color(Color.cyan.opacity(0.40))
+                    )
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: 2.5, y: y - 1.2, width: 2.4, height: 2.4)),
+                        with: .color(Color.black.opacity(0.50))
+                    )
+                }
             }
+            .frame(width: 20)
             .allowsHitTesting(false)
         }
     }
@@ -828,16 +886,15 @@ struct GuideFlowView: View {
                 TimelineView(.animation) { tl in
                     Canvas { ctx, sz in
                         let t = tl.date.timeIntervalSinceReferenceDate
-                        let count = 11
+                        let count = 9
                         let speeds: [Double] = [starSpeed,      starSpeed*0.58, starSpeed*1.32,
                                                 starSpeed*0.82, starSpeed*1.12, starSpeed*0.72,
-                                                starSpeed*1.45, starSpeed*0.90, starSpeed*1.20,
-                                                starSpeed*0.65, starSpeed*1.05]
+                                                starSpeed*1.45, starSpeed*0.90, starSpeed*1.20]
                         let yRatios: [Double] = [0.10, 0.35, 0.58, 0.82, 0.22, 0.50, 0.72, 0.40,
-                                                 0.90, 0.65, 0.28]
-                        let radii: [CGFloat]  = [1.8, 1.3, 1.6, 1.4, 2.1, 1.1, 1.7, 1.2, 1.5, 1.8, 1.3]
-                        let alphas: [CGFloat] = [0.88, 0.65, 0.80, 0.58, 0.92, 0.50, 0.72, 0.60, 0.82, 0.68, 0.74]
-                        let tails:  [Double]  = [11, 7, 13, 8, 16, 6, 10, 7, 12, 9, 8]
+                                                 0.90]
+                        let radii: [CGFloat]  = [1.8, 1.3, 1.6, 1.4, 2.1, 1.1, 1.7, 1.2, 1.5]
+                        let alphas: [CGFloat] = [0.70, 0.52, 0.64, 0.46, 0.75, 0.40, 0.58, 0.48, 0.66]
+                        let tails:  [Double]  = [11, 7, 13, 8, 16, 6, 10, 7, 12]
                         for i in 0..<count {
                             let xBase = t * speeds[i]
                             let x = sz.width - CGFloat(xBase.truncatingRemainder(dividingBy: Double(sz.width) + tails[i] + 4))
@@ -1558,6 +1615,82 @@ private struct ResultComparisonCard: View {
             }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 8)
+    }
+}
+
+// MARK: - SessionAmbientStarfield
+
+private struct SessionAmbientStarfield: View {
+    let score: Double
+    let stateColor: Color
+
+    private var starSpeed: Double  { score * 22.0 + 6.0 }
+    private var baseAlpha: CGFloat { 0.08 + CGFloat(score) * 0.06 }
+
+    var body: some View {
+        TimelineView(.animation) { tl in
+            Canvas { ctx, sz in
+                let t = tl.date.timeIntervalSinceReferenceDate
+                let count = 22
+                let speeds:  [Double]  = [1.00, 0.52, 1.28, 0.78, 1.15, 0.68, 1.40, 0.88,
+                                          1.22, 0.60, 1.06, 0.76, 1.35, 0.95, 0.64, 1.18,
+                                          0.84, 1.30, 0.70, 1.04, 0.56, 1.44]
+                let yRatios: [Double]  = [0.04, 0.11, 0.19, 0.27, 0.34, 0.41, 0.50, 0.57,
+                                          0.64, 0.73, 0.81, 0.89, 0.96, 0.08, 0.17, 0.31,
+                                          0.46, 0.62, 0.77, 0.91, 0.38, 0.55]
+                let radii:   [CGFloat] = [1.0, 0.7, 1.2, 0.8, 1.4, 0.6, 1.1, 0.9,
+                                          1.3, 0.7, 1.0, 0.8, 1.2, 0.6, 1.1, 0.9,
+                                          1.4, 0.7, 1.0, 1.3, 0.8, 1.1]
+                let alphas:  [CGFloat] = [1.00, 0.74, 0.88, 0.64, 0.95, 0.54, 0.82, 0.72,
+                                          0.90, 0.60, 0.78, 0.68, 0.85, 0.50, 0.80, 0.70,
+                                          0.92, 0.58, 0.76, 0.88, 0.62, 0.84]
+                let tails:   [Double]  = [8, 5, 12, 6, 14, 4, 9, 7, 13, 5, 8, 6, 11, 4, 9, 7, 14, 5, 8, 12, 6, 10]
+
+                // 呼吸円周囲をマスク（中心ほど透明 → 可読性維持）
+                let cx = sz.width * 0.50
+                let cy = sz.height * 0.44
+                let maskInner: CGFloat = 108
+                let maskOuter: CGFloat = 220
+
+                for i in 0..<count {
+                    let spd = starSpeed * speeds[i]
+                    let xBase = t * spd
+                    let tailLen = CGFloat(tails[i])
+                    let x = sz.width - CGFloat(xBase.truncatingRemainder(dividingBy: Double(sz.width) + Double(tailLen) + 4))
+                    let y = sz.height * CGFloat(yRatios[i])
+                    let r = radii[i]
+
+                    let dist = sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy))
+                    let maskFade: CGFloat
+                    if dist < maskInner {
+                        maskFade = 0
+                    } else if dist < maskOuter {
+                        maskFade = (dist - maskInner) / (maskOuter - maskInner)
+                    } else {
+                        maskFade = 1.0
+                    }
+
+                    let a = baseAlpha * alphas[i] * maskFade
+                    guard a > 0.005 else { continue }
+
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: x - r * 2.2, y: y - r * 2.2, width: r * 4.4, height: r * 4.4)),
+                        with: .color(stateColor.opacity(Double(a * 0.25)))
+                    )
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
+                        with: .color(stateColor.opacity(Double(a)))
+                    )
+                    if tailLen > 3 {
+                        var tail = Path()
+                        tail.move(to: CGPoint(x: x + r, y: y))
+                        tail.addLine(to: CGPoint(x: x + r + tailLen, y: y))
+                        ctx.stroke(tail, with: .color(stateColor.opacity(Double(a * 0.28))), lineWidth: r * 0.55)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 
