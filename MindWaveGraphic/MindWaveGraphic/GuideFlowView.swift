@@ -549,41 +549,26 @@ struct GuideFlowView: View {
 
     private var exerciseListContent: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 14) {
-                // おすすめバナー
-                if let scene = selectedScene {
-                    HStack(spacing: 8) {
-                        Image(systemName: scene.icon)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.cyan.opacity(0.70))
-                        Text("\(scene.displayName) には \(scene.recommendedExercise.title) がおすすめ")
-                            .font(.system(size: 11, weight: .light))
-                            .foregroundStyle(.white.opacity(0.50))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Color.cyan.opacity(0.06))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .strokeBorder(Color.cyan.opacity(0.18), lineWidth: 0.7)
-                            )
-                    )
+            VStack(spacing: 16) {
+                // BREATH SELECT ヘッダー
+                HStack(spacing: 0) {
+                    Rectangle().fill(Color.cyan.opacity(0.22)).frame(height: 0.6)
+                    Text("BREATH SELECT")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.52))
+                        .tracking(3.0)
+                        .fixedSize()
+                        .padding(.horizontal, 10)
+                    Rectangle().fill(Color.cyan.opacity(0.22)).frame(height: 0.6)
                 }
+                .padding(.top, 4)
 
-                Text("ガイドを選んでください")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(.white.opacity(0.40))
-
-                // 横3列コンパクトカード
-                HStack(spacing: 10) {
+                // 大型カード（縦3枚）
+                VStack(spacing: 10) {
                     ForEach(GuideExercise.allCases) { exercise in
-                        ExerciseCardCompact(
-                            exercise:      exercise,
-                            isSelected:    selectedExercise == exercise,
-                            isRecommended: selectedScene?.recommendedExercise == exercise
+                        LargeExerciseCard(
+                            exercise:   exercise,
+                            isSelected: selectedExercise == exercise
                         ) {
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 selectedExercise = exercise
@@ -593,7 +578,7 @@ struct GuideFlowView: View {
                     }
                 }
 
-                // 選択済み呼吸法のディテールパネル
+                // 選択済みディテール
                 if let exercise = selectedExercise {
                     ExerciseDetailPanel(exercise: exercise)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -608,89 +593,112 @@ struct GuideFlowView: View {
 
     private var sessionContent: some View {
         VStack(spacing: 0) {
-            // BREATH MODE HUDラベル
-            HStack(spacing: 8) {
-                Rectangle()
-                    .fill(Color.cyan.opacity(0.20))
-                    .frame(height: 0.5)
-                Text("BREATH MODE")
-                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color.cyan.opacity(0.40))
-                    .tracking(2.2)
-                    .fixedSize()
-                Rectangle()
-                    .fill(Color.cyan.opacity(0.20))
-                    .frame(height: 0.5)
-            }
-            .padding(.horizontal, 36)
-            .padding(.top, 6)
-
-            Spacer()
-            sessionVisual
-            Spacer()
-
-            if sessionIsFinished {
-                VStack(spacing: 4) {
-                    Text("セッション終了")
-                        .font(.system(size: 16, weight: .light))
-                        .foregroundStyle(.white.opacity(0.75))
-                    Text("再測定へ移行中…")
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(.white.opacity(0.38))
+            // ── エクササイズ切り替えタブ
+            HStack(spacing: 0) {
+                ForEach(GuideExercise.allCases) { ex in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            selectedExercise = ex
+                        }
+                    } label: {
+                        VStack(spacing: 0) {
+                            HStack(spacing: 5) {
+                                Image(systemName: ex.icon)
+                                    .font(.system(size: 9, weight: .medium))
+                                Text(ex.title)
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .tracking(0.4)
+                            }
+                            .foregroundStyle(selectedExercise == ex ? .white : .white.opacity(0.28))
+                            .padding(.vertical, 9)
+                            .frame(maxWidth: .infinity)
+                            Rectangle()
+                                .fill(selectedExercise == ex ? Color.cyan : Color.white.opacity(0.08))
+                                .frame(height: selectedExercise == ex ? 1.5 : 0.5)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(ex.title) に切り替え")
                 }
-                .padding(.bottom, 8)
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
 
-            Text(sessionTimeString)
-                .font(.system(size: 52, weight: .thin, design: .rounded))
-                .foregroundStyle(.white.opacity(sessionIsFinished ? 0.30 : 0.90))
-                .monospacedDigit()
-                .contentTransition(.numericText())
+            // ── 呼吸ビジュアル（大型）+ ミニ状態ウィンドウ
+            sessionVisual
+
+            // ── 残り時間表示
+            VStack(spacing: 2) {
+                if sessionIsFinished {
+                    Text("SESSION COMPLETE")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.60))
+                        .tracking(2.5)
+                }
+                HStack(alignment: .lastTextBaseline, spacing: 5) {
+                    Text(sessionTimeString)
+                        .font(.system(size: 40, weight: .thin, design: .rounded))
+                        .foregroundStyle(.white.opacity(sessionIsFinished ? 0.22 : 0.88))
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                    if !sessionIsFinished {
+                        Text("REMAINING")
+                            .font(.system(size: 8, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.20))
+                            .tracking(1.5)
+                            .padding(.bottom, 5)
+                    }
+                }
+            }
+            .padding(.top, 2)
 
             if !sessionIsRunning && !sessionIsFinished {
-                sessionDurationPicker.padding(.vertical, 14)
-            }
-            if !sessionIsFinished {
-                sessionControlButton.padding(.horizontal, 24)
+                sessionDurationPicker.padding(.vertical, 12)
             }
 
-            Spacer(minLength: 36)
+            Spacer(minLength: 14)
+
+            // ── BIG セッションボタン（コックピット緊急停止風）
+            if !sessionIsFinished {
+                bigSessionButton.padding(.horizontal, 20)
+            }
+
+            Spacer(minLength: 24)
         }
     }
 
     private var sessionVisual: some View {
         ZStack(alignment: .topTrailing) {
-            ZStack {
-                // 外側HUDリング（コックピット計器感）
-                Circle()
-                    .stroke(Color.cyan.opacity(0.05), lineWidth: 0.6)
-                    .frame(width: 236, height: 236)
-                Circle()
-                    .stroke(Color.white.opacity(0.025), lineWidth: 0.4)
-                    .frame(width: 254, height: 254)
-
+            // 呼吸サークル（主役）
+            Group {
                 if let exercise = selectedExercise {
                     BreathingCircleVisual(
                         exercise: exercise,
                         elapsedSeconds: sessionDurationSeconds - sessionElapsed,
                         isRunning: sessionIsRunning
                     )
+                } else {
+                    Circle()
+                        .stroke(Color.cyan.opacity(0.08), lineWidth: 1)
+                        .frame(width: 240, height: 240)
                 }
             }
+            .frame(maxWidth: .infinity)
 
             // ミニ緊張状態ウィンドウ（右上に常時表示）
             miniStateWindow
-                .padding(.top, 8)
-                .padding(.trailing, 12)
+                .padding(.top, 4)
+                .padding(.trailing, 8)
         }
-        .frame(height: 270)
+        .padding(.horizontal, 8)
+        .frame(minHeight: 320)
     }
 
-    // MARK: - ミニ緊張状態ウィンドウ
+    // MARK: - ミニ緊張状態ウィンドウ（宇宙小窓スタイル）
 
     private var miniStateWindow: some View {
-        let input  = viewModel.graphicInput
-        let score  = min(max(input.score / 100.0, 0.0), 1.0)
+        let input   = viewModel.graphicInput
+        let score   = min(max(input.score / 100.0, 0.0), 1.0)
         let hasData = viewModel.didFetchHeartRate || viewModel.didFetchHRV
 
         let stateName: String
@@ -719,120 +727,135 @@ struct GuideFlowView: View {
             return "—"
         }()
 
-        return VStack(alignment: .trailing, spacing: 3) {
-            // ── 上端スキャンライン (計器感)
-            Canvas { ctx, size in
-                var hl = Path()
-                hl.move(to: CGPoint(x: 3, y: 1.0))
-                hl.addLine(to: CGPoint(x: size.width - 3, y: 1.0))
-                ctx.stroke(hl, with: .color(stateColor.opacity(0.55)), lineWidth: 0.8)
-                ctx.stroke(hl, with: .color(stateColor.opacity(0.12)), lineWidth: 4)
-            }
-            .frame(height: 3)
-            .animation(.easeInOut(duration: 0.8), value: stateName)
+        // スコアに応じて星の速度を変化（高ストレス = 速い）
+        let starSpeed = hasData ? (score * 40 + 14) : 10.0
+        let capturedColor = stateColor
 
-            // 上段: STATE
-            HStack(spacing: 4) {
-                Text("STATE")
-                    .font(.system(size: 6, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.32))
-                    .tracking(0.6)
-                Circle()
-                    .fill(stateColor)
-                    .frame(width: 4, height: 4)
-                    .shadow(color: stateColor.opacity(0.90), radius: 5)
-            }
-
-            Text(stateName)
-                .font(.system(size: 12, weight: .black, design: .monospaced))
-                .foregroundStyle(stateColor)
-                .shadow(color: stateColor.opacity(0.45), radius: 4)
-                .tracking(0.4)
-                .animation(.easeInOut(duration: 0.8), value: stateName)
-
-            // 区切り
-            Rectangle()
-                .fill(Color.white.opacity(0.10))
-                .frame(height: 0.5)
-                .padding(.vertical, 1)
-
-            // 下段: PULSE
-            Text("PULSE")
-                .font(.system(size: 6, weight: .semibold, design: .monospaced))
-                .foregroundStyle(Color.white.opacity(0.32))
-                .tracking(0.6)
-                .frame(maxWidth: .infinity, alignment: .trailing)
-
-            HStack(alignment: .firstTextBaseline, spacing: 1) {
-                Text(hrText)
-                    .font(.system(size: 15, weight: .thin, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(Color.white.opacity(hasData || viewModel.activeDataSource == .mock ? 0.94 : 0.28))
-                    .contentTransition(.numericText())
-                Text("bpm")
-                    .font(.system(size: 6, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.32))
-            }
-
-            // ミニECGスパークライン
-            Canvas { ctx, sz in
-                let mid = sz.height * 0.50
-                let amp = (hasData || viewModel.activeDataSource == .mock) ? sz.height * 0.44 : sz.height * 0.05
-                let xs: [CGFloat] = [0,0.06,0.11,0.17,0.23,0.27,0.32,0.38,0.44,
-                                     0.48,0.50,0.56,0.62,0.67,0.73,0.77,0.82,0.88,0.94,0.97,1.0]
-                let ys: [CGFloat] = [0,-0.04,-0.20,0.28,0,-0.85,1.0,-0.28,0.30,
-                                     0,0,-0.04,-0.20,0.28,0,-0.85,1.0,-0.28,0.30,0,0]
-                var p = Path()
-                for i in 0..<xs.count {
-                    let pt = CGPoint(x: xs[i] * sz.width, y: mid - ys[i] * amp)
-                    i == 0 ? p.move(to: pt) : p.addLine(to: pt)
-                }
-                let a: CGFloat = (hasData || viewModel.activeDataSource == .mock) ? 0.72 : 0.08
-                ctx.stroke(p, with: .color(stateColor.opacity(a * 0.20)), lineWidth: 2.5)
-                ctx.stroke(p, with: .color(stateColor.opacity(a)), lineWidth: 0.70)
-            }
-            .frame(height: 14)
-
-            // 右→左へ流れる星流（ストレス状態カラーに連動）
-            let capturedStateColor = stateColor
+        return VStack(spacing: 0) {
+            // ── 上半分: 流れ星ウィンドウ（右→左）
             TimelineView(.animation) { tl in
                 Canvas { ctx, sz in
                     let t = tl.date.timeIntervalSinceReferenceDate
-                    let speeds: [Double] = [22, 15, 30, 18, 26]
-                    let yRatios: [Double] = [0.20, 0.50, 0.30, 0.70, 0.45]
-                    let radii: [CGFloat] = [1.2, 0.7, 1.0, 0.8, 1.3]
-                    let alphas: [CGFloat] = [0.20, 0.13, 0.17, 0.10, 0.22]
-                    for i in 0..<5 {
+                    let count = 8
+                    let speeds: [Double] = [starSpeed,      starSpeed*0.60, starSpeed*1.30,
+                                            starSpeed*0.85, starSpeed*1.10, starSpeed*0.75,
+                                            starSpeed*1.40, starSpeed*0.92]
+                    let yRatios: [Double] = [0.12, 0.38, 0.62, 0.85, 0.25, 0.55, 0.75, 0.44]
+                    let radii: [CGFloat]  = [1.5, 0.8, 1.2, 1.0, 1.7, 0.7, 1.1, 0.9]
+                    let alphas: [CGFloat] = [0.85, 0.55, 0.72, 0.48, 0.90, 0.40, 0.65, 0.55]
+                    let tails:  [Double]  = [10, 6, 12, 7, 14, 5, 9, 8]
+                    for i in 0..<count {
                         let xBase = t * speeds[i]
-                        let x = sz.width - CGFloat(xBase.truncatingRemainder(dividingBy: Double(sz.width + 6)))
+                        let x = sz.width - CGFloat(xBase.truncatingRemainder(dividingBy: Double(sz.width) + tails[i] + 4))
                         let y = sz.height * CGFloat(yRatios[i])
                         let r = radii[i]
+                        let a = alphas[i]
+                        // 光点
                         ctx.fill(
                             Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
-                            with: .color(capturedStateColor.opacity(alphas[i]))
+                            with: .color(capturedColor.opacity(a))
                         )
+                        // 尾（右側へ伸びる）
+                        var tail = Path()
+                        tail.move(to: CGPoint(x: x + r, y: y))
+                        tail.addLine(to: CGPoint(x: x + r + CGFloat(tails[i]), y: y))
+                        ctx.stroke(tail, with: .color(capturedColor.opacity(a * 0.22)), lineWidth: r * 0.65)
                     }
                 }
             }
-            .frame(height: 8)
+            .frame(height: 46)
+            .background(
+                LinearGradient(
+                    colors: [Color.black.opacity(0.60), Color.black.opacity(0.28)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+            .overlay(alignment: .top) {
+                Rectangle().fill(capturedColor.opacity(0.48)).frame(height: 0.8)
+            }
+
+            // ── 中仕切り
+            Rectangle()
+                .fill(stateColor.opacity(0.28))
+                .frame(height: 0.6)
+
+            // ── 下半分: STATE + PULSE コンパクト
+            VStack(spacing: 5) {
+                // STATE行
+                HStack(spacing: 5) {
+                    Text("STATE")
+                        .font(.system(size: 6.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.30))
+                        .tracking(0.5)
+                    Circle()
+                        .fill(stateColor)
+                        .frame(width: 4.5, height: 4.5)
+                        .shadow(color: stateColor.opacity(0.90), radius: 5)
+                    Text(stateName)
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundStyle(stateColor)
+                        .shadow(color: stateColor.opacity(0.50), radius: 4)
+                        .tracking(0.4)
+                        .animation(.easeInOut(duration: 0.8), value: stateName)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // PULSE行
+                HStack(alignment: .lastTextBaseline, spacing: 3) {
+                    Text("PULSE")
+                        .font(.system(size: 6.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.30))
+                        .tracking(0.5)
+                    Spacer()
+                    Text(hrText)
+                        .font(.system(size: 14, weight: .thin, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundStyle(Color.white.opacity(hasData || viewModel.activeDataSource == .mock ? 0.90 : 0.28))
+                        .contentTransition(.numericText())
+                    Text("bpm")
+                        .font(.system(size: 6, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.28))
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
         }
-        .frame(width: 78)
-        .padding(.horizontal, 9)
-        .padding(.vertical, 7)
+        .frame(width: 92)
         .background(
             ZStack {
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(Color(red: 0.02, green: 0.04, blue: 0.12).opacity(0.88))
-                RoundedRectangle(cornerRadius: 9)
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(red: 0.01, green: 0.03, blue: 0.12).opacity(0.92))
+                RoundedRectangle(cornerRadius: 8)
                     .fill(LinearGradient(
-                        colors: [Color.white.opacity(0.05), .clear],
-                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.18)
+                        colors: [Color.white.opacity(0.04), .clear],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.25)
                     ))
-                RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(stateColor.opacity(0.42), lineWidth: 0.9)
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(stateColor.opacity(0.48), lineWidth: 1.0)
             }
         )
-        .shadow(color: stateColor.opacity(0.28), radius: 10)
+        // コーナーブラケット（コックピット窓枠感）
+        .overlay {
+            Canvas { ctx, size in
+                let len: CGFloat = 8
+                let t: CGFloat = 1.2
+                let corners: [(CGPoint, CGPoint, CGPoint)] = [
+                    (CGPoint(x: 0, y: len),                     CGPoint(x: 0, y: 0),           CGPoint(x: len, y: 0)),
+                    (CGPoint(x: size.width - len, y: 0),        CGPoint(x: size.width, y: 0),  CGPoint(x: size.width, y: len)),
+                    (CGPoint(x: 0, y: size.height - len),       CGPoint(x: 0, y: size.height), CGPoint(x: len, y: size.height)),
+                    (CGPoint(x: size.width - len, y: size.height), CGPoint(x: size.width, y: size.height), CGPoint(x: size.width, y: size.height - len))
+                ]
+                for (p0, p1, p2) in corners {
+                    var path = Path()
+                    path.move(to: p0)
+                    path.addLine(to: p1)
+                    path.addLine(to: p2)
+                    ctx.stroke(path, with: .color(stateColor.opacity(0.80)), lineWidth: t)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+        .shadow(color: stateColor.opacity(0.32), radius: 14)
         .animation(.easeInOut(duration: 1.2), value: hasData)
         .accessibilityIdentifier("guide_session_mini_state_window")
     }
@@ -869,30 +892,51 @@ struct GuideFlowView: View {
         }
     }
 
-    private var sessionControlLabel: some View {
-        let icon = sessionIsRunning ? "stop.circle.fill" : "play.circle.fill"
-        let txt  = sessionIsRunning ? "停止" : "開始"
-        let fg   = sessionIsRunning ? Color.orange.opacity(0.9) : Color.cyan.opacity(0.9)
-        let bg   = sessionIsRunning ? Color.orange.opacity(0.12) : Color.cyan.opacity(0.15)
-        let bd   = sessionIsRunning ? Color.orange.opacity(0.28) : Color.cyan.opacity(0.28)
-        return HStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 15))
-            Text(txt).font(.system(size: 15, weight: .medium))
+    private var bigSessionButton: some View {
+        let isStop = sessionIsRunning
+        return Button { sessionIsRunning.toggle() } label: {
+            ZStack {
+                // 外縁グロー（2層）
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(isStop ? Color.orange.opacity(0.65) : Color.cyan.opacity(0.65), lineWidth: 2.5)
+                    .blur(radius: 5)
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(isStop ? Color.orange.opacity(0.22) : Color.cyan.opacity(0.22), lineWidth: 10)
+                    .blur(radius: 14)
+                // 背景フィル
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(isStop
+                          ? LinearGradient(colors: [Color.orange.opacity(0.16), Color.orange.opacity(0.08)], startPoint: .top, endPoint: .bottom)
+                          : LinearGradient(colors: [Color.cyan.opacity(0.14), Color.cyan.opacity(0.06)], startPoint: .top, endPoint: .bottom))
+                // 上端ガラスライン
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.10), .clear],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.6)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    Spacer()
+                }
+                // ボーダー
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(isStop ? Color.orange.opacity(0.52) : Color.cyan.opacity(0.42), lineWidth: 1.2)
+                // ラベル
+                HStack(spacing: 10) {
+                    Image(systemName: isStop ? "stop.fill" : "play.fill")
+                        .font(.system(size: 20, weight: .bold))
+                    Text(isStop ? "STOP" : "START")
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .tracking(3.0)
+                }
+                .foregroundStyle(isStop ? Color.orange.opacity(0.95) : Color.cyan.opacity(0.95))
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 68)
         }
-        .foregroundStyle(fg)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(bg)
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(bd, lineWidth: 1))
-        )
-    }
-
-    private var sessionControlButton: some View {
-        Button { sessionIsRunning.toggle() } label: { sessionControlLabel }
-            .buttonStyle(.plain)
-            .accessibilityLabel(sessionIsRunning ? "停止する" : "開始する")
+        .buttonStyle(.plain)
+        .shadow(color: isStop ? Color.orange.opacity(0.40) : Color.cyan.opacity(0.28), radius: 18)
+        .accessibilityLabel(isStop ? "停止する" : "開始する")
+        .animation(.easeInOut(duration: 0.22), value: isStop)
     }
 
     // MARK: - ▼ STEP 4: Remeasurement
@@ -1388,6 +1432,99 @@ private struct ExerciseDetailPanel: View {
                         .strokeBorder(Color.cyan.opacity(0.22), lineWidth: 0.7)
                 )
         )
+    }
+}
+
+// MARK: - LargeExerciseCard（大型呼吸法選択カード）
+
+private struct LargeExerciseCard: View {
+    let exercise:   GuideExercise
+    let isSelected: Bool
+    let action:     () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 16) {
+                // アイコン円
+                ZStack {
+                    Circle()
+                        .fill(isSelected ? Color.cyan.opacity(0.20) : Color.white.opacity(0.06))
+                        .frame(width: 54, height: 54)
+                    Circle()
+                        .stroke(isSelected ? Color.cyan.opacity(0.40) : Color.clear, lineWidth: 1.0)
+                        .frame(width: 54, height: 54)
+                    Image(systemName: exercise.icon)
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(isSelected ? Color.cyan.opacity(0.95) : Color.white.opacity(0.50))
+                }
+
+                // テキスト
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .lastTextBaseline, spacing: 8) {
+                        Text(exercise.title)
+                            .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(isSelected ? .white : .white.opacity(0.75))
+                            .tracking(0.5)
+                        Text(exercise.subtitle)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(isSelected ? Color.cyan.opacity(0.75) : Color.white.opacity(0.28))
+                    }
+                    Text(exercise.timingLabel)
+                        .font(.system(size: 11, weight: .light, design: .monospaced))
+                        .foregroundStyle(isSelected ? Color.cyan.opacity(0.60) : Color.white.opacity(0.24))
+                        .tracking(1.5)
+                    Text(exercise.description)
+                        .font(.system(size: 11, weight: .light))
+                        .foregroundStyle(.white.opacity(isSelected ? 0.55 : 0.28))
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                // 選択インジケーター
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundStyle(isSelected ? Color.cyan.opacity(0.90) : .white.opacity(0.15))
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .background(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(isSelected
+                              ? Color(red: 0.02, green: 0.18, blue: 0.30)
+                              : Color.white.opacity(0.04))
+                    // 上端アクセントライン
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [
+                                isSelected ? Color.cyan.opacity(0.75) : Color.white.opacity(0.08),
+                                .clear
+                            ],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                        .frame(height: 1.2)
+                        Spacer()
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    // ボーダー
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(
+                            isSelected ? Color.cyan.opacity(0.52) : Color.white.opacity(0.08),
+                            lineWidth: isSelected ? 1.1 : 0.7
+                        )
+                    // 選択時グロー
+                    if isSelected {
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.cyan.opacity(0.30), lineWidth: 3)
+                            .blur(radius: 6)
+                    }
+                }
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(exercise.title)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 

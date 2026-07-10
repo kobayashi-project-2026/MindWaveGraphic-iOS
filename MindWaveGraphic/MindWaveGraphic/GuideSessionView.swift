@@ -21,17 +21,25 @@ enum GuideExercise: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .breathing478: return "4-7-8呼吸"
-        case .box:          return "BOX呼吸"
-        case .breathing214: return "2-1-4呼吸"
+        case .breathing478: return "4-7-8"
+        case .box:          return "BOX"
+        case .breathing214: return "2-1-4"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .breathing478: return "リラックス"
+        case .box:          return "集中力向上"
+        case .breathing214: return "緊張緩和"
         }
     }
 
     var description: String {
         switch self {
-        case .breathing478: return "吸う4秒・止める7秒・吐く8秒。深い鎮静効果。"
-        case .box:          return "4秒ずつ4フェーズ。集中と落ち着きを同時に。"
-        case .breathing214: return "吸う2秒・止める1秒・吐く4秒。手軽にリセット。"
+        case .breathing478: return "深い鎮静効果。緊張・不安の解消に。"
+        case .box:          return "集中と落ち着きを同時に高める。"
+        case .breathing214: return "手軽にできる緊張緩和呼吸。"
         }
     }
 
@@ -81,6 +89,22 @@ enum GuideExercise: String, CaseIterable, Identifiable {
         }
     }
     var cycleTotal: Int { inhaleSeconds + hold1Seconds + exhaleSeconds + hold2Seconds }
+
+    /// 現在フェーズの残り秒数（円内タイマー表示用）
+    func phaseSecondsRemaining(elapsed: Int) -> Int {
+        guard cycleTotal > 0 else { return 0 }
+        let pos = elapsed % cycleTotal
+        if pos < inhaleSeconds {
+            return inhaleSeconds - pos
+        } else if pos < inhaleSeconds + hold1Seconds {
+            return (inhaleSeconds + hold1Seconds) - pos
+        } else if pos < inhaleSeconds + hold1Seconds + exhaleSeconds {
+            return (inhaleSeconds + hold1Seconds + exhaleSeconds) - pos
+        } else if hold2Seconds > 0 {
+            return cycleTotal - pos
+        }
+        return 0
+    }
 
     /// elapsed = 経過秒数。返値: (phaseText, circleScale 0.55–1.0)
     func breathPhase(elapsed: Int) -> (text: String, scale: CGFloat) {
@@ -286,6 +310,6 @@ struct GuideSessionView: View {
 
 // MARK: - Preview
 
-#Preview("4-7-8呼吸") { GuideSessionView(exercise: .breathing478) }
-#Preview("BOX呼吸")   { GuideSessionView(exercise: .box) }
-#Preview("2-1-4呼吸") { GuideSessionView(exercise: .breathing214) }
+#Preview("4-7-8") { GuideSessionView(exercise: .breathing478) }
+#Preview("BOX")   { GuideSessionView(exercise: .box) }
+#Preview("2-1-4") { GuideSessionView(exercise: .breathing214) }
