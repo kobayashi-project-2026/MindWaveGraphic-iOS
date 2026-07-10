@@ -262,6 +262,21 @@ struct GuideFlowView: View {
             if step == .session {
                 SessionAmbientStarfield(score: sessionScoreIntensity, stateColor: sessionStateColor)
                     .ignoresSafeArea()
+                // 下部コンソール感（機体内部からの反射）
+                VStack {
+                    Spacer()
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.02, green: 0.06, blue: 0.18).opacity(0.60),
+                            Color(red: 0.01, green: 0.03, blue: 0.10).opacity(0.30),
+                            .clear
+                        ],
+                        startPoint: .bottom, endPoint: .top
+                    )
+                    .frame(height: 130)
+                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
             }
         }
     }
@@ -1624,68 +1639,98 @@ private struct SessionAmbientStarfield: View {
     let score: Double
     let stateColor: Color
 
-    private var starSpeed: Double  { score * 22.0 + 6.0 }
-    private var baseAlpha: CGFloat { 0.08 + CGFloat(score) * 0.06 }
+    // 遠景層: 小さく遅く薄い (indices 0-15)
+    // 近景層: 大きく速く明るい (indices 16-27)
+    private var farSpeed:  Double  { score * 14.0 + 4.0 }
+    private var nearSpeed: Double  { score * 28.0 + 10.0 }
+    private var farBase:   CGFloat { 0.06 + CGFloat(score) * 0.04 }
+    private var nearBase:  CGFloat { 0.10 + CGFloat(score) * 0.06 }
 
     var body: some View {
         TimelineView(.animation) { tl in
             Canvas { ctx, sz in
                 let t = tl.date.timeIntervalSinceReferenceDate
-                let count = 22
-                let speeds:  [Double]  = [1.00, 0.52, 1.28, 0.78, 1.15, 0.68, 1.40, 0.88,
-                                          1.22, 0.60, 1.06, 0.76, 1.35, 0.95, 0.64, 1.18,
-                                          0.84, 1.30, 0.70, 1.04, 0.56, 1.44]
-                let yRatios: [Double]  = [0.04, 0.11, 0.19, 0.27, 0.34, 0.41, 0.50, 0.57,
-                                          0.64, 0.73, 0.81, 0.89, 0.96, 0.08, 0.17, 0.31,
-                                          0.46, 0.62, 0.77, 0.91, 0.38, 0.55]
-                let radii:   [CGFloat] = [1.0, 0.7, 1.2, 0.8, 1.4, 0.6, 1.1, 0.9,
-                                          1.3, 0.7, 1.0, 0.8, 1.2, 0.6, 1.1, 0.9,
-                                          1.4, 0.7, 1.0, 1.3, 0.8, 1.1]
-                let alphas:  [CGFloat] = [1.00, 0.74, 0.88, 0.64, 0.95, 0.54, 0.82, 0.72,
-                                          0.90, 0.60, 0.78, 0.68, 0.85, 0.50, 0.80, 0.70,
-                                          0.92, 0.58, 0.76, 0.88, 0.62, 0.84]
-                let tails:   [Double]  = [8, 5, 12, 6, 14, 4, 9, 7, 13, 5, 8, 6, 11, 4, 9, 7, 14, 5, 8, 12, 6, 10]
 
-                // 呼吸円周囲をマスク（中心ほど透明 → 可読性維持）
+                // ── 遠景星 (16個: 小・遅・薄)
+                let farSpeeds:  [Double]  = [1.00, 0.60, 1.18, 0.78, 1.32, 0.52, 1.08, 0.88,
+                                             1.24, 0.70, 0.92, 1.40, 0.64, 1.16, 0.80, 1.28]
+                let farYRat:    [Double]  = [0.04, 0.12, 0.21, 0.30, 0.39, 0.48, 0.55, 0.63,
+                                             0.71, 0.79, 0.87, 0.94, 0.09, 0.18, 0.43, 0.66]
+                let farRadii:   [CGFloat] = [0.55, 0.40, 0.65, 0.45, 0.70, 0.38, 0.58, 0.48,
+                                             0.62, 0.42, 0.52, 0.68, 0.44, 0.60, 0.50, 0.64]
+                let farAlphas:  [CGFloat] = [0.90, 0.65, 0.80, 0.58, 0.95, 0.50, 0.78, 0.62,
+                                             0.85, 0.55, 0.72, 0.88, 0.48, 0.76, 0.60, 0.82]
+                let farTails:   [Double]  = [5, 3, 7, 4, 8, 3, 6, 4, 7, 3, 5, 8, 3, 6, 4, 7]
+
+                // ── 近景星 (12個: 大・速・明)
+                let nearSpeeds: [Double]  = [1.00, 0.72, 1.38, 0.84, 1.22, 0.64,
+                                             1.48, 0.90, 1.16, 0.78, 1.34, 1.06]
+                let nearYRat:   [Double]  = [0.07, 0.24, 0.44, 0.61, 0.76, 0.92,
+                                             0.15, 0.34, 0.52, 0.68, 0.83, 0.97]
+                let nearRadii:  [CGFloat] = [1.4, 1.0, 1.6, 1.2, 1.8, 1.1,
+                                             1.5, 0.9, 1.3, 1.7, 1.0, 1.4]
+                let nearAlphas: [CGFloat] = [1.00, 0.75, 0.90, 0.68, 0.95, 0.60,
+                                             0.85, 0.72, 0.80, 0.92, 0.65, 0.88]
+                let nearTails:  [Double]  = [14, 9, 18, 11, 22, 8, 16, 10, 13, 20, 9, 15]
+
                 let cx = sz.width * 0.50
                 let cy = sz.height * 0.44
-                let maskInner: CGFloat = 108
-                let maskOuter: CGFloat = 220
+                let maskInner: CGFloat = 112
+                let maskOuter: CGFloat = 230
 
-                for i in 0..<count {
-                    let spd = starSpeed * speeds[i]
-                    let xBase = t * spd
-                    let tailLen = CGFloat(tails[i])
-                    let x = sz.width - CGFloat(xBase.truncatingRemainder(dividingBy: Double(sz.width) + Double(tailLen) + 4))
-                    let y = sz.height * CGFloat(yRatios[i])
-                    let r = radii[i]
-
+                func maskFade(_ x: CGFloat, _ y: CGFloat) -> CGFloat {
                     let dist = sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy))
-                    let maskFade: CGFloat
-                    if dist < maskInner {
-                        maskFade = 0
-                    } else if dist < maskOuter {
-                        maskFade = (dist - maskInner) / (maskOuter - maskInner)
-                    } else {
-                        maskFade = 1.0
-                    }
+                    if dist < maskInner { return 0 }
+                    if dist < maskOuter { return (dist - maskInner) / (maskOuter - maskInner) }
+                    return 1.0
+                }
 
-                    let a = baseAlpha * alphas[i] * maskFade
-                    guard a > 0.005 else { continue }
-
-                    ctx.fill(
-                        Path(ellipseIn: CGRect(x: x - r * 2.2, y: y - r * 2.2, width: r * 4.4, height: r * 4.4)),
-                        with: .color(stateColor.opacity(Double(a * 0.25)))
-                    )
+                // 遠景描画
+                for i in 0..<16 {
+                    let spd = farSpeed * farSpeeds[i]
+                    let tLen = CGFloat(farTails[i])
+                    let x = sz.width - CGFloat((t * spd).truncatingRemainder(dividingBy: Double(sz.width) + Double(tLen) + 2))
+                    let y = sz.height * CGFloat(farYRat[i])
+                    let r = farRadii[i]
+                    let a = farBase * farAlphas[i] * maskFade(x, y)
+                    guard a > 0.003 else { continue }
                     ctx.fill(
                         Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
                         with: .color(stateColor.opacity(Double(a)))
                     )
-                    if tailLen > 3 {
+                    if tLen > 2 {
                         var tail = Path()
                         tail.move(to: CGPoint(x: x + r, y: y))
-                        tail.addLine(to: CGPoint(x: x + r + tailLen, y: y))
-                        ctx.stroke(tail, with: .color(stateColor.opacity(Double(a * 0.28))), lineWidth: r * 0.55)
+                        tail.addLine(to: CGPoint(x: x + r + tLen, y: y))
+                        ctx.stroke(tail, with: .color(stateColor.opacity(Double(a * 0.22))), lineWidth: r * 0.50)
+                    }
+                }
+
+                // 近景描画
+                for i in 0..<12 {
+                    let spd = nearSpeed * nearSpeeds[i]
+                    let tLen = CGFloat(nearTails[i])
+                    let x = sz.width - CGFloat((t * spd).truncatingRemainder(dividingBy: Double(sz.width) + Double(tLen) + 4))
+                    let y = sz.height * CGFloat(nearYRat[i])
+                    let r = nearRadii[i]
+                    let a = nearBase * nearAlphas[i] * maskFade(x, y)
+                    guard a > 0.004 else { continue }
+                    // グロー
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: x - r * 2.4, y: y - r * 2.4, width: r * 4.8, height: r * 4.8)),
+                        with: .color(stateColor.opacity(Double(a * 0.22)))
+                    )
+                    // コア
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
+                        with: .color(stateColor.opacity(Double(a)))
+                    )
+                    // 尾
+                    if tLen > 6 {
+                        var tail = Path()
+                        tail.move(to: CGPoint(x: x + r, y: y))
+                        tail.addLine(to: CGPoint(x: x + r + tLen, y: y))
+                        ctx.stroke(tail, with: .color(stateColor.opacity(Double(a * 0.32))), lineWidth: r * 0.55)
                     }
                 }
             }

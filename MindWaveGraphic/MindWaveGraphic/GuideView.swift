@@ -80,12 +80,39 @@ struct GuideView: View {
             // 上部消失点グロー（宇宙感の奥行き）
             RadialGradient(
                 colors: [
-                    Color(hue: 0.62, saturation: 0.90, brightness: 0.85).opacity(0.06),
+                    Color(hue: 0.62, saturation: 0.90, brightness: 0.85).opacity(0.08),
                     .clear
                 ],
                 center: UnitPoint(x: 0.5, y: 0.0),
-                startRadius: 0, endRadius: 240
+                startRadius: 0, endRadius: 280
             )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            // 散在星ドット（静的・深宇宙感）
+            Canvas { ctx, sz in
+                let dots: [(x: Double, y: Double, r: CGFloat, a: CGFloat)] = [
+                    (0.08, 0.06, 0.9, 0.40), (0.23, 0.13, 0.6, 0.28), (0.72, 0.04, 1.1, 0.48),
+                    (0.88, 0.10, 0.7, 0.32), (0.45, 0.09, 0.8, 0.36), (0.61, 0.17, 0.5, 0.24),
+                    (0.14, 0.22, 0.6, 0.30), (0.37, 0.19, 1.0, 0.42), (0.82, 0.21, 0.7, 0.34),
+                    (0.95, 0.28, 0.8, 0.38), (0.04, 0.35, 0.5, 0.22), (0.55, 0.30, 0.6, 0.26),
+                    (0.78, 0.38, 0.9, 0.44), (0.29, 0.42, 0.7, 0.32), (0.91, 0.44, 0.5, 0.20),
+                    (0.18, 0.50, 0.8, 0.36), (0.66, 0.48, 1.0, 0.45), (0.43, 0.55, 0.6, 0.28),
+                ]
+                for d in dots {
+                    let x = sz.width  * CGFloat(d.x)
+                    let y = sz.height * CGFloat(d.y)
+                    let r = d.r
+                    let a = d.a
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)),
+                        with: .color(Color.cyan.opacity(Double(a)))
+                    )
+                    ctx.fill(
+                        Path(ellipseIn: CGRect(x: x - r * 2, y: y - r * 2, width: r * 4, height: r * 4)),
+                        with: .color(Color.cyan.opacity(Double(a * 0.15)))
+                    )
+                }
+            }
             .ignoresSafeArea()
             .allowsHitTesting(false)
             // 下部から上向きのコックピットパネル反射グロー
@@ -444,40 +471,54 @@ struct GuideView: View {
                 print("[UI][Guide] session_start_requested scene=\(selectedScene!.rawValue)")
                 showFlowView = true
             } label: {
+                let active = selectedScene != nil
                 ZStack {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(selectedScene != nil
-                              ? LinearGradient(colors: [Color.cyan, Color.cyan.opacity(0.82)],
-                                               startPoint: .top, endPoint: .bottom)
-                              : LinearGradient(colors: [Color(red: 0.08, green: 0.12, blue: 0.22),
-                                                        Color(red: 0.05, green: 0.08, blue: 0.16)],
-                                               startPoint: .top, endPoint: .bottom))
-                    // 上端ハイライトリップ
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(LinearGradient(
-                            colors: [Color.white.opacity(selectedScene != nil ? 0.18 : 0.07), .clear],
-                            startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.22)
-                        ))
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(
-                            selectedScene != nil ? Color.white.opacity(0.20) : Color.cyan.opacity(0.28),
-                            lineWidth: 0.8
-                        )
-                    HStack(spacing: 10) {
-                        Image(systemName: "wind")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text(selectedScene != nil ? "この場面で整える" : "場面を選んでください")
-                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                            .tracking(0.3)
+                    // 外縁グロー（選択時）
+                    if active {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.cyan.opacity(0.35), lineWidth: 10)
+                            .blur(radius: 12)
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.cyan.opacity(0.70), lineWidth: 2)
+                            .blur(radius: 4)
                     }
-                    .foregroundStyle(selectedScene != nil ? Color.black : Color.white.opacity(0.38))
+                    // 背景フィル
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(active
+                              ? LinearGradient(colors: [Color.cyan.opacity(0.88), Color.cyan.opacity(0.68), Color(red:0.00,green:0.18,blue:0.28)],
+                                               startPoint: .top, endPoint: .bottom)
+                              : LinearGradient(colors: [Color(red: 0.06, green: 0.10, blue: 0.20), Color(red: 0.03, green: 0.06, blue: 0.14)],
+                                               startPoint: .top, endPoint: .bottom))
+                    // ガラス上端ハイライト
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(LinearGradient(
+                            colors: [Color.white.opacity(active ? 0.22 : 0.06), .clear],
+                            startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.25)
+                        ))
+                    // エッジライン
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(
+                            active ? LinearGradient(colors: [Color.white.opacity(0.55), Color.cyan.opacity(0.35)], startPoint: .top, endPoint: .bottom)
+                                   : LinearGradient(colors: [Color.cyan.opacity(0.22), Color.cyan.opacity(0.10)], startPoint: .top, endPoint: .bottom),
+                            lineWidth: active ? 1.2 : 0.8
+                        )
+                    HStack(spacing: 12) {
+                        Image(systemName: active ? "play.fill" : "dot.radiowaves.right")
+                            .font(.system(size: 16, weight: .bold))
+                        Text(active ? "LAUNCH GUIDE" : "SCENE SELECT")
+                            .font(.system(size: 15, weight: .bold, design: .monospaced))
+                            .tracking(2.0)
+                    }
+                    .foregroundStyle(active ? Color.black.opacity(0.90) : Color.white.opacity(0.28))
+                    .shadow(color: active ? Color.cyan.opacity(0.25) : .clear, radius: 6)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: 52)
+                .frame(height: 58)
+                .shadow(color: active ? Color.cyan.opacity(0.45) : .clear, radius: 20, y: 4)
             }
             .disabled(selectedScene == nil)
             .buttonStyle(.plain)
-            .animation(.easeInOut(duration: 0.2), value: selectedScene)
+            .animation(.easeInOut(duration: 0.22), value: selectedScene)
             .padding(.horizontal, 20)
             .padding(.top, 12)
             .padding(.bottom, 16)

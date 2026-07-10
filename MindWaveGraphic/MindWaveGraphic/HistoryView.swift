@@ -41,19 +41,43 @@ struct HistoryView: View {
                     .allowsHitTesting(false)
                 }
                 .ignoresSafeArea(edges: .bottom)
-                // サイドエッジ
+                // サイドフレーム（リベット付きコックピットストラット）
                 HStack(spacing: 0) {
-                    LinearGradient(
-                        colors: [Color.cyan.opacity(0.07), .clear],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .frame(width: 18)
+                    Canvas { ctx, size in
+                        let sh = size.height
+                        ctx.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: sh)),
+                                 with: .color(Color.cyan.opacity(0.05)))
+                        var el = Path()
+                        el.move(to: CGPoint(x: size.width - 0.5, y: sh * 0.06))
+                        el.addLine(to: CGPoint(x: size.width - 0.5, y: sh * 0.94))
+                        ctx.stroke(el, with: .color(Color.cyan.opacity(0.28)), lineWidth: 0.7)
+                        for i in 0..<4 {
+                            let y = sh * (0.18 + Double(i) * 0.22)
+                            ctx.fill(Path(ellipseIn: CGRect(x: size.width - 5.5, y: y - 2, width: 4, height: 4)),
+                                     with: .color(Color.cyan.opacity(0.32)))
+                            ctx.fill(Path(ellipseIn: CGRect(x: size.width - 4.5, y: y - 1, width: 2, height: 2)),
+                                     with: .color(Color.black.opacity(0.45)))
+                        }
+                    }
+                    .frame(width: 20)
                     Spacer()
-                    LinearGradient(
-                        colors: [.clear, Color.cyan.opacity(0.07)],
-                        startPoint: .leading, endPoint: .trailing
-                    )
-                    .frame(width: 18)
+                    Canvas { ctx, size in
+                        let sh = size.height
+                        ctx.fill(Path(CGRect(x: 0, y: 0, width: size.width, height: sh)),
+                                 with: .color(Color.cyan.opacity(0.05)))
+                        var el = Path()
+                        el.move(to: CGPoint(x: 0.5, y: sh * 0.06))
+                        el.addLine(to: CGPoint(x: 0.5, y: sh * 0.94))
+                        ctx.stroke(el, with: .color(Color.cyan.opacity(0.28)), lineWidth: 0.7)
+                        for i in 0..<4 {
+                            let y = sh * (0.18 + Double(i) * 0.22)
+                            ctx.fill(Path(ellipseIn: CGRect(x: 1.5, y: y - 2, width: 4, height: 4)),
+                                     with: .color(Color.cyan.opacity(0.32)))
+                            ctx.fill(Path(ellipseIn: CGRect(x: 2.5, y: y - 1, width: 2, height: 2)),
+                                     with: .color(Color.black.opacity(0.45)))
+                        }
+                    }
+                    .frame(width: 20)
                 }
                 .ignoresSafeArea()
                 .allowsHitTesting(false)

@@ -6,7 +6,6 @@
 //  - 上部 79% = 星グラフィック完全主役
 //  - 下部 21% = 暗い金属コックピット (ゲームUIではなく重厚な計器盤)
 //  - ストラット: ほぼ黒、極細エッジのみ
-//  - QA パレット: 通常UIから完全非表示 (dbg長押しでシート表示)
 //  - HRV/SDNN/ms/SCORE: 通常UI非表示
 //  - PULSE: DEMO時に "72" 表示
 //
@@ -21,29 +20,14 @@ struct HomeView: View {
     @Binding var selectedTab: Int
 
     @State private var showSettingsSheet  = false
-    @State private var showDebugSheet     = false
     @State private var showStatusDetail   = false
     @State private var buttonPulse: Bool  = false
 
-    #if DEBUG
-    @State private var qaScore: Double? = nil
-    #endif
-
     // MARK: - Computed display properties
 
-    private var displayInput: GraphicInput {
-        #if DEBUG
-        if let s = qaScore { return GraphicInput(score: s, confidence: 1.0, state: .optimalTension) }
-        #endif
-        return viewModel.graphicInput
-    }
+    private var displayInput: GraphicInput { viewModel.graphicInput }
 
-    private var hasDisplayData: Bool {
-        #if DEBUG
-        if qaScore != nil { return true }
-        #endif
-        return viewModel.didFetchHeartRate || viewModel.didFetchHRV
-    }
+    private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
 
     private var scoreIntensity: Double { min(max(displayInput.score / 100.0, 0), 1) }
 
@@ -132,16 +116,9 @@ struct HomeView: View {
             withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
                 buttonPulse = true
             }
-            #if DEBUG
-            if let s = envQAScore() { qaScore = s }
-            #endif
         }
         .sheet(isPresented: $showSettingsSheet) {
             SettingsView().environmentObject(viewModel)
-        }
-        .sheet(isPresented: $showDebugSheet) {
-            debugConsoleSheet
-                .presentationDetents([.large])
         }
         .sheet(isPresented: $showStatusDetail) {
             statusDetailSheet
@@ -205,26 +182,14 @@ struct HomeView: View {
 
             Spacer()
 
-            // 右: 設定 + dbg
-            HStack(spacing: 0) {
-                Button { showSettingsSheet = true } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 14, weight: .light))
-                        .foregroundStyle(Color.white.opacity(0.38))
-                        .frame(width: 36, height: 36)
-                }
-                .buttonStyle(.plain)
-
-                #if DEBUG
-                Button { showDebugSheet = true } label: {
-                    Text("dbg")
-                        .font(.system(size: 7, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.15))
-                        .frame(width: 28, height: 36)
-                }
-                .buttonStyle(.plain)
-                #endif
+            // 右: 設定
+            Button { showSettingsSheet = true } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .light))
+                    .foregroundStyle(Color.white.opacity(0.38))
+                    .frame(width: 36, height: 36)
             }
+            .buttonStyle(.plain)
         }
         .frame(height: 36)
     }
@@ -683,67 +648,6 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Debug console sheet (QAパレットはここだけ)
-
-    private var debugConsoleSheet: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 14) {
-                    #if DEBUG
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Visual QA — Score Preview")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.white)
-                        let items: [(String, Double?)] = [
-                            ("OFF", nil), ("CALM", 12.0), ("FOCUS", 40.0),
-                            ("ALERT", 70.0), ("OVLD", 92.0)
-                        ]
-                        HStack(spacing: 6) {
-                            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                                let active = qaScore == item.1
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.15)) { qaScore = item.1 }
-                                } label: {
-                                    Text(item.0)
-                                        .font(.system(size: 10, weight: .black, design: .monospaced))
-                                        .foregroundStyle(active ? .black : Color.white.opacity(0.72))
-                                        .frame(maxWidth: .infinity).frame(height: 40)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 7)
-                                                .fill(active ? Color.cyan : Color.white.opacity(0.08))
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 7)
-                                                .strokeBorder(active ? Color.white.opacity(0.22)
-                                                              : Color.cyan.opacity(0.18), lineWidth: 0.7)
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("visual_state_\(item.0.lowercased())")
-                            }
-                        }
-                    }
-                    .padding(14)
-                    .background(Color.white.opacity(0.04))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    #endif
-
-                    DebugDiagnosticsView().environmentObject(viewModel)
-                }
-                .padding(14)
-            }
-            .background(Color(red: 0.02, green: 0.02, blue: 0.07).ignoresSafeArea())
-            .navigationTitle("デバッグ")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("閉じる") { showDebugSheet = false }.foregroundStyle(.cyan)
-                }
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-
     // MARK: - Helpers
 
     private var isDemoMode: Bool { viewModel.activeDataSource == .mock }
@@ -813,18 +717,6 @@ struct HomeView: View {
         }
     }
 
-    #if DEBUG
-    private func envQAScore() -> Double? {
-        guard let s = ProcessInfo.processInfo.environment["VISUAL_QA_STATE"] else { return nil }
-        switch s.uppercased() {
-        case "CALM":     return 12.0
-        case "FOCUS":    return 40.0
-        case "ALERT":    return 70.0
-        case "OVERLOAD": return 92.0
-        default:         return nil
-        }
-    }
-    #endif
 }
 
 // MARK: - CockpitFrameCanvas (imageUI.png: ほぼ黒のストラット)
