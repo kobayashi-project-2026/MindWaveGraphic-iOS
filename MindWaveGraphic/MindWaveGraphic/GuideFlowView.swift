@@ -31,9 +31,11 @@ struct GuideFlowView: View {
         }
         #if DEBUG
         if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session" {
-            _step             = State(initialValue: .session)
-            _selectedScene    = State(initialValue: .interview)
-            _selectedExercise = State(initialValue: .breathing478)
+            _step                   = State(initialValue: .session)
+            _selectedScene          = State(initialValue: .interview)
+            _selectedExercise       = State(initialValue: .breathing478)
+            _sessionElapsed         = State(initialValue: 60)
+            _sessionDurationSeconds = State(initialValue: 60)
         }
         #endif
     }
@@ -261,11 +263,11 @@ struct GuideFlowView: View {
             // 消失点グロー（呼吸集中モードの深度感）
             RadialGradient(
                 colors: [
-                    Color(hue: 0.62, saturation: 0.85, brightness: 0.80).opacity(0.07),
+                    Color(hue: 0.62, saturation: 0.85, brightness: 0.80).opacity(0.13),
                     .clear
                 ],
                 center: UnitPoint(x: 0.5, y: 0.28),
-                startRadius: 0, endRadius: 240
+                startRadius: 0, endRadius: 280
             )
             .ignoresSafeArea()
             .allowsHitTesting(false)
@@ -722,7 +724,16 @@ struct GuideFlowView: View {
             .padding(.top, 6)
             .animation(.easeInOut(duration: 0.18), value: selectedExercise)
 
-            // ── 呼吸ビジュアル（大型）+ ミニ状態ウィンドウ
+            // ── ミニ状態ウィンドウ（タブ直下・右寄せ固定、呼吸円と重ならない）
+            HStack(spacing: 0) {
+                Spacer()
+                miniStateWindow
+                    .padding(.trailing, 10)
+            }
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+
+            // ── 呼吸ビジュアル（大型・邪魔なし）
             sessionVisual
 
             // ── 残り時間表示
@@ -766,32 +777,32 @@ struct GuideFlowView: View {
     }
 
     private var sessionVisual: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack {
             // ── 呼吸円 背後グロー（深部感・奥行き演出）
             ZStack {
                 // 広域アンビエント
                 RadialGradient(
                     colors: [
-                        Color(hue: 0.60, saturation: 0.85, brightness: 0.75).opacity(0.14),
-                        Color(hue: 0.60, saturation: 0.70, brightness: 0.50).opacity(0.05),
+                        Color(hue: 0.60, saturation: 0.85, brightness: 0.75).opacity(0.16),
+                        Color(hue: 0.60, saturation: 0.70, brightness: 0.50).opacity(0.06),
                         .clear
                     ],
-                    center: .center, startRadius: 0, endRadius: 200
+                    center: .center, startRadius: 0, endRadius: 210
                 )
                 // 中心コア輝点
                 RadialGradient(
                     colors: [
-                        Color.cyan.opacity(0.12),
+                        Color.cyan.opacity(0.14),
                         .clear
                     ],
-                    center: .center, startRadius: 0, endRadius: 80
+                    center: .center, startRadius: 0, endRadius: 90
                 )
             }
             .frame(width: 400, height: 400)
             .frame(maxWidth: .infinity)
             .allowsHitTesting(false)
 
-            // 呼吸サークル（主役）
+            // 呼吸サークル（主役・邪魔なし）
             Group {
                 if let exercise = selectedExercise {
                     BreathingCircleVisual(
@@ -806,14 +817,9 @@ struct GuideFlowView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-
-            // ミニ緊張状態ウィンドウ（右上に常時表示）
-            miniStateWindow
-                .padding(.top, 4)
-                .padding(.trailing, 8)
         }
         .padding(.horizontal, 8)
-        .frame(minHeight: 330)
+        .frame(minHeight: 300)
         // ── 左右コックピットサイドフレーム（リベット付き）
         .overlay(alignment: .leading) {
             Canvas { ctx, size in
@@ -1654,8 +1660,8 @@ private struct SessionAmbientStarfield: View {
     // 近景層: 大きく速く明るい (indices 16-27)
     private var farSpeed:  Double  { score * 14.0 + 4.0 }
     private var nearSpeed: Double  { score * 28.0 + 10.0 }
-    private var farBase:   CGFloat { 0.06 + CGFloat(score) * 0.04 }
-    private var nearBase:  CGFloat { 0.10 + CGFloat(score) * 0.06 }
+    private var farBase:   CGFloat { 0.14 + CGFloat(score) * 0.08 }
+    private var nearBase:  CGFloat { 0.22 + CGFloat(score) * 0.10 }
 
     var body: some View {
         TimelineView(.animation) { tl in
