@@ -215,14 +215,38 @@ struct GuideFlowView: View {
 
     // MARK: - Background
 
+    // 表示に使う心拍数値（HomeViewと同じ優先順位）
+    private var guideHeartRateNumeric: Double {
+        if let w = viewModel.latestWatchHeartRate { return w }
+        if viewModel.didFetchHeartRate { return viewModel.currentHeartRate }
+        #if DEBUG
+        if let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
+           let val = Double(str) { return val }
+        #endif
+        return 0
+    }
+
+    // 心拍数から表示色スコア下限（HomeViewと同じ閾値）
+    private var guideHRVisualFloor: Double {
+        let hr = guideHeartRateNumeric
+        if hr >= 130 { return 85 }
+        if hr >= 115 { return 72 }
+        if hr >= 100 { return 55 }
+        return 0
+    }
+
     private var sessionScoreIntensity: Double {
-        min(max(viewModel.graphicInput.score / 100.0, 0), 1)
+        let raw = min(max(viewModel.graphicInput.score / 100.0, 0), 1)
+        return max(raw, guideHRVisualFloor / 100.0)
     }
 
     private var sessionStateColor: Color {
         let sc = sessionScoreIntensity
+        // HR補正後のscoreを使うため hasData チェックは維持しつつ、
+        // 補正が入っていれば低心拍でない限り青にならない
         let hasData = viewModel.didFetchHeartRate || viewModel.didFetchHRV
-        if !hasData { return Color(hue: 0.62, saturation: 0.80, brightness: 0.88) }
+        let hasHR = guideHeartRateNumeric > 0
+        if !hasData && !hasHR { return Color(hue: 0.62, saturation: 0.80, brightness: 0.88) }
         if sc < 0.25 { return Color(hue: 0.62, saturation: 0.80, brightness: 0.88) }
         if sc < 0.55 { return Color(hue: 0.48, saturation: 0.85, brightness: 0.90) }
         if sc < 0.78 { return Color(hue: 0.08, saturation: 0.92, brightness: 0.98) }
@@ -878,13 +902,16 @@ struct GuideFlowView: View {
     // MARK: - ミニ緊張状態ウィンドウ（宇宙小窓スタイル）
 
     private var miniStateWindow: some View {
-        let input   = viewModel.graphicInput
-        let score   = min(max(input.score / 100.0, 0.0), 1.0)
-        let hasData = viewModel.didFetchHeartRate || viewModel.didFetchHRV
+        let input    = viewModel.graphicInput
+        let rawScore = min(max(input.score / 100.0, 0.0), 1.0)
+        // 心拍補正：HomeViewと同じ閾値でscoreを底上げ
+        let score    = max(rawScore, guideHRVisualFloor / 100.0)
+        let hasData  = viewModel.didFetchHeartRate || viewModel.didFetchHRV
+        let hasHR    = guideHeartRateNumeric > 0
 
         let stateName: String
         let stateColor: Color
-        if !hasData {
+        if !hasData && !hasHR {
             stateName = "—"
             stateColor = Color.white.opacity(0.62)
         } else if score < 0.25 {

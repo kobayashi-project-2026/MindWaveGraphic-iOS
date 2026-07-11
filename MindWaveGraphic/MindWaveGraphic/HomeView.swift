@@ -19,13 +19,42 @@ struct HomeView: View {
     @EnvironmentObject var flowState: AppFlowState
     @Binding var selectedTab: Int
 
-    @State private var showSettingsSheet  = false
-    @State private var showStatusDetail   = false
-    @State private var buttonPulse: Bool  = false
+    @State private var showSettingsSheet    = false
+    @State private var showStatusDetail     = false
+    @State private var buttonPulse: Bool    = false
+    #if DEBUG
+    @State private var showDebugDiagnostics = false
+    #endif
 
     // MARK: - Computed display properties
 
-    private var displayInput: GraphicInput { viewModel.graphicInput }
+    // 実際のPULSE表示に使う心拍数値（DEMO_HEART_RATE env varでシミュレーター確認可）
+    private var heartRateNumeric: Double {
+        if let w = viewModel.latestWatchHeartRate { return w }
+        if viewModel.didFetchHeartRate { return viewModel.currentHeartRate }
+        #if DEBUG
+        if let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
+           let val = Double(str) { return val }
+        #endif
+        return 0
+    }
+
+    // 心拍数から表示色スコアの下限を決定（表示のみ。計算値は変えない）
+    private var heartRateVisualFloor: Double {
+        let hr = heartRateNumeric
+        if hr >= 130 { return 85 }
+        if hr >= 115 { return 72 }
+        if hr >= 100 { return 55 }
+        return 0
+    }
+
+    // 表示用 GraphicInput（心拍優先補正済み score）
+    private var displayInput: GraphicInput {
+        let base = viewModel.graphicInput
+        let correctedScore = max(base.score, heartRateVisualFloor)
+        guard correctedScore > base.score else { return base }
+        return GraphicInput(score: correctedScore, confidence: base.confidence, state: base.state)
+    }
 
     private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
 
@@ -120,6 +149,21 @@ struct HomeView: View {
         .sheet(isPresented: $showSettingsSheet) {
             SettingsView().environmentObject(viewModel)
         }
+        #if DEBUG
+        .sheet(isPresented: $showDebugDiagnostics) {
+            NavigationStack {
+                DebugDiagnosticsView()
+                    .environmentObject(viewModel)
+                    .navigationTitle("診断")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("閉じる") { showDebugDiagnostics = false }
+                        }
+                    }
+            }
+            .preferredColorScheme(.dark)
+        }
+        #endif
         .sheet(isPresented: $showStatusDetail) {
             statusDetailSheet
                 .presentationDetents([.medium])
@@ -182,7 +226,7 @@ struct HomeView: View {
 
             Spacer()
 
-            // 右: 設定
+            // 右: 設定（DEBUGビルドのみ長押しで診断を開く）
             Button { showSettingsSheet = true } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 14, weight: .light))
@@ -190,6 +234,13 @@ struct HomeView: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
+            #if DEBUG
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 1.5).onEnded { _ in
+                    showDebugDiagnostics = true
+                }
+            )
+            #endif
         }
         .frame(height: 36)
     }
@@ -659,7 +710,11 @@ struct HomeView: View {
     private var heartRateText: String {
         if let w = viewModel.latestWatchHeartRate { return String(format: "%.0f", w) }
         if viewModel.didFetchHeartRate            { return String(format: "%.0f", viewModel.currentHeartRate) }
-        if isDemoMode                             { return "72" }
+        #if DEBUG
+        if let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
+           let val = Double(str) { return String(format: "%.0f", val) }
+        #endif
+        if isDemoMode { return "72" }
         return "—"
     }
 
