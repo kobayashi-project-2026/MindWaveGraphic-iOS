@@ -25,17 +25,24 @@ struct HomeView: View {
     #if DEBUG
     @State private var showDebugDiagnostics = false
     #endif
+    #if DEBUG && targetEnvironment(simulator)
+    @State private var showSimulatorDemoControls = false
+    @AppStorage("sim_demo_override_enabled") private var simDemoOverrideEnabled = false
+    @AppStorage("sim_demo_bpm")             private var simDemoBPM:             Double = 72.0
+    @AppStorage("sim_demo_score")           private var simDemoScore:           Double = 12.0
+    #endif
 
     // MARK: - Computed display properties
 
-    // 実際のPULSE表示に使う心拍数値（DEMO_HEART_RATE env varでシミュレーター確認可）
+    // 実際のPULSE表示に使う心拍数値（Simulator demo override → DEMO_HEART_RATE → 実データ）
     private var heartRateNumeric: Double {
-        if let w = viewModel.latestWatchHeartRate { return w }
-        if viewModel.didFetchHeartRate { return viewModel.currentHeartRate }
-        #if DEBUG
+        #if DEBUG && targetEnvironment(simulator)
+        if simDemoOverrideEnabled { return simDemoBPM }
         if let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
            let val = Double(str) { return val }
         #endif
+        if let w = viewModel.latestWatchHeartRate { return w }
+        if viewModel.didFetchHeartRate { return viewModel.currentHeartRate }
         return 0
     }
 
@@ -48,9 +55,16 @@ struct HomeView: View {
         return 0
     }
 
-    // 表示用 GraphicInput（心拍優先補正済み score）
+    // 表示用 GraphicInput（Simulator demo override → 心拍フロア補正）
     private var displayInput: GraphicInput {
         let base = viewModel.graphicInput
+        #if DEBUG && targetEnvironment(simulator)
+        if simDemoOverrideEnabled {
+            let corrected = max(simDemoScore, heartRateVisualFloor)
+            return GraphicInput(score: corrected, confidence: base.confidence,
+                                state: MindState.from(score: corrected))
+        }
+        #endif
         let correctedScore = max(base.score, heartRateVisualFloor)
         guard correctedScore > base.score else { return base }
         return GraphicInput(score: correctedScore, confidence: base.confidence, state: base.state)
@@ -164,6 +178,22 @@ struct HomeView: View {
             .preferredColorScheme(.dark)
         }
         #endif
+        #if DEBUG && targetEnvironment(simulator)
+        .sheet(isPresented: $showSimulatorDemoControls) {
+            NavigationStack {
+                SimulatorDemoControlsView()
+                    .environmentObject(viewModel)
+                    .navigationTitle("DEMO CONTROLS")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("閉じる") { showSimulatorDemoControls = false }
+                        }
+                    }
+            }
+            .preferredColorScheme(.dark)
+        }
+        #endif
         .sheet(isPresented: $showStatusDetail) {
             statusDetailSheet
                 .presentationDetents([.medium])
@@ -226,7 +256,7 @@ struct HomeView: View {
 
             Spacer()
 
-            // 右: 設定（DEBUGビルドのみ長押しで診断を開く）
+            // 右: 設定（Simulator+DEBUGのみ長押しでデモ操作パネルを開く。実機では長押し無効）
             Button { showSettingsSheet = true } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 14, weight: .light))
@@ -234,10 +264,10 @@ struct HomeView: View {
                     .frame(width: 36, height: 36)
             }
             .buttonStyle(.plain)
-            #if DEBUG
+            #if DEBUG && targetEnvironment(simulator)
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 1.5).onEnded { _ in
-                    showDebugDiagnostics = true
+                    showSimulatorDemoControls = true
                 }
             )
             #endif
@@ -708,12 +738,13 @@ struct HomeView: View {
     }
 
     private var heartRateText: String {
-        if let w = viewModel.latestWatchHeartRate { return String(format: "%.0f", w) }
-        if viewModel.didFetchHeartRate            { return String(format: "%.0f", viewModel.currentHeartRate) }
-        #if DEBUG
+        #if DEBUG && targetEnvironment(simulator)
+        if simDemoOverrideEnabled { return String(format: "%.0f", simDemoBPM) }
         if let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
            let val = Double(str) { return String(format: "%.0f", val) }
         #endif
+        if let w = viewModel.latestWatchHeartRate { return String(format: "%.0f", w) }
+        if viewModel.didFetchHeartRate            { return String(format: "%.0f", viewModel.currentHeartRate) }
         if isDemoMode { return "72" }
         return "—"
     }
@@ -1128,6 +1159,224 @@ struct CockpitLeverNav: View {
         }
     }
 }
+
+// MARK: - Simulator Demo Controls
+
+#if DEBUG && targetEnvironment(simulator)
+private struct SimulatorDemoControlsView: View {
+    @EnvironmentObject var viewModel: MindWaveViewModel
+
+    @AppStorage("sim_demo_override_enabled") private var overrideEnabled = false
+    @AppStorage("sim_demo_bpm")             private var demoBPM:         Double = 72.0
+    @AppStorage("sim_demo_score")           private var demoScore:       Double = 12.0
+
+    private var hrFloor: Double {
+        if demoBPM >= 130 { return 85 }
+        if demoBPM >= 115 { return 72 }
+        if demoBPM >= 100 { return 55 }
+        return 0
+    }
+
+    private var displayScore: Double {
+        overrideEnabled ? max(demoScore, hrFloor) : viewModel.graphicInput.score
+    }
+
+    private var derivedStateName: String {
+        let s = displayScore / 100.0
+        if s < 0.25 { return "CALM" }
+        if s < 0.55 { return "FOCUS" }
+        if s < 0.78 { return "ALERT" }
+        return "OVLD"
+    }
+
+    private var derivedStateColor: Color {
+        let s = displayScore / 100.0
+        if s < 0.25 { return Color(hue: 0.62, saturation: 0.80, brightness: 0.88) }
+        if s < 0.55 { return Color(hue: 0.48, saturation: 0.85, brightness: 0.90) }
+        if s < 0.78 { return Color(hue: 0.08, saturation: 0.92, brightness: 0.98) }
+        return Color(hue: 0.01, saturation: 0.96, brightness: 1.0)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+
+                // ── ヘッダー
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("SIMULATOR DEMO CONTROLS")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.88))
+                        .tracking(1.5)
+                    Text("Simulator only. Not compiled into device builds.")
+                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.35))
+                }
+
+                Divider().background(Color.cyan.opacity(0.25))
+
+                // ── Demo Override トグル
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("DEMO OVERRIDE")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(overrideEnabled ? Color.cyan : Color.white.opacity(0.55))
+                            .tracking(1)
+                        Text(overrideEnabled ? "ON — demo values active" : "OFF — real sensor data")
+                            .font(.system(size: 9, weight: .regular, design: .monospaced))
+                            .foregroundStyle(Color.white.opacity(0.35))
+                    }
+                    Spacer()
+                    Toggle("", isOn: $overrideEnabled).labelsHidden().tint(.cyan)
+                }
+
+                Divider().background(Color.white.opacity(0.08))
+
+                // ── Heart Rate / BPM スライダー
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("HEART RATE")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Color.white.opacity(0.55))
+                            .tracking(1)
+                        Spacer()
+                        Text(String(format: "%.0f BPM", demoBPM))
+                            .font(.system(size: 16, weight: .thin, design: .monospaced))
+                            .foregroundStyle(overrideEnabled ? Color.white : Color.white.opacity(0.30))
+                            .monospacedDigit()
+                    }
+                    Slider(value: $demoBPM, in: 40...170, step: 1)
+                        .tint(derivedStateColor)
+                        .disabled(!overrideEnabled)
+
+                    // BPM プリセット
+                    HStack(spacing: 6) {
+                        bpmButton("CALM",   72)
+                        bpmButton("FOCUS", 100)
+                        bpmButton("ALERT", 115)
+                        bpmButton("OVLD",  130)
+                        bpmButton("MAX",   150)
+                    }
+                }
+
+                Divider().background(Color.white.opacity(0.08))
+
+                // ── Visual Score スライダー
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("VISUAL SCORE")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(Color.white.opacity(0.55))
+                            .tracking(1)
+                        Spacer()
+                        Text(String(format: "%.0f / 100", demoScore))
+                            .font(.system(size: 14, weight: .thin, design: .monospaced))
+                            .foregroundStyle(overrideEnabled ? Color.white : Color.white.opacity(0.30))
+                            .monospacedDigit()
+                    }
+                    Slider(value: $demoScore, in: 0...100, step: 1)
+                        .tint(derivedStateColor)
+                        .disabled(!overrideEnabled)
+                }
+
+                Divider().background(Color.white.opacity(0.08))
+
+                // ── State Preview
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("STATE PREVIEW")
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.55))
+                        .tracking(1)
+
+                    HStack(spacing: 16) {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(derivedStateColor)
+                                .frame(width: 10, height: 10)
+                                .shadow(color: derivedStateColor.opacity(0.80), radius: 8)
+                            Text(derivedStateName)
+                                .font(.system(size: 22, weight: .black, design: .monospaced))
+                                .foregroundStyle(derivedStateColor)
+                                .shadow(color: derivedStateColor.opacity(0.50), radius: 8)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 5) {
+                            infoRow("BPM",           overrideEnabled ? String(format: "%.0f", demoBPM) : "—")
+                            infoRow("raw score",     String(format: "%.0f", viewModel.graphicInput.score))
+                            infoRow("display score", String(format: "%.0f", displayScore))
+                            infoRow("source",        overrideEnabled ? "simulator demo" : "real / sensor")
+                        }
+                    }
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.black.opacity(0.60))
+                            .overlay(RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(derivedStateColor.opacity(0.40), lineWidth: 1))
+                    )
+                }
+
+                Divider().background(Color.white.opacity(0.08))
+
+                // ── Reset ボタン
+                Button {
+                    overrideEnabled = false
+                    demoBPM   = 72.0
+                    demoScore = 12.0
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.counterclockwise")
+                        Text("RESET TO DEFAULT")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .tracking(1)
+                    }
+                    .foregroundStyle(Color.orange.opacity(0.80))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 32)
+            }
+            .padding(20)
+        }
+        .background(Color(red: 0.02, green: 0.04, blue: 0.12).ignoresSafeArea())
+    }
+
+    private func bpmButton(_ label: String, _ bpm: Double) -> some View {
+        let isActive = abs(demoBPM - bpm) < 0.5 && overrideEnabled
+        return Button { demoBPM = bpm } label: {
+            VStack(spacing: 2) {
+                Text(label)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .tracking(0.4)
+                Text(String(format: "%.0f", bpm))
+                    .font(.system(size: 9, weight: .thin, design: .monospaced))
+            }
+            .foregroundStyle(isActive ? Color.black : Color.white.opacity(0.65))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(isActive ? derivedStateColor : Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!overrideEnabled)
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.40))
+            Text(value)
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.85))
+                .monospacedDigit()
+        }
+    }
+}
+#endif
 
 // MARK: - Preview
 

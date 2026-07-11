@@ -20,6 +20,11 @@ struct GuideFlowView: View {
     @Binding var selectedTab: Int
     @Environment(\.dismiss)              private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    #if DEBUG && targetEnvironment(simulator)
+    @AppStorage("sim_demo_override_enabled") private var simDemoOverrideEnabled = false
+    @AppStorage("sim_demo_bpm")             private var simDemoBPM:             Double = 72.0
+    @AppStorage("sim_demo_score")           private var simDemoScore:           Double = 12.0
+    #endif
 
     // MARK: - custom init
 
@@ -215,14 +220,15 @@ struct GuideFlowView: View {
 
     // MARK: - Background
 
-    // 表示に使う心拍数値（HomeViewと同じ優先順位）
+    // 表示に使う心拍数値（Simulator demo override → DEMO_HEART_RATE → 実データ）
     private var guideHeartRateNumeric: Double {
-        if let w = viewModel.latestWatchHeartRate { return w }
-        if viewModel.didFetchHeartRate { return viewModel.currentHeartRate }
-        #if DEBUG
+        #if DEBUG && targetEnvironment(simulator)
+        if simDemoOverrideEnabled { return simDemoBPM }
         if let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
            let val = Double(str) { return val }
         #endif
+        if let w = viewModel.latestWatchHeartRate { return w }
+        if viewModel.didFetchHeartRate { return viewModel.currentHeartRate }
         return 0
     }
 
@@ -236,6 +242,11 @@ struct GuideFlowView: View {
     }
 
     private var sessionScoreIntensity: Double {
+        #if DEBUG && targetEnvironment(simulator)
+        if simDemoOverrideEnabled {
+            return min(max(max(simDemoScore, guideHRVisualFloor) / 100.0, 0), 1)
+        }
+        #endif
         let raw = min(max(viewModel.graphicInput.score / 100.0, 0), 1)
         return max(raw, guideHRVisualFloor / 100.0)
     }
@@ -903,8 +914,13 @@ struct GuideFlowView: View {
 
     private var miniStateWindow: some View {
         let input    = viewModel.graphicInput
+        #if DEBUG && targetEnvironment(simulator)
+        let rawScore = simDemoOverrideEnabled
+            ? min(max(simDemoScore / 100.0, 0.0), 1.0)
+            : min(max(input.score  / 100.0, 0.0), 1.0)
+        #else
         let rawScore = min(max(input.score / 100.0, 0.0), 1.0)
-        // 心拍補正：HomeViewと同じ閾値でscoreを底上げ
+        #endif
         let score    = max(rawScore, guideHRVisualFloor / 100.0)
         let hasData  = viewModel.didFetchHeartRate || viewModel.didFetchHRV
         let hasHR    = guideHeartRateNumeric > 0
@@ -929,6 +945,9 @@ struct GuideFlowView: View {
         }
 
         let hrText: String = {
+            #if DEBUG && targetEnvironment(simulator)
+            if simDemoOverrideEnabled { return String(format: "%.0f", simDemoBPM) }
+            #endif
             if let w = viewModel.latestWatchHeartRate { return String(format: "%.0f", w) }
             if viewModel.didFetchHeartRate            { return String(format: "%.0f", viewModel.currentHeartRate) }
             if viewModel.activeDataSource == .mock    { return "72" }
