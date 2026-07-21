@@ -494,24 +494,30 @@ private struct AITrendPanel: View {
         return counts.max(by: { $0.value < $1.value })?.key
     }
 
-    private var avgScoreBefore: Double {
-        let vals = recentRecords.map(\.before.score)
-        guard !vals.isEmpty else { return 0 }
-        return vals.reduce(0, +) / Double(vals.count)
+    private var calmAfterCount: Int {
+        recentRecords.compactMap(\.after).filter { $0.score < 55 }.count
     }
 
-    private var avgScoreAfter: Double {
-        let vals = recentRecords.compactMap(\.after?.score)
-        guard !vals.isEmpty else { return 0 }
-        return vals.reduce(0, +) / Double(vals.count)
+    private var highBeforeCount: Int {
+        recentRecords.filter { $0.before.score >= 55 }.count
     }
 
     private var trendText: String {
-        let diff = avgScoreAfter - avgScoreBefore
-        if records.count < 2 { return "セッションを重ねるとトレンドが表示されます。" }
-        if diff < -5 { return "呼吸ケア後のスコアが平均\(String(format: "%.0f", abs(diff)))pt改善傾向。継続が効果的です。" }
-        if diff > 5  { return "セッション後のスコアが上昇傾向。種目や実施タイミングの見直しを検討してください。" }
-        return "セッション前後のスコアが安定しています。継続的なケアを維持しましょう。"
+        if records.count < 2 {
+            return "セッションを重ねると呼吸の傾向が見えてきます。"
+        }
+        let afterRecords = recentRecords.compactMap(\.after)
+        if afterRecords.isEmpty {
+            return "再測定データが蓄積されると傾向が表示されます。"
+        }
+        let calmRatio = Double(calmAfterCount) / Double(afterRecords.count)
+        if calmRatio > 0.6 {
+            return "呼吸後に落ち着く傾向が見られます。このペースでケアを続けましょう。"
+        } else if highBeforeCount > recentCount / 2 {
+            return "反応が高まりやすい場面が多い傾向です。呼吸を早めに始めると変化しやすくなります。"
+        } else {
+            return "呼吸前後の変化はまちまちです。継続的なケアで傾向がつかみやすくなります。"
+        }
     }
 
     private var topExercise: GuideExercise? {
@@ -543,11 +549,11 @@ private struct AITrendPanel: View {
             // メトリクス行
             HStack(spacing: 12) {
                 trendMetric(
-                    label: "前後改善",
+                    label: "落ち着き傾向",
                     value: records.count > 1
-                        ? (avgScoreAfter < avgScoreBefore ? "↓改善" : "→維持")
+                        ? (calmAfterCount > 0 ? "あり" : "継続中")
                         : "—",
-                    accent: avgScoreAfter < avgScoreBefore
+                    accent: calmAfterCount > 0
                         ? Color(hue: 0.62, saturation: 0.78, brightness: 0.90)
                         : Color.white.opacity(0.50)
                 )

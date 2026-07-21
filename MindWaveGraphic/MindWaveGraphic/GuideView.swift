@@ -617,15 +617,15 @@ private struct AISceneSuggestionView: View {
     private var suggestionText: String {
         switch scene {
         case .interview, .speech:
-            return "4-7-8呼吸が副交感神経を活性化し、\n発表前の緊張緩和に最適です。"
+            return "4-7-8は吐く時間を長く取りやすく、本番前の高まりを落ち着ける準備に向いています。"
         case .sports:
-            return "ボックス呼吸が集中力とリズムを整え、\n試合前のパフォーマンス向上に効果的です。"
+            return "BOXは一定のリズムを保ちやすく、集中を維持したまま整えたい場面に向いています。"
         case .social:
-            return "ボックス呼吸が適度な覚醒レベルを維持し、\nコミュニケーションを円滑にします。"
+            return "BOXは一定のリズムで気持ちを安定させやすく、大切な場面の前後に向いています。"
         case .study, .meeting:
-            return "2-1-4呼吸で過剰な緊張を緩和しながら、\n集中力を保ちやすい状態に整えます。"
+            return "2-1-4は息を長く吐きやすく、高まりをほぐして集中しやすい状態に向いています。"
         case .daily, .other:
-            return "4-7-8呼吸で自律神経のバランスを整え、\n心身のリセットを促します。"
+            return "4-7-8はゆっくりとした呼吸のリズムで、日常的なリセットに向いています。"
         }
     }
 

@@ -43,21 +43,21 @@ private struct StarLayer {
 // ─────────────────────────────────────────────────────────────
 private let kFar = StarLayer(
     count: 1000, xRange: 2600, yRange: 1600, zDepth: 9500,
-    baseSpd: 0.40, strSpd: 14.0,
-    sizeMul: 0.42, brightFl: 0.090, brightDp: 2.10,
-    trailRatio: 0.012
+    baseSpd: 0.35, strSpd: 12.0,
+    sizeMul: 0.38, brightFl: 0.082, brightDp: 2.15,
+    trailRatio: 0.010
 )
 private let kMid = StarLayer(
     count: 240, xRange: 1280, yRange:  780, zDepth: 5500,
     baseSpd: 0.92, strSpd: 66.0,
     sizeMul: 0.92, brightFl: 0.098, brightDp: 2.20,
-    trailRatio: 0.18
+    trailRatio: 0.22
 )
 private let kNear = StarLayer(
     count: 110, xRange:  420, yRange:  330, zDepth: 2200,
-    baseSpd: 1.48, strSpd: 178.0,
+    baseSpd: 1.48, strSpd: 198.0,
     sizeMul: 1.65, brightFl: 0.140, brightDp: 2.80,
-    trailRatio: 0.30
+    trailRatio: 0.34
 )
 private let kLayers: [StarLayer] = [kFar, kMid, kNear]
 private let kFocal: Double = 440.0
@@ -115,17 +115,19 @@ struct SpaceshipStateGraphicView: View {
             )
             .blendMode(.screen)
 
-            // CALM: 深蒼ネビュラ核（t < 0.25 の深宇宙感）
+            // CALM: 深海青ネビュラ（静かな深宇宙感）
             if t < 0.30 {
                 let cp = max(0, 1.0 - t / 0.30)
+                // 広がった深青コア
                 RadialGradient(
                     colors: [
-                        Color(hue: 0.640, saturation: 0.92, brightness: 0.85).opacity(0.14 * cp),
-                        Color(hue: 0.630, saturation: 0.80, brightness: 0.70).opacity(0.07 * cp),
+                        Color(hue: 0.643, saturation: 0.95, brightness: 0.88).opacity(0.22 * cp),
+                        Color(hue: 0.635, saturation: 0.85, brightness: 0.72).opacity(0.10 * cp),
+                        Color(hue: 0.628, saturation: 0.78, brightness: 0.60).opacity(0.04 * cp),
                         .clear
                     ],
                     center: UnitPoint(x: 0.5, y: 0.32),
-                    startRadius: 0, endRadius: 180
+                    startRadius: 0, endRadius: 260
                 )
                 .blendMode(.screen)
 
@@ -133,27 +135,28 @@ struct SpaceshipStateGraphicView: View {
                 LinearGradient(
                     colors: [
                         .clear,
-                        Color(hue: 0.635, saturation: 0.88, brightness: 0.82).opacity(0.06 * cp),
-                        Color(hue: 0.620, saturation: 0.80, brightness: 0.75).opacity(0.04 * cp),
+                        Color(hue: 0.637, saturation: 0.90, brightness: 0.84).opacity(0.09 * cp),
+                        Color(hue: 0.622, saturation: 0.82, brightness: 0.76).opacity(0.06 * cp),
                         .clear
                     ],
-                    startPoint: UnitPoint(x: 0.0, y: 0.25),
-                    endPoint:   UnitPoint(x: 1.0, y: 0.32)
+                    startPoint: UnitPoint(x: 0.0, y: 0.22),
+                    endPoint:   UnitPoint(x: 1.0, y: 0.30)
                 )
                 .blendMode(.screen)
             }
 
-            // FOCUS: ティールシフト (0.28 < t < 0.58)
-            if t > 0.28 && t < 0.58 {
-                let fp = min(1.0, (t - 0.28) / 0.30)
-                let fade = t < 0.50 ? fp : fp * (1.0 - (t - 0.50) / 0.08)
+            // FOCUS: 整った青緑の流れ (0.28 < t < 0.60)
+            if t > 0.28 && t < 0.60 {
+                let fp = min(1.0, (t - 0.28) / 0.28)
+                let fade = t < 0.48 ? fp : fp * (1.0 - (t - 0.48) / 0.12)
                 RadialGradient(
                     colors: [
-                        Color(hue: 0.490, saturation: 0.75, brightness: 0.70).opacity(0.08 * fade),
+                        Color(hue: 0.490, saturation: 0.85, brightness: 0.80).opacity(0.14 * fade),
+                        Color(hue: 0.500, saturation: 0.78, brightness: 0.68).opacity(0.06 * fade),
                         .clear
                     ],
-                    center: UnitPoint(x: 0.5, y: 0.40),
-                    startRadius: 30, endRadius: 200
+                    center: UnitPoint(x: 0.5, y: 0.38),
+                    startRadius: 20, endRadius: 250
                 )
                 .blendMode(.screen)
             }
@@ -208,6 +211,29 @@ struct SpaceshipStateGraphicView: View {
                 startRadius: 195, endRadius: 395
             )
             .blendMode(.multiply)
+
+            // ガラス反射: 上辺ハイライト（CALM時はより青白く）
+            LinearGradient(
+                colors: [
+                    Color.white.opacity(0.055 + (1 - t) * 0.030),
+                    Color(hue: 0.630, saturation: 0.60, brightness: 1.0).opacity(0.018),
+                    .clear
+                ],
+                startPoint: .top,
+                endPoint: UnitPoint(x: 0.5, y: 0.07)
+            )
+            .blendMode(.screen)
+
+            // 下部パネル金属感: 底辺グラデーション
+            LinearGradient(
+                colors: [
+                    .clear,
+                    Color.black.opacity(0.12),
+                    Color(white: 0.12).opacity(0.08)
+                ],
+                startPoint: UnitPoint(x: 0.5, y: 0.86),
+                endPoint: .bottom
+            )
         }
         .allowsHitTesting(false)
         .animation(.easeInOut(duration: 1.5), value: t)
@@ -287,16 +313,17 @@ private struct StarFieldCanvas: View {
                 .blendMode(.screen)
             }
 
-            // ── FOCUS: ティール拡散（中程度 stress）
+            // ── FOCUS: 整った青緑拡散（中程度 stress）
             if raw > 0.28 && raw < 0.62 {
                 let fp = min(1.0, (raw - 0.28) / 0.30) * (1.0 - max(0, raw - 0.50) / 0.12)
                 RadialGradient(
                     colors: [
-                        Color(hue: 0.490, saturation: 0.82, brightness: 0.90).opacity(0.10 * fp),
+                        Color(hue: 0.490, saturation: 0.88, brightness: 0.95).opacity(0.16 * fp),
+                        Color(hue: 0.500, saturation: 0.80, brightness: 0.82).opacity(0.06 * fp),
                         .clear
                     ],
                     center: UnitPoint(x: 0.5, y: vpYRatio),
-                    startRadius: 5, endRadius: 80
+                    startRadius: 5, endRadius: 110
                 )
                 .blendMode(.screen)
             }
@@ -356,13 +383,25 @@ private struct StarFieldCanvas: View {
         let briBoost = 1.0 + raw * 0.55
 
         // ── 色設計 ─────────────────────────────────────────────
-        // imageUI.png 参照: 全体を BLUE/CYAN 基調に
-        // 深青 (hue 0.640): CALM
-        // シアン寄り青 (hue 0.620): ALERT+
-        let globalHue: Double = raw < 0.45 ? 0.640 : (raw < 0.70 ? 0.640 - (raw-0.45)/0.25*0.018 : 0.622)
+        // CALM   (raw<0.28):  深海青    hue 0.645
+        // FOCUS  (raw 0.28–0.58): 青緑 hue 0.645→0.505
+        // ALERT  (raw 0.58–0.80): 戻り hue 0.505→0.622
+        // OVLD   (raw>0.80):  蒼白熱   hue 0.622
+        let globalHue: Double
+        if raw < 0.28 {
+            globalHue = 0.645
+        } else if raw < 0.58 {
+            let f = (raw - 0.28) / 0.30
+            globalHue = 0.645 - f * 0.140
+        } else if raw < 0.80 {
+            let f = (raw - 0.58) / 0.22
+            globalHue = 0.505 + f * 0.117
+        } else {
+            globalHue = 0.622
+        }
 
-        // 暖色アクセント (OVERLOAD のみ、最大 8%) ← blue dominant を保つ
-        let warmChance: Double = max(0.0, (raw - 0.72) / 0.28) * 0.08
+        // 暖色アクセント: OVLD で増加 (最大 18%) ← blue dominant を保つ
+        let warmChance: Double = max(0.0, (raw - 0.68) / 0.32) * 0.18
 
         var seedIdx = 0
 
@@ -415,8 +454,13 @@ private struct StarFieldCanvas: View {
                     (layer.brightFl + depthFrac * layer.brightDp * layer.brightFl * 12.5) * briBoost)
 
                 // dot size
-                let sizeBoost = (isNear || isMid) ? (1.0 + raw * 0.28) : 1.0
-                let dotSz = min(5.0, max(0.38,
+                // ALERT far: finer particle look (smaller → denser feel)
+                let isFar = !isNear && !isMid
+                let alertParticleMul: Double = (isFar && raw > 0.58)
+                    ? max(0.55, 1.0 - (raw - 0.58) * 1.10)
+                    : 1.0
+                let sizeBoost = (isNear || isMid) ? (1.0 + raw * 0.28) : alertParticleMul
+                let dotSz = min(5.0, max(0.28,
                     (0.40 + depthFrac * layer.sizeMul * 2.8) * sizeBoost))
 
                 // ── 色計算 ──────────────────────────────────────
@@ -505,10 +549,10 @@ private struct StarFieldCanvas: View {
         let nx = dvx / velSafe
         let ny = dvy / velSafe
 
-        // ストリーク長: ストレスに応じて伸びる (CALM: short, OVERLOAD: medium)
-        // 最大を diag*trailRatio*1.5 でキャップ → 画面幅の ~40% 程度
-        let stretchFactor = 0.88 + intn * 3.0   // 0.88x → 3.88x
-        let streakLen = max(5.0, min(velocity * stretchFactor, maxTrailPx * 1.5))
+        // ストリーク長: ストレスに応じて伸びる (CALM: short, OVLD: dramatic)
+        // OVLD では尾を大幅延長 → 視覚的な高速ワープ感
+        let stretchFactor = 0.88 + intn * 6.2   // 0.88x → 7.08x
+        let streakLen = max(5.0, min(velocity * stretchFactor, maxTrailPx * 2.0))
 
         // ストリーク末尾座標
         let tx = x - CGFloat(nx) * streakLen
@@ -560,13 +604,24 @@ private struct StarFieldCanvas: View {
                    lineWidth: sw * 0.68)
 
         // 5. 先端の微小輝点 (大きな丸ではなく、非常に小さい点)
-        // 「星の位置」を示す最小限の点 (1.0-1.8px)
-        let tipR = max(0.35, dotSz * 0.24)  // 点に見せる・棒に見えない
+        let tipR = max(0.35, dotSz * 0.24)
         ctx.fill(
             Path(ellipseIn: CGRect(x: x - tipR, y: y - tipR,
                                    width: tipR * 2, height: tipR * 2)),
             with: .color(Color.white.opacity(alpha * 0.88))
         )
+
+        // 6. OVLD: 先端に暖色ハロー (尾の強調と連動)
+        if intn > 0.58 {
+            let wg = (intn - 0.58) / 0.42
+            let hr = tipR * (2.2 + wg * 2.0)
+            ctx.fill(
+                Path(ellipseIn: CGRect(x: x - hr, y: y - hr,
+                                       width: hr * 2, height: hr * 2)),
+                with: .color(Color(hue: 0.06, saturation: 0.90, brightness: 1.0)
+                    .opacity(alpha * 0.28 * wg))
+            )
+        }
     }
 
     // MARK: - Mid star (中速ストリーク)
