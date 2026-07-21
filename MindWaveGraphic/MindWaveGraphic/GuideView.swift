@@ -47,7 +47,8 @@ struct GuideView: View {
         .onAppear {
             print("[UI][Guide] view_appeared")
             #if DEBUG
-            if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session" {
+            if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session"
+               || ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "result" {
                 selectedScene = .interview
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     showFlowView = true

@@ -61,6 +61,7 @@ struct GuideFlowView: View {
     @State private var sessionElapsed:    Int  = 0
     @State private var sessionIsRunning:  Bool = false
     @State private var sessionIsFinished: Bool = false
+    @State private var aiFeedbackResult: LocalAIFeedbackResult? = nil
 
     // Remeasurement
     @State private var remeasurementElapsed:   Int   = 0
@@ -191,6 +192,33 @@ struct GuideFlowView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                     sessionIsRunning = true
                 }
+            }
+            // 撮影補助: GUIDE_PHASE=result で AI Feedback 表示画面へジャンプ
+            if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "result" {
+                let hr = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"]
+                    .flatMap(Double.init) ?? 115.0
+                let beforeScore: Double = hr >= 130 ? 85 : hr >= 115 ? 72 : hr >= 100 ? 55 : hr >= 80 ? 38 : 18
+                let beforeState: MindState = beforeScore > 69 ? .overTense : beforeScore > 32 ? .optimalTension : .underAroused
+                let afterScore  = max(beforeScore - 20, 8)
+                let afterState: MindState  = afterScore > 69 ? .overTense : afterScore > 32 ? .optimalTension : .underAroused
+                beforeSnapshot = GuideSnapshot(
+                    timestamp: Date(), score: beforeScore,
+                    confidence: 0.80, state: beforeState,
+                    heartRate: hr, hrv: nil, isMockData: true,
+                    heartRateSampleDate: Date(), hrvSampleDate: nil
+                )
+                afterSnapshot = GuideSnapshot(
+                    timestamp: Date(), score: afterScore,
+                    confidence: 0.80, state: afterState,
+                    heartRate: max(hr - 14, 60), hrv: nil, isMockData: true,
+                    heartRateSampleDate: Date(), hrvSampleDate: nil
+                )
+                selectedScene    = .interview
+                selectedExercise = .breathing478
+                aiFeedbackResult = LocalAIFeedbackGenerator.generate(
+                    heartRate: hr, exercise: .breathing478, scene: .interview
+                )
+                step = .result
             }
         }
         #endif
@@ -1273,6 +1301,10 @@ struct GuideFlowView: View {
                     ResultComparisonCard(before: before, after: after)
                 }
 
+                if let feedback = aiFeedbackResult {
+                    AIFeedbackCardView(result: feedback)
+                }
+
                 Text("これは医療診断ではありません。\n数値は計測環境により変動します。")
                     .font(.system(size: 11, weight: .light))
                     .foregroundStyle(.white.opacity(0.30))
@@ -1336,6 +1368,11 @@ struct GuideFlowView: View {
                 if sessionElapsed == 0 {
                     sessionIsRunning  = false
                     sessionIsFinished = true
+                    aiFeedbackResult  = LocalAIFeedbackGenerator.generate(
+                        heartRate: guideHeartRateNumeric,
+                        exercise:  selectedExercise ?? .breathing478,
+                        scene:     selectedScene    ?? .other
+                    )
                     MindWaveDebugLogger.log(.flow, "session completed")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         guard self.sessionIsFinished else { return }
@@ -1799,6 +1836,267 @@ private struct SessionAmbientStarfield: View {
             }
         }
         .allowsHitTesting(false)
+    }
+}
+
+// MARK: - LocalAI Feedback Data
+
+private struct LocalAIFeedbackResult {
+    let title:          String
+    let summary:        String
+    let analysis:       String
+    let recommendation: String
+    let nextAction:     String
+    let caution:        String
+}
+
+// MARK: - LocalAI Feedback Generator
+
+private enum LocalAIFeedbackGenerator {
+
+    private enum HRTier { case calm, normal, elevated, high, veryHigh }
+
+    private static func tier(_ hr: Double) -> HRTier {
+        if hr < 1   { return .calm }
+        if hr < 80  { return .calm }
+        if hr < 100 { return .normal }
+        if hr < 115 { return .elevated }
+        if hr < 130 { return .high }
+        return .veryHigh
+    }
+
+    static func generate(heartRate: Double, exercise: GuideExercise, scene: MeasurementScene) -> LocalAIFeedbackResult {
+        let t = tier(heartRate)
+        return LocalAIFeedbackResult(
+            title:          makeTitle(t, exercise),
+            summary:        makeSummary(t, exercise),
+            analysis:       makeAnalysis(t, scene),
+            recommendation: makeRecommendation(exercise),
+            nextAction:     makeNextAction(t, scene),
+            caution:        "このフィードバックは医療的な診断ではなく、セルフケアの参考情報です。"
+        )
+    }
+
+    // MARK: Title
+
+    private static func makeTitle(_ t: HRTier, _ e: GuideExercise) -> String {
+        switch e {
+        case .breathing478:
+            switch t {
+            case .calm:     return "深い鎮静でリラックスを達成"
+            case .normal:   return "4-7-8呼吸で安定したリラックスを確認"
+            case .elevated: return "興奮状態から4-7-8呼吸で回復を図りました"
+            case .high:     return "4-7-8呼吸で高緊張から鎮静モードへ移行"
+            case .veryHigh: return "強い興奮状態に4-7-8呼吸で対処しました"
+            }
+        case .box:
+            switch t {
+            case .calm:     return "安静時の集中呼吸でコンディション良好"
+            case .normal:   return "ボックス呼吸でリズムが整っています"
+            case .elevated: return "ボックス呼吸で高まりを安定化させました"
+            case .high:     return "ボックス呼吸で高負荷を着実に乗り越え中"
+            case .veryHigh: return "ボックス呼吸で緊張ピーク時のケアを実施"
+            }
+        case .breathing214:
+            switch t {
+            case .calm:     return "穏やかな状態で自律神経を整えました"
+            case .normal:   return "2-1-4呼吸で心身のバランスが良好"
+            case .elevated: return "2-1-4呼吸で緊張の解放が進行しています"
+            case .high:     return "2-1-4呼吸で高緊張に積極的にアプローチ"
+            case .veryHigh: return "強いストレスに2-1-4呼吸で緊急対応しました"
+            }
+        }
+    }
+
+    // MARK: Summary
+
+    private static func makeSummary(_ t: HRTier, _ e: GuideExercise) -> String {
+        let exName: String
+        switch e {
+        case .breathing478: exName = "4-7-8呼吸法"
+        case .box:          exName = "ボックス呼吸"
+        case .breathing214: exName = "2-1-4呼吸"
+        }
+        switch t {
+        case .calm:
+            return "リラックスした状態で\(exName)を実践しました。呼吸が整っており、コンディションは良好です。"
+        case .normal:
+            return "安定したコンディションで\(exName)に取り組みました。継続的な実践が今後のパフォーマンス向上につながります。"
+        case .elevated:
+            return "やや活性化した状態で\(exName)に取り組みました。呼吸練習が自律神経の調整をサポートしています。"
+        case .high:
+            return "高い緊張状態の中、\(exName)で自律神経の調整を実施しました。短時間でも継続的な効果が期待できます。"
+        case .veryHigh:
+            return "強い緊張が見られた状況で\(exName)による緊急セルフケアを実施しました。継続した取り組みが重要です。"
+        }
+    }
+
+    // MARK: Analysis
+
+    private static func makeAnalysis(_ t: HRTier, _ scene: MeasurementScene) -> String {
+        let sceneDesc: String
+        switch scene {
+        case .interview: sceneDesc = "面接・プレゼン前"
+        case .study:     sceneDesc = "試験・勉強中"
+        case .sports:    sceneDesc = "試合・競技前"
+        case .social:    sceneDesc = "対人場面"
+        case .daily:     sceneDesc = "日常生活"
+        case .other:     sceneDesc = "日常場面"
+        case .meeting:   sceneDesc = "重要な会議前"
+        case .speech:    sceneDesc = "スピーチ前"
+        }
+        switch t {
+        case .calm:
+            return "\(sceneDesc)において、心身がリラックスした状態にあります。このコンディションを本番まで維持することが理想的です。"
+        case .normal:
+            return "\(sceneDesc)において、適度な集中状態が確認されています。緊張と緩和のバランスが取れており、パフォーマンスに適した状態です。"
+        case .elevated:
+            return "\(sceneDesc)において、やや興奮気味の反応が見られます。呼吸調整が奏功しており、安静方向への変化が期待されます。"
+        case .high:
+            return "\(sceneDesc)において、高めの緊張反応が観察されました。呼吸ガイドを継続することで、緊張の緩和をサポートできます。"
+        case .veryHigh:
+            return "\(sceneDesc)において、強い緊張反応が見られました。呼吸練習を積み重ねることで、今後の緊張マネジメントに役立てましょう。"
+        }
+    }
+
+    // MARK: Recommendation
+
+    private static func makeRecommendation(_ e: GuideExercise) -> String {
+        switch e {
+        case .breathing478:
+            return "4-7-8呼吸は副交感神経を優位にし、リラックスを促進します。就寝前や本番直前など、深く落ち着きたいタイミングに特に効果的です。"
+        case .box:
+            return "ボックス呼吸は意識的な集中力を高め、ストレス反応を抑えます。重要な場面の直前に活用すると集中力の維持に役立ちます。"
+        case .breathing214:
+            return "2-1-4呼吸は短い吸気と長い呼気でリラックス効果を高めます。気持ちをすぐにリセットしたいときや、緊張を素早く和らげたいときに有効です。"
+        }
+    }
+
+    // MARK: NextAction
+
+    private static func makeNextAction(_ t: HRTier, _ scene: MeasurementScene) -> String {
+        let isCalm = (t == .calm || t == .normal)
+        switch scene {
+        case .interview, .meeting, .speech:
+            return isCalm
+                ? "現在の落ち着きを保ちながら、自信を持って本番に臨んでください。"
+                : "もう1セット深呼吸を行い、心を整えてから本番に向かいましょう。"
+        case .sports, .study:
+            return isCalm
+                ? "良いコンディションです。このまま軽くウォームアップを続けましょう。"
+                : "緊張は集中力の源にもなります。呼吸を整えて、本番に集中してください。"
+        case .social, .daily, .other:
+            return isCalm
+                ? "心身が整っています。この状態を意識しながら次の活動に移りましょう。"
+                : "少し休憩を取り、引き続き呼吸ケアを続けてください。"
+        }
+    }
+}
+
+// MARK: - AI Feedback Card View
+
+private struct AIFeedbackCardView: View {
+    let result: LocalAIFeedbackResult
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // ── ヘッダー
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.42))
+                    .frame(height: 0.7)
+                Text(" AI FEEDBACK ")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.72))
+                    .tracking(3.2)
+                    .fixedSize()
+                    .padding(.vertical, 9)
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.42))
+                    .frame(height: 0.7)
+            }
+
+            // ── タイトル
+            Text(result.title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.93))
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 10)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // ── セパレーター
+            Rectangle()
+                .fill(Color.white.opacity(0.07))
+                .frame(height: 0.6)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+
+            // ── フィードバック行
+            VStack(alignment: .leading, spacing: 12) {
+                aiFeedbackRow(label: "SUMMARY",        text: result.summary,        color: .cyan)
+                aiFeedbackRow(label: "ANALYSIS",       text: result.analysis,       color: Color(hue: 0.08, saturation: 0.72, brightness: 0.98))
+                aiFeedbackRow(label: "RECOMMENDATION", text: result.recommendation, color: Color(hue: 0.48, saturation: 0.72, brightness: 0.90))
+                aiFeedbackRow(label: "NEXT ACTION",    text: result.nextAction,     color: .cyan)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 14)
+
+            // ── 免責セパレーター
+            Rectangle()
+                .fill(Color.white.opacity(0.07))
+                .frame(height: 0.6)
+                .padding(.horizontal, 16)
+
+            // ── 免責事項
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Color.white.opacity(0.28))
+                    .padding(.top, 1)
+                Text(result.caution)
+                    .font(.system(size: 9.5, weight: .light))
+                    .foregroundStyle(.white.opacity(0.30))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(2)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(red: 0.01, green: 0.04, blue: 0.14).opacity(0.97))
+                // 上端シアングロー
+                VStack(spacing: 0) {
+                    LinearGradient(
+                        colors: [Color.cyan.opacity(0.10), .clear],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: 22)
+                    Spacer()
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                // ボーダー
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Color.cyan.opacity(0.28), lineWidth: 0.8)
+            }
+        )
+        .shadow(color: Color.cyan.opacity(0.12), radius: 18)
+    }
+
+    private func aiFeedbackRow(label: String, text: String, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                .foregroundStyle(color.opacity(0.62))
+                .tracking(2.2)
+            Text(text)
+                .font(.system(size: 12, weight: .light))
+                .foregroundStyle(.white.opacity(0.80))
+                .fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(2.5)
+        }
     }
 }
 
