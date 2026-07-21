@@ -62,6 +62,8 @@ struct GuideFlowView: View {
     @State private var sessionIsRunning:  Bool = false
     @State private var sessionIsFinished: Bool = false
     @State private var aiFeedbackResult: LocalAIFeedbackResult? = nil
+    @State private var latestAIInsight:  MindWaveAIInsight?     = nil
+    @State private var selfReportBefore: SelfReportLevel?       = nil
 
     // Remeasurement
     @State private var remeasurementElapsed:   Int   = 0
@@ -719,6 +721,10 @@ struct GuideFlowView: View {
                 if let exercise = selectedExercise {
                     ExerciseDetailPanel(exercise: exercise)
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                    // 体感入力（任意）
+                    SelfReportPickerView(selection: $selfReportBefore)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .padding(.horizontal, 20)
@@ -789,6 +795,14 @@ struct GuideFlowView: View {
 
             // ── ミニ状態ウィンドウ（タブ直下・右寄せ固定、呼吸円と重ならない）
             HStack(spacing: 0) {
+                // AI セッションマイクロコピー（左寄せ）
+                Text(sessionAIMicrocopy)
+                    .font(.system(size: 9.5, weight: .light, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.38))
+                    .tracking(0.4)
+                    .lineLimit(1)
+                    .padding(.leading, 12)
+                    .animation(.easeInOut(duration: 0.4), value: sessionAIMicrocopy)
                 Spacer()
                 miniStateWindow
                     .padding(.trailing, 10)
@@ -1142,6 +1156,15 @@ struct GuideFlowView: View {
         String(format: "%d:%02d", sessionElapsed / 60, sessionElapsed % 60)
     }
 
+    private var sessionAIMicrocopy: String {
+        guard sessionIsRunning else { return "" }
+        switch selectedExercise ?? .breathing478 {
+        case .breathing478: return "4吸→7止→8吐"
+        case .box:          return "4吸→4止→4吐→4止"
+        case .breathing214: return "2吸→1止→4吐"
+        }
+    }
+
     private let sessionDurationOptions: [(label: String, seconds: Int)] = [
         ("1分", 60), ("3分", 180), ("5分", 300)
     ]
@@ -1305,6 +1328,11 @@ struct GuideFlowView: View {
                     AIFeedbackCardView(result: feedback)
                 }
 
+                // AIインサイト補足バッジ（selfReport + confidence）
+                if let insight = latestAIInsight {
+                    AIInsightBadgeRow(insight: insight, selfReport: selfReportBefore)
+                }
+
                 Text("これは医療診断ではありません。\n数値は計測環境により変動します。")
                     .font(.system(size: 11, weight: .light))
                     .foregroundStyle(.white.opacity(0.30))
@@ -1373,6 +1401,23 @@ struct GuideFlowView: View {
                         exercise:  selectedExercise ?? .breathing478,
                         scene:     selectedScene    ?? .other
                     )
+                    let ctx = MindWaveAIContext(
+                        scene:             selectedScene    ?? .other,
+                        breathingMethod:   selectedExercise ?? .breathing478,
+                        currentHeartRate:  guideHeartRateNumeric,
+                        state:             viewModel.graphicInput.state,
+                        sessionElapsed:    sessionDurationSeconds,
+                        sessionCompleted:  true,
+                        beforeHeartRate:   beforeSnapshot?.heartRate,
+                        afterHeartRate:    nil,
+                        beforeState:       beforeSnapshot?.state,
+                        afterState:        nil,
+                        selfReportBefore:  selfReportBefore,
+                        selfReportAfter:   nil,
+                        baselineHeartRate: nil,
+                        source:            "local"
+                    )
+                    latestAIInsight = LocalMindWaveAIEngine.generate(context: ctx)
                     MindWaveDebugLogger.log(.flow, "session completed")
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         guard self.sessionIsFinished else { return }
@@ -1467,8 +1512,10 @@ struct GuideFlowView: View {
         sessionElapsed     = sessionDurationSeconds
         remeasurementElapsed = 0
         remeasurementCompleted = false
-        afterSnapshot = nil
-        beforeSnapshot = captureBeforeSnapshot()
+        afterSnapshot      = nil
+        aiFeedbackResult   = nil
+        latestAIInsight    = nil
+        beforeSnapshot     = captureBeforeSnapshot()
         step = .session
     }
 }
@@ -2096,6 +2143,267 @@ private struct AIFeedbackCardView: View {
                 .foregroundStyle(.white.opacity(0.80))
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(2.5)
+        }
+    }
+}
+
+// MARK: - Self Report Picker View
+
+private struct SelfReportPickerView: View {
+    @Binding var selection: SelfReportLevel?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 0) {
+                Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5)
+                Text(" 体感入力（任意）")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.28))
+                    .tracking(1.8)
+                    .fixedSize()
+                Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(SelfReportLevel.allCases) { level in
+                    let isSelected = selection == level
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.14)) {
+                            selection = isSelected ? nil : level
+                        }
+                    } label: {
+                        Text(level.shortLabel)
+                            .font(.system(size: 9, weight: isSelected ? .bold : .medium, design: .monospaced))
+                            .foregroundStyle(isSelected ? .black : level.accentColor.opacity(0.65))
+                            .tracking(0.8)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 7)
+                            .frame(maxWidth: .infinity)
+                            .background(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 7)
+                                        .fill(isSelected ? level.accentColor.opacity(0.88) : Color.white.opacity(0.05))
+                                    RoundedRectangle(cornerRadius: 7)
+                                        .strokeBorder(isSelected ? level.accentColor : level.accentColor.opacity(0.22), lineWidth: isSelected ? 1.2 : 0.7)
+                                }
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.easeInOut(duration: 0.14), value: isSelected)
+                }
+            }
+
+            if let sel = selection {
+                Text(sel.label)
+                    .font(.system(size: 10, weight: .light))
+                    .foregroundStyle(sel.accentColor.opacity(0.65))
+                    .transition(.opacity)
+            }
+        }
+        .padding(.top, 8)
+    }
+}
+
+// MARK: - AI Insight Badge Row
+
+private struct AIInsightBadgeRow: View {
+    let insight:    MindWaveAIInsight
+    let selfReport: SelfReportLevel?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // confidence badge
+            HStack(spacing: 4) {
+                Image(systemName: "brain")
+                    .font(.system(size: 8))
+                    .foregroundStyle(insight.displayTone.color.opacity(0.65))
+                Text(insight.confidenceLabel)
+                    .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(insight.displayTone.color.opacity(0.72))
+                    .tracking(1.0)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(insight.displayTone.color.opacity(0.08))
+                    .overlay(Capsule().strokeBorder(insight.displayTone.color.opacity(0.22), lineWidth: 0.7))
+            )
+
+            // source badge
+            HStack(spacing: 4) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(Color.white.opacity(0.22))
+                Text("LOCAL AI")
+                    .font(.system(size: 8, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.28))
+                    .tracking(1.0)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.04))
+                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 0.7))
+            )
+
+            // self-report badge（入力があれば）
+            if let sr = selfReport {
+                HStack(spacing: 4) {
+                    Text("体感")
+                        .font(.system(size: 7, weight: .medium, design: .monospaced))
+                        .foregroundStyle(sr.accentColor.opacity(0.50))
+                    Text(sr.shortLabel)
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(sr.accentColor.opacity(0.72))
+                        .tracking(0.5)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule()
+                        .fill(sr.accentColor.opacity(0.06))
+                        .overlay(Capsule().strokeBorder(sr.accentColor.opacity(0.20), lineWidth: 0.7))
+                )
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 2)
+    }
+}
+
+// MARK: - Local MindWave AI Engine
+
+private enum LocalMindWaveAIEngine {
+
+    static func generate(context: MindWaveAIContext) -> MindWaveAIInsight {
+        let tone     = displayTone(for: context)
+        let hrChange = heartRateChange(context)
+        return MindWaveAIInsight(
+            title:           makeTitle(context),
+            summary:         makeSummary(context, hrChange: hrChange),
+            analysis:        makeAnalysis(context, hrChange: hrChange),
+            recommendation:  makeRecommendation(context),
+            nextAction:      makeNextAction(context),
+            caution:         "このインサイトは医療診断ではなく、セルフケアの参考情報です。",
+            confidenceLabel: confidenceLabel(context),
+            displayTone:     tone,
+            shouldShowOnHome:    false,
+            shouldShowInSession: false,
+            shouldShowInResult:  true,
+            shouldShowInHistory: true
+        )
+    }
+
+    // MARK: - Private helpers
+
+    private static func displayTone(for ctx: MindWaveAIContext) -> AIDisplayTone {
+        switch ctx.state {
+        case .underAroused:  return .calm
+        case .optimalTension:
+            return ctx.currentHeartRate < 100 ? .focus : .alert
+        case .overTense:     return .ovld
+        }
+    }
+
+    private static func heartRateChange(_ ctx: MindWaveAIContext) -> Double? {
+        guard let before = ctx.beforeHeartRate, let after = ctx.afterHeartRate,
+              before > 0, after > 0 else { return nil }
+        return after - before
+    }
+
+    private static func confidenceLabel(_ ctx: MindWaveAIContext) -> String {
+        var score = 0
+        if ctx.currentHeartRate > 0 { score += 2 }
+        if ctx.beforeHeartRate != nil { score += 1 }
+        if ctx.afterHeartRate != nil { score += 1 }
+        if ctx.selfReportBefore != nil { score += 1 }
+        switch score {
+        case 5:    return "HIGH CONFIDENCE"
+        case 3, 4: return "MED CONFIDENCE"
+        default:   return "LOW CONFIDENCE"
+        }
+    }
+
+    private static func makeTitle(_ ctx: MindWaveAIContext) -> String {
+        switch ctx.breathingMethod {
+        case .breathing478:
+            switch ctx.state {
+            case .underAroused:   return "4-7-8呼吸：深い鎮静状態を達成"
+            case .optimalTension: return "4-7-8呼吸：心身を最適レベルに調整"
+            case .overTense:      return "4-7-8呼吸：高緊張への積極的ケア"
+            }
+        case .box:
+            switch ctx.state {
+            case .underAroused:   return "ボックス呼吸：安定した集中モード"
+            case .optimalTension: return "ボックス呼吸：コンディション良好"
+            case .overTense:      return "ボックス呼吸：高負荷からの立て直し"
+            }
+        case .breathing214:
+            switch ctx.state {
+            case .underAroused:   return "2-1-4呼吸：穏やかな覚醒状態"
+            case .optimalTension: return "2-1-4呼吸：緊張を適切に緩和"
+            case .overTense:      return "2-1-4呼吸：強い緊張へのファーストケア"
+            }
+        }
+    }
+
+    private static func makeSummary(_ ctx: MindWaveAIContext, hrChange: Double?) -> String {
+        let hr = ctx.currentHeartRate
+        let hrText = hr > 0 ? String(format: "心拍%.0fbpm", hr) : "データ待機中"
+        if let change = hrChange {
+            let dir = change < -3 ? "↓\(String(format: "%.0f", abs(change)))bpm低下" :
+                      change > 3  ? "↑\(String(format: "%.0f", change))bpm上昇" : "安定維持"
+            return "\(hrText) / 前後比較: \(dir)"
+        }
+        return "\(hrText)のセッションを完了しました"
+    }
+
+    private static func makeAnalysis(_ ctx: MindWaveAIContext, hrChange: Double?) -> String {
+        switch ctx.state {
+        case .underAroused:
+            return "心拍数が落ち着いており、副交感神経優位の状態です。\(ctx.breathingMethod.title)が自律神経の安定に貢献しています。"
+        case .optimalTension:
+            return "適度な覚醒レベルを維持しています。\(ctx.scene.displayName)に適したコンディションです。"
+        case .overTense:
+            let selfText = ctx.selfReportBefore.map { "（体感: \($0.label)）" } ?? ""
+            return "高い緊張が記録されています\(selfText)。継続的なケアを推奨します。"
+        }
+    }
+
+    private static func makeRecommendation(_ ctx: MindWaveAIContext) -> String {
+        let isCalm = ctx.state == .underAroused
+        switch ctx.scene {
+        case .interview, .meeting, .speech:
+            return isCalm
+                ? "現在の落ち着きを保ちながら自信を持って本番に臨んでください。"
+                : "もう1セット深呼吸を行い、心を整えてから本番に向かいましょう。"
+        case .sports:
+            return isCalm
+                ? "良いコンディションです。このままウォームアップを続けましょう。"
+                : "緊張は集中力の源です。呼吸を整えて本番に集中してください。"
+        case .study:
+            return isCalm
+                ? "集中しやすい状態です。短い休憩後に学習を再開しましょう。"
+                : "呼吸ケアを続けながら、無理のないペースで学習を進めましょう。"
+        case .social:
+            return isCalm
+                ? "気持ちが整っています。自然体でコミュニケーションを楽しんで。"
+                : "引き続き深呼吸を意識してリラックスしましょう。"
+        case .daily, .other:
+            return isCalm
+                ? "心身が整っています。この状態を意識して次の活動に移りましょう。"
+                : "少し休憩を取り、引き続き呼吸ケアを続けてください。"
+        }
+    }
+
+    private static func makeNextAction(_ ctx: MindWaveAIContext) -> String {
+        switch ctx.state {
+        case .underAroused:   return "5分後に再測定し、この状態をキープできているか確認する"
+        case .optimalTension: return "そのまま本番の活動に移行し、状態変化を観察する"
+        case .overTense:      return "追加で2-1-4呼吸を1セット実施し、再測定する"
         }
     }
 }

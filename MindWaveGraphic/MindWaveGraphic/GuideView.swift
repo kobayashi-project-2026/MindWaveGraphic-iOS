@@ -29,9 +29,15 @@ struct GuideView: View {
                         .padding(.horizontal, 20)
                     sceneGrid
                         .padding(.horizontal, 20)
+                    if let scene = selectedScene {
+                        AISceneSuggestionView(scene: scene)
+                            .padding(.horizontal, 20)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                     Spacer().frame(height: 8)
                 }
                 .padding(.top, 4)
+                .animation(.easeInOut(duration: 0.22), value: selectedScene)
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 pageHeader
@@ -598,6 +604,79 @@ private struct OtherSceneSelectorView: View {
             }
         }
         .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - AI Scene Suggestion View
+
+private struct AISceneSuggestionView: View {
+    let scene: MeasurementScene
+
+    private var recommended: GuideExercise { scene.recommendedExercise }
+
+    private var suggestionText: String {
+        switch scene {
+        case .interview, .speech:
+            return "4-7-8呼吸が副交感神経を活性化し、\n発表前の緊張緩和に最適です。"
+        case .sports:
+            return "ボックス呼吸が集中力とリズムを整え、\n試合前のパフォーマンス向上に効果的です。"
+        case .social:
+            return "ボックス呼吸が適度な覚醒レベルを維持し、\nコミュニケーションを円滑にします。"
+        case .study, .meeting:
+            return "2-1-4呼吸で過剰な緊張を緩和しながら、\n集中力を保ちやすい状態に整えます。"
+        case .daily, .other:
+            return "4-7-8呼吸で自律神経のバランスを整え、\n心身のリセットを促します。"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            // アイコン
+            ZStack {
+                Circle()
+                    .fill(Color(hue: 0.62, saturation: 0.72, brightness: 0.25).opacity(0.60))
+                Image(systemName: "brain")
+                    .font(.system(size: 14, weight: .light))
+                    .foregroundStyle(Color(hue: 0.62, saturation: 0.78, brightness: 0.92))
+            }
+            .frame(width: 34, height: 34)
+
+            // テキスト
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 5) {
+                    Text("AI SUGGEST")
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color(hue: 0.62, saturation: 0.78, brightness: 0.80).opacity(0.72))
+                        .tracking(1.8)
+                    Text("→")
+                        .font(.system(size: 8, weight: .light, design: .monospaced))
+                        .foregroundStyle(Color.white.opacity(0.22))
+                    Text(recommended.title)
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.cyan.opacity(0.80))
+                        .tracking(0.5)
+                }
+                Text(suggestionText)
+                    .font(.system(size: 11, weight: .light))
+                    .foregroundStyle(Color.white.opacity(0.52))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(2.5)
+            }
+        }
+        .padding(14)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(red: 0.01, green: 0.04, blue: 0.14).opacity(0.95))
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(LinearGradient(
+                        colors: [Color(hue: 0.62, saturation: 0.80, brightness: 0.50).opacity(0.08), .clear],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color(hue: 0.62, saturation: 0.72, brightness: 0.70).opacity(0.28), lineWidth: 0.8)
+            }
+        )
     }
 }
 

@@ -89,6 +89,7 @@ struct HistoryView: View {
                         if historyStore.records.isEmpty {
                             emptyState
                         } else {
+                            AITrendPanel(records: historyStore.records)
                             recordsList
                         }
                         Spacer().frame(height: 96)
@@ -477,6 +478,143 @@ private struct MiniWave: View {
             ctx.stroke(line, with: .color(color.opacity(0.75)), lineWidth: 1.5)
         }
         .background(color.opacity(0.06))
+    }
+}
+
+// MARK: - AI Trend Panel
+
+private struct AITrendPanel: View {
+    let records: [GuideSessionRecord]
+
+    private var recentCount: Int { min(records.count, 5) }
+    private var recentRecords: [GuideSessionRecord] { Array(records.prefix(5)) }
+
+    private var dominantScene: MeasurementScene? {
+        let counts = Dictionary(grouping: recentRecords, by: \.scene).mapValues(\.count)
+        return counts.max(by: { $0.value < $1.value })?.key
+    }
+
+    private var avgScoreBefore: Double {
+        let vals = recentRecords.map(\.before.score)
+        guard !vals.isEmpty else { return 0 }
+        return vals.reduce(0, +) / Double(vals.count)
+    }
+
+    private var avgScoreAfter: Double {
+        let vals = recentRecords.compactMap(\.after?.score)
+        guard !vals.isEmpty else { return 0 }
+        return vals.reduce(0, +) / Double(vals.count)
+    }
+
+    private var trendText: String {
+        let diff = avgScoreAfter - avgScoreBefore
+        if records.count < 2 { return "セッションを重ねるとトレンドが表示されます。" }
+        if diff < -5 { return "呼吸ケア後のスコアが平均\(String(format: "%.0f", abs(diff)))pt改善傾向。継続が効果的です。" }
+        if diff > 5  { return "セッション後のスコアが上昇傾向。種目や実施タイミングの見直しを検討してください。" }
+        return "セッション前後のスコアが安定しています。継続的なケアを維持しましょう。"
+    }
+
+    private var topExercise: GuideExercise? {
+        let counts = Dictionary(grouping: recentRecords, by: \.exercise).mapValues(\.count)
+        return counts.max(by: { $0.value < $1.value })?.key
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // ヘッダー
+            HStack(spacing: 6) {
+                Image(systemName: "brain")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color.cyan.opacity(0.55))
+                Text("AI TREND ANALYSIS")
+                    .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.55))
+                    .tracking(1.8)
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.14))
+                    .frame(height: 0.5)
+                Text("LAST \(recentCount)")
+                    .font(.system(size: 7.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.cyan.opacity(0.35))
+                    .tracking(0.8)
+            }
+            .padding(.bottom, 12)
+
+            // メトリクス行
+            HStack(spacing: 12) {
+                trendMetric(
+                    label: "前後改善",
+                    value: records.count > 1
+                        ? (avgScoreAfter < avgScoreBefore ? "↓改善" : "→維持")
+                        : "—",
+                    accent: avgScoreAfter < avgScoreBefore
+                        ? Color(hue: 0.62, saturation: 0.78, brightness: 0.90)
+                        : Color.white.opacity(0.50)
+                )
+
+                Rectangle()
+                    .fill(Color.white.opacity(0.08))
+                    .frame(width: 0.6, height: 28)
+
+                trendMetric(
+                    label: "よく使う技法",
+                    value: topExercise?.title ?? "—",
+                    accent: Color.cyan.opacity(0.80)
+                )
+
+                if let scene = dominantScene {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.08))
+                        .frame(width: 0.6, height: 28)
+                    trendMetric(
+                        label: "主な場面",
+                        value: scene.displayName,
+                        accent: Color.white.opacity(0.65)
+                    )
+                }
+            }
+            .padding(.bottom, 12)
+
+            // インサイトテキスト
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "lightbulb.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color.cyan.opacity(0.40))
+                    .padding(.top, 1)
+                Text(trendText)
+                    .font(.system(size: 11, weight: .light))
+                    .foregroundStyle(Color.white.opacity(0.48))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(2.5)
+            }
+        }
+        .padding(14)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(red: 0.02, green: 0.05, blue: 0.14).opacity(0.92))
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(LinearGradient(
+                        colors: [Color.cyan.opacity(0.06), .clear],
+                        startPoint: .topLeading, endPoint: .bottomTrailing
+                    ))
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.cyan.opacity(0.22), lineWidth: 0.8)
+            }
+        )
+    }
+
+    private func trendMetric(label: String, value: String, accent: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.system(size: 7.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(Color.white.opacity(0.28))
+                .tracking(0.5)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(accent)
+                .lineLimit(1)
+        }
     }
 }
 

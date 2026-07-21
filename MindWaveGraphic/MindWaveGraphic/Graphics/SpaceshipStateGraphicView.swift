@@ -106,21 +106,64 @@ struct SpaceshipStateGraphicView: View {
             // 常時ブルーネビュラ（ストレスに依存しない宇宙の奥行き）
             RadialGradient(
                 colors: [
-                    Color(hue: 0.638, saturation: 0.88, brightness: 0.78).opacity(0.07),
-                    Color(hue: 0.645, saturation: 0.90, brightness: 0.72).opacity(0.03),
+                    Color(hue: 0.638, saturation: 0.88, brightness: 0.78).opacity(0.09),
+                    Color(hue: 0.645, saturation: 0.90, brightness: 0.72).opacity(0.05),
                     .clear
                 ],
-                center: UnitPoint(x: 0.5, y: 0.38),
-                startRadius: 30, endRadius: 220
+                center: UnitPoint(x: 0.5, y: 0.36),
+                startRadius: 20, endRadius: 240
             )
             .blendMode(.screen)
+
+            // CALM: 深蒼ネビュラ核（t < 0.25 の深宇宙感）
+            if t < 0.30 {
+                let cp = max(0, 1.0 - t / 0.30)
+                RadialGradient(
+                    colors: [
+                        Color(hue: 0.640, saturation: 0.92, brightness: 0.85).opacity(0.14 * cp),
+                        Color(hue: 0.630, saturation: 0.80, brightness: 0.70).opacity(0.07 * cp),
+                        .clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.32),
+                    startRadius: 0, endRadius: 180
+                )
+                .blendMode(.screen)
+
+                // CALM オーロラ帯（上部横断ライン）
+                LinearGradient(
+                    colors: [
+                        .clear,
+                        Color(hue: 0.635, saturation: 0.88, brightness: 0.82).opacity(0.06 * cp),
+                        Color(hue: 0.620, saturation: 0.80, brightness: 0.75).opacity(0.04 * cp),
+                        .clear
+                    ],
+                    startPoint: UnitPoint(x: 0.0, y: 0.25),
+                    endPoint:   UnitPoint(x: 1.0, y: 0.32)
+                )
+                .blendMode(.screen)
+            }
+
+            // FOCUS: ティールシフト (0.28 < t < 0.58)
+            if t > 0.28 && t < 0.58 {
+                let fp = min(1.0, (t - 0.28) / 0.30)
+                let fade = t < 0.50 ? fp : fp * (1.0 - (t - 0.50) / 0.08)
+                RadialGradient(
+                    colors: [
+                        Color(hue: 0.490, saturation: 0.75, brightness: 0.70).opacity(0.08 * fade),
+                        .clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.40),
+                    startRadius: 30, endRadius: 200
+                )
+                .blendMode(.screen)
+            }
 
             // OVERLOAD: 消失点近傍にごく薄い暖色（控えめに）
             if t > 0.72 {
                 let ap = (t - 0.72) / 0.28
                 RadialGradient(
                     colors: [
-                        Color(red: ap * 0.12, green: ap * 0.004, blue: 0).opacity(0.16),
+                        Color(red: ap * 0.14, green: ap * 0.004, blue: 0).opacity(0.18),
                         .clear
                     ],
                     center: UnitPoint(x: 0.5, y: 0.35),
@@ -133,16 +176,16 @@ struct SpaceshipStateGraphicView: View {
                 let ep = (t - 0.58) / 0.42
                 RadialGradient(
                     colors: [.clear,
-                             Color(red: 0.40 * ep, green: 0, blue: 0.04 * ep).opacity(0.30)],
+                             Color(red: 0.45 * ep, green: 0, blue: 0.04 * ep).opacity(0.32)],
                     center: UnitPoint(x: 0.5, y: 0.5),
-                    startRadius: 70, endRadius: 370
+                    startRadius: 65, endRadius: 380
                 )
             }
 
             // OVERLOAD: 深紅アンビエント（宇宙の緊急感）
             if t > 0.80 {
                 let op = (t - 0.80) / 0.20
-                Color(red: 0.048 * op, green: 0, blue: 0).opacity(0.34 * op)
+                Color(red: 0.056 * op, green: 0, blue: 0).opacity(0.38 * op)
             }
         }
     }
@@ -228,6 +271,35 @@ private struct StarFieldCanvas: View {
                 startRadius: 0, endRadius: 20
             )
             .blendMode(.screen)
+
+            // ── CALM: 深蒼コア（low stress時に青が鮮やか）
+            if raw < 0.30 {
+                let cp = 1.0 - raw / 0.30
+                RadialGradient(
+                    colors: [
+                        Color(hue: 0.638, saturation: 0.92, brightness: 1.0).opacity(0.18 * cp),
+                        Color(hue: 0.645, saturation: 0.88, brightness: 0.90).opacity(0.08 * cp),
+                        .clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: vpYRatio),
+                    startRadius: 0, endRadius: 55
+                )
+                .blendMode(.screen)
+            }
+
+            // ── FOCUS: ティール拡散（中程度 stress）
+            if raw > 0.28 && raw < 0.62 {
+                let fp = min(1.0, (raw - 0.28) / 0.30) * (1.0 - max(0, raw - 0.50) / 0.12)
+                RadialGradient(
+                    colors: [
+                        Color(hue: 0.490, saturation: 0.82, brightness: 0.90).opacity(0.10 * fp),
+                        .clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: vpYRatio),
+                    startRadius: 5, endRadius: 80
+                )
+                .blendMode(.screen)
+            }
 
             // ── OVERLOAD: 橙アクセント (消失点近傍のみ・極控えめ)
             if raw > 0.75 {

@@ -177,3 +177,99 @@ final class GuideHistoryStore: ObservableObject {
         MindWaveDebugLogger.log(.flow, "record saved id=\(record.id.uuidString.prefix(8)) scene=\(record.scene.rawValue)")
     }
 }
+
+// MARK: - AI Display Tone
+
+/// AIインサイトの表示トーン。scoreの閾値に対応。
+enum AIDisplayTone {
+    case calm    // score < 25: hue 0.62 cyan-blue
+    case focus   // score < 55: hue 0.48 teal-green
+    case alert   // score < 78: hue 0.08 orange
+    case ovld    // score ≥ 78: hue 0.01 red
+
+    var color: Color {
+        switch self {
+        case .calm:  return Color(hue: 0.62, saturation: 0.78, brightness: 0.90)
+        case .focus: return Color(hue: 0.48, saturation: 0.78, brightness: 0.90)
+        case .alert: return Color(hue: 0.08, saturation: 0.88, brightness: 0.98)
+        case .ovld:  return Color(hue: 0.01, saturation: 0.92, brightness: 1.00)
+        }
+    }
+}
+
+// MARK: - Self Report Level
+
+/// セッション前後の主観的緊張度。ユーザーが4段階で報告する。
+enum SelfReportLevel: Int, CaseIterable, Identifiable {
+    case calm               = 0
+    case slightTension      = 1
+    case significantTension = 2
+    case strongTension      = 3
+
+    var id: Int { rawValue }
+
+    var label: String {
+        switch self {
+        case .calm:               return "落ち着いている"
+        case .slightTension:      return "少し緊張"
+        case .significantTension: return "かなり緊張"
+        case .strongTension:      return "強い緊張"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .calm:               return "CALM"
+        case .slightTension:      return "SLIGHT"
+        case .significantTension: return "TENSE"
+        case .strongTension:      return "HIGH"
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .calm:               return Color(hue: 0.62, saturation: 0.72, brightness: 0.88)
+        case .slightTension:      return Color(hue: 0.48, saturation: 0.72, brightness: 0.88)
+        case .significantTension: return Color(hue: 0.08, saturation: 0.82, brightness: 0.95)
+        case .strongTension:      return Color(hue: 0.01, saturation: 0.92, brightness: 1.00)
+        }
+    }
+}
+
+// MARK: - MindWave AI Context
+
+/// AIエンジンへ渡す全セッションコンテキスト。外部通信なし・完全ローカル。
+struct MindWaveAIContext {
+    let scene:             MeasurementScene
+    let breathingMethod:   GuideExercise
+    let currentHeartRate:  Double
+    let state:             MindState
+    let sessionElapsed:    Int
+    let sessionCompleted:  Bool
+    let beforeHeartRate:   Double?
+    let afterHeartRate:    Double?
+    let beforeState:       MindState?
+    let afterState:        MindState?
+    let selfReportBefore:  SelfReportLevel?
+    let selfReportAfter:   SelfReportLevel?
+    let baselineHeartRate: Double?
+    let source:            String  // "local"
+}
+
+// MARK: - MindWave AI Insight
+
+/// LocalMindWaveAIEngineが生成するインサイト。全画面で共通利用可能。
+struct MindWaveAIInsight {
+    let title:           String
+    let summary:         String
+    let analysis:        String
+    let recommendation:  String
+    let nextAction:      String
+    let caution:         String
+    let confidenceLabel: String
+    let displayTone:     AIDisplayTone
+    let shouldShowOnHome:    Bool
+    let shouldShowInSession: Bool
+    let shouldShowInResult:  Bool
+    let shouldShowInHistory: Bool
+}

@@ -653,6 +653,23 @@ struct HomeView: View {
                     .padding(.top, 2)
                     .animation(.easeInOut(duration: 0.35), value: hasData)
 
+                if hasData {
+                    HStack(spacing: 3) {
+                        Image(systemName: "brain")
+                            .font(.system(size: 6, weight: .medium))
+                            .foregroundStyle(ac.opacity(0.32))
+                        Text("AI INSIGHT READY")
+                            .font(.system(size: 6.5, weight: .medium, design: .monospaced))
+                            .foregroundStyle(ac.opacity(0.28))
+                            .tracking(0.8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 7)
+                    .padding(.top, 1)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.50), value: hasData)
+                }
+
                 Spacer(minLength: 1)
 
                 Canvas { ctx, sz in
