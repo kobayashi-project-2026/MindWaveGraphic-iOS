@@ -1346,7 +1346,9 @@ struct GuideFlowView: View {
                 }
 
                 // ── 呼吸後の体感入力
-                SelfReportAfterView(selection: $selfReportAfter)
+                SelfReportAfterView(selection: $selfReportAfter, onChanged: {
+                    regenerateInsightWithAfterReport()
+                })
 
                 // ── 免責
                 Text("このフィードバックは医療診断ではありません。\n数値は計測環境により変動します。")
@@ -1535,12 +1537,39 @@ struct GuideFlowView: View {
             durationSeconds: sessionDurationSeconds,
             before: before, after: afterSnapshot,
             hrvUpdated: hrvUpdatedDuringSession,
-            emotionMemo: memo.isEmpty ? nil : memo
+            emotionMemo: memo.isEmpty ? nil : memo,
+            selfReportBefore:        selfReportBefore,
+            selfReportAfter:         selfReportAfter,
+            aiInsightTitle:          latestAIInsight?.title,
+            aiInsightSummary:        latestAIInsight?.summary,
+            aiInsightRecommendation: latestAIInsight?.recommendation,
+            localAIVersion:          "local-v1"
         )
         historyStore.add(record)
         showFeedbackView = false
         dismiss()
         Task { @MainActor in selectedTab = 2 }
+    }
+
+    private func regenerateInsightWithAfterReport() {
+        guard let snap = afterSnapshot ?? beforeSnapshot else { return }
+        let ctx = MindWaveAIContext(
+            scene:             selectedScene    ?? .other,
+            breathingMethod:   selectedExercise ?? .breathing478,
+            currentHeartRate:  snap.heartRate ?? guideHeartRateNumeric,
+            state:             snap.state,
+            sessionElapsed:    sessionDurationSeconds,
+            sessionCompleted:  true,
+            beforeHeartRate:   beforeSnapshot?.heartRate,
+            afterHeartRate:    afterSnapshot?.heartRate,
+            beforeState:       beforeSnapshot?.state,
+            afterState:        afterSnapshot?.state,
+            selfReportBefore:  selfReportBefore,
+            selfReportAfter:   selfReportAfter,
+            baselineHeartRate: nil,
+            source:            "local"
+        )
+        latestAIInsight = LocalMindWaveAIEngine.generate(context: ctx)
     }
 
     private func resetForNewSession() {
@@ -2350,9 +2379,11 @@ private enum LocalMindWaveAIEngine {
         if ctx.beforeHeartRate != nil  { pts += 1 }
         if ctx.afterHeartRate  != nil  { pts += 1 }
         if ctx.selfReportBefore != nil { pts += 1 }
+        if ctx.selfReportAfter  != nil { pts += 1 }
         switch pts {
-        case 5:    return "データ充実"
-        case 3, 4: return "データ標準"
+        case 6:    return "データ充実"
+        case 4, 5: return "データ標準"
+        case 3:    return "データ標準"
         default:   return "データ限定"
         }
     }
@@ -2416,7 +2447,25 @@ private enum LocalMindWaveAIEngine {
     }
 
     private static func makeRecommendation(_ ctx: MindWaveAIContext) -> String {
-        let isCalm = ctx.state == .underAroused || ctx.state == .optimalTension
+        // selfReportAfterが HIGH 系なら追加ケアを提案
+        let stillTense: Bool
+        switch ctx.selfReportAfter {
+        case .strongTension, .significantTension: stillTense = true
+        default: stillTense = false
+        }
+        let isCalm = !stillTense && (ctx.state == .underAroused || ctx.state == .optimalTension)
+
+        if stillTense {
+            switch ctx.breathingMethod {
+            case .breathing478:
+                return "体感がまだ高めです。もう1セット、7カウントの息止めを抜いてゆっくり吐くだけ試してみましょう。"
+            case .box:
+                return "体感がまだ高めです。BOX呼吸のペースを少しゆっくりにして、吐く時間を意識するともう少し楽になることがあります。"
+            case .breathing214:
+                return "体感がまだ高めです。吐く（4カウント）を2〜3回だけ繰り返してみましょう。"
+            }
+        }
+
         switch ctx.scene {
         case .interview, .meeting, .speech:
             return isCalm
@@ -2442,13 +2491,20 @@ private enum LocalMindWaveAIEngine {
     }
 
     private static func makeNextAction(_ ctx: MindWaveAIContext) -> String {
-        switch ctx.state {
-        case .underAroused:
-            return "この状態をキープ。5分後に気分を確認してみましょう"
-        case .optimalTension:
-            return "そのまま次の活動へ。気になるときは短い呼吸ケアを挟みましょう"
-        case .overTense:
-            return "2-1-4呼吸を1セット追加し、もう一度気持ちを確かめましょう"
+        switch ctx.selfReportAfter {
+        case .strongTension, .significantTension:
+            return "体感が高いまま終わっても問題ありません。記録が積み上がると次回の提案に反映されます"
+        case .calm, .slightTension:
+            return "呼吸後の体感も良好です。このデータが傾向の学習に役立ちます"
+        case nil:
+            switch ctx.state {
+            case .underAroused:
+                return "この状態をキープ。5分後に気分を確認してみましょう"
+            case .optimalTension:
+                return "そのまま次の活動へ。気になるときは短い呼吸ケアを挟みましょう"
+            case .overTense:
+                return "2-1-4呼吸を1セット追加し、もう一度気持ちを確かめましょう"
+            }
         }
     }
 }
@@ -2523,6 +2579,24 @@ private struct AIDebriefCard: View {
                 .fill(Color.white.opacity(0.06))
                 .frame(height: 0.5)
                 .padding(.horizontal, 16)
+
+            // ── LEARNING SIGNAL（学習データ記録インジケーター）
+            let hasReport = selfReportBefore != nil || selfReportAfter != nil
+            HStack(spacing: 5) {
+                Image(systemName: hasReport ? "arrow.up.doc.on.clipboard" : "doc.on.clipboard")
+                    .font(.system(size: 7))
+                    .foregroundStyle(hasReport ? accentColor.opacity(0.55) : Color.white.opacity(0.18))
+                Text(hasReport
+                     ? "LEARNING SIGNAL — 体感データが記録されました"
+                     : "LEARNING SIGNAL — 保存時に学習データとして記録されます")
+                    .font(.system(size: 7, weight: .medium, design: .monospaced))
+                    .foregroundStyle(hasReport ? accentColor.opacity(0.45) : Color.white.opacity(0.18))
+                    .tracking(0.5)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
 
             // ── 品質 + LOCAL AI バッジ行
             HStack(spacing: 6) {
@@ -2631,6 +2705,7 @@ private struct AIDebriefCard: View {
 
 private struct SelfReportAfterView: View {
     @Binding var selection: SelfReportLevel?
+    var onChanged: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -2653,6 +2728,7 @@ private struct SelfReportAfterView: View {
                         withAnimation(.easeInOut(duration: 0.14)) {
                             selection = isSelected ? nil : level
                         }
+                        onChanged?()
                     } label: {
                         Text(level.shortLabel)
                             .font(.system(size: 9, weight: isSelected ? .bold : .regular, design: .monospaced))

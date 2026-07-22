@@ -161,17 +161,19 @@ struct SpaceshipStateGraphicView: View {
                 .blendMode(.screen)
             }
 
-            // OVERLOAD: 消失点近傍にごく薄い暖色（控えめに）
-            if t > 0.72 {
-                let ap = (t - 0.72) / 0.28
+            // ALERT: 橙黄ネビュラ雲（消失点周辺）
+            if t > 0.55 && t < 0.80 {
+                let ap = min(1.0, (t - 0.55) / 0.25)
                 RadialGradient(
                     colors: [
-                        Color(red: ap * 0.14, green: ap * 0.004, blue: 0).opacity(0.18),
+                        Color(hue: 0.09, saturation: 0.90, brightness: 0.92).opacity(0.10 * ap),
+                        Color(hue: 0.07, saturation: 0.85, brightness: 0.80).opacity(0.04 * ap),
                         .clear
                     ],
                     center: UnitPoint(x: 0.5, y: 0.35),
-                    startRadius: 0, endRadius: 140
+                    startRadius: 10, endRadius: 200
                 )
+                .blendMode(.screen)
             }
 
             // ALERT 外縁: 薄い赤みのネビュラ
@@ -179,16 +181,31 @@ struct SpaceshipStateGraphicView: View {
                 let ep = (t - 0.58) / 0.42
                 RadialGradient(
                     colors: [.clear,
-                             Color(red: 0.45 * ep, green: 0, blue: 0.04 * ep).opacity(0.32)],
+                             Color(red: 0.52 * ep, green: 0.02 * ep, blue: 0.02 * ep).opacity(0.30)],
                     center: UnitPoint(x: 0.5, y: 0.5),
-                    startRadius: 65, endRadius: 380
+                    startRadius: 60, endRadius: 400
                 )
             }
 
+            // OVERLOAD: 消失点近傍の暖色コア
+            if t > 0.72 {
+                let ap = (t - 0.72) / 0.28
+                RadialGradient(
+                    colors: [
+                        Color(hue: 0.04, saturation: 0.95, brightness: 1.0).opacity(ap * 0.22),
+                        Color(hue: 0.07, saturation: 0.88, brightness: 0.85).opacity(ap * 0.10),
+                        .clear
+                    ],
+                    center: UnitPoint(x: 0.5, y: 0.34),
+                    startRadius: 0, endRadius: 160
+                )
+                .blendMode(.screen)
+            }
+
             // OVERLOAD: 深紅アンビエント（宇宙の緊急感）
-            if t > 0.80 {
-                let op = (t - 0.80) / 0.20
-                Color(red: 0.056 * op, green: 0, blue: 0).opacity(0.38 * op)
+            if t > 0.78 {
+                let op = (t - 0.78) / 0.22
+                Color(red: 0.07 * op, green: 0, blue: 0.005 * op).opacity(0.42 * op)
             }
         }
     }
@@ -228,12 +245,40 @@ struct SpaceshipStateGraphicView: View {
             LinearGradient(
                 colors: [
                     .clear,
-                    Color.black.opacity(0.12),
-                    Color(white: 0.12).opacity(0.08)
+                    Color.black.opacity(0.16),
+                    Color(white: 0.10).opacity(0.10)
                 ],
-                startPoint: UnitPoint(x: 0.5, y: 0.86),
+                startPoint: UnitPoint(x: 0.5, y: 0.85),
                 endPoint: .bottom
             )
+
+            // コックピット窓枠ブラケット（四隅）
+            Canvas { ctx, size in
+                let w = size.width, h = size.height
+                let bLen: Double = 22
+                let bW: Double = 0.7
+                let bAlpha = 0.28 + t * 0.12
+                let bc = GraphicsContext.Shading.color(Color.white.opacity(bAlpha))
+                // 四隅のL字ブラケット
+                for (ox, oy) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)] {
+                    let sx: Double = ox == 0 ? 1 : -1
+                    let sy: Double = oy == 0 ? 1 : -1
+                    var hPath = Path()
+                    hPath.move(to: CGPoint(x: ox + sx * 6, y: oy + sy * 6))
+                    hPath.addLine(to: CGPoint(x: ox + sx * (6 + bLen), y: oy + sy * 6))
+                    var vPath = Path()
+                    vPath.move(to: CGPoint(x: ox + sx * 6, y: oy + sy * 6))
+                    vPath.addLine(to: CGPoint(x: ox + sx * 6, y: oy + sy * (6 + bLen)))
+                    ctx.stroke(hPath, with: bc, lineWidth: bW)
+                    ctx.stroke(vPath, with: bc, lineWidth: bW)
+                }
+                // 中央水平スキャンライン（下部パネル感）
+                let panY = h * 0.92
+                var scanLine = Path()
+                scanLine.move(to: CGPoint(x: w * 0.06, y: panY))
+                scanLine.addLine(to: CGPoint(x: w * 0.94, y: panY))
+                ctx.stroke(scanLine, with: .color(Color.white.opacity(0.10 + t * 0.05)), lineWidth: 0.5)
+            }
         }
         .allowsHitTesting(false)
         .animation(.easeInOut(duration: 1.5), value: t)
@@ -634,9 +679,10 @@ private struct StarFieldCanvas: View {
         dotSz: Double, alpha: Double, intn: Double,
         starCol: Color, isWhiteStar: Bool
     ) {
-        // 速度に応じたストリーク
+        // ALERT: ストリーク長を延長してより動きのある印象に
+        let alertStretch = intn > 0.30 ? 1.0 + (intn - 0.30) * 1.5 : 1.0
         if velocity > 1.2 {
-            let len   = min(velocity * (1.3 + intn * 2.0), maxTrailPx)
+            let len   = min(velocity * (1.3 + intn * 2.0) * alertStretch, maxTrailPx)
             let scale = len / max(velocity, 1e-9)
             let txEnd = x - dvx * scale
             let tyEnd = y - dvy * scale
@@ -646,23 +692,23 @@ private struct StarFieldCanvas: View {
             trail.move(to:    CGPoint(x: x,     y: y))
             trail.addLine(to: CGPoint(x: txEnd, y: tyEnd))
 
-            // 外グロー (中程度ストレス以上)
+            // 外グロー
             if intn > 0.05 {
-                ctx.stroke(trail, with: .color(starCol.opacity(alpha * 0.08 * min(1, intn / 0.22))),
-                           lineWidth: tw * 3.8)
+                ctx.stroke(trail, with: .color(starCol.opacity(alpha * 0.09 * min(1, intn / 0.20))),
+                           lineWidth: tw * 4.2)
             }
             // メインストリーク
-            ctx.stroke(trail, with: .color(starCol.opacity(alpha * (0.32 + intn * 0.48))),
+            ctx.stroke(trail, with: .color(starCol.opacity(alpha * (0.32 + intn * 0.50))),
                        lineWidth: tw * 0.85)
 
             // 先端セグメント (明)
-            let tipLen = len * 0.28
+            let tipLen = len * 0.30
             let tipScale = tipLen / max(velocity, 1e-9)
             var tipTrail = Path()
             tipTrail.move(to:    CGPoint(x: x, y: y))
             tipTrail.addLine(to: CGPoint(x: x - dvx * tipScale, y: y - dvy * tipScale))
-            ctx.stroke(tipTrail, with: .color(starCol.opacity(alpha * 0.72)),
-                       lineWidth: tw * 0.72)
+            ctx.stroke(tipTrail, with: .color(starCol.opacity(alpha * 0.80)),
+                       lineWidth: tw * 0.70)
         }
 
         // 星点本体 (小さく)
@@ -674,15 +720,15 @@ private struct StarFieldCanvas: View {
 
         // 白い明星: 十字光芒 (細め)
         if isWhiteStar && alpha > 0.35 && r > 0.28 {
-            let cl = r * 2.8
+            let cl = r * 3.2
             var vl = Path()
             vl.move(to: CGPoint(x: x, y: y - cl))
             vl.addLine(to: CGPoint(x: x, y: y + cl))
             var hl = Path()
-            hl.move(to: CGPoint(x: x - cl * 1.6, y: y))
-            hl.addLine(to: CGPoint(x: x + cl * 1.6, y: y))
-            ctx.stroke(vl, with: .color(starCol.opacity(alpha * 0.25)), lineWidth: 0.28)
-            ctx.stroke(hl, with: .color(starCol.opacity(alpha * 0.25)), lineWidth: 0.28)
+            hl.move(to: CGPoint(x: x - cl * 1.8, y: y))
+            hl.addLine(to: CGPoint(x: x + cl * 1.8, y: y))
+            ctx.stroke(vl, with: .color(starCol.opacity(alpha * 0.30)), lineWidth: 0.30)
+            ctx.stroke(hl, with: .color(starCol.opacity(alpha * 0.30)), lineWidth: 0.30)
         }
     }
 
