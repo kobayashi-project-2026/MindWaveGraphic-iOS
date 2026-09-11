@@ -64,6 +64,7 @@ mind-wave-graphic/
 ```
 
 ## 関連ドキュメント
+- [開発環境セットアップ](docs/DEVELOPMENT_SETUP.md)
 - [プロジェクト概要](docs/PROJECT_OVERVIEW.md)
 - [スコア計算式](docs/FORMULA.md)
 - [HealthKit連携方針](docs/HEALTHKIT_NOTES.md)
