@@ -63,6 +63,10 @@ final class MindWaveViewModel: ObservableObject {
     @Published private(set) var hrvObserverUpdateCount: Int = 0
     /// 最後にHRV状態を更新した経路。"HealthKit取得" または "Observer受信"
     @Published private(set) var lastHRVFetchSource: String  = "---"
+    /// HealthKitManager 内で受理・重複除外・古値除外されたサンプル数（診断用）
+    @Published private(set) var hrvManagerAcceptedCount: Int   = 0
+    @Published private(set) var hrvManagerDuplicateCount: Int  = 0
+    @Published private(set) var hrvManagerStaleCount: Int      = 0
     /// GraphicInputを最後に更新したデータ経路（"heartRate" / "hrv" / "healthKit" / "mock"）
     @Published private(set) var lastGraphicUpdateTrigger: String = "---"
 
@@ -549,6 +553,11 @@ final class MindWaveViewModel: ObservableObject {
             MindWaveDebugLogger.log(.healthKit, "HRV observer fired but no value")
             return
         }
+        // HealthKitManager の受理・除外カウンターを同期（DebugDiagnosticsView 表示用）
+        hrvManagerAcceptedCount  = hkManager.hrvAcceptedCount
+        hrvManagerDuplicateCount = hkManager.hrvDuplicateCount
+        hrvManagerStaleCount     = hkManager.hrvStaleCount
+
         // 共通HRV状態更新（dedup・latestHealthKitSample.hrv更新・currentHRV更新を含む）
         let updated = updateHRVState(result: result, isFromObserver: true)
         guard updated else { return }

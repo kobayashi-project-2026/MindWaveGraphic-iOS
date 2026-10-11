@@ -92,8 +92,12 @@ struct DebugDiagnosticsView: View {
                     // ── HRV Observer ──────────────────────────────────
                     debugBlock {
                         debugRow("HRV監視",       viewModel.isHRVObserverActive ? "稼働中 ●" : "停止中")
+                        debugRow("HRV監視方式",   "HKAnchoredObjectQuery")
                         debugRow("HRV実測取得",   viewModel.didFetchHRV ? "済 ✓" : "未取得")
                         debugRow("HRV取得元",     viewModel.lastHRVFetchSource)
+                        debugRow("HRV新規受理",   "\(viewModel.hrvManagerAcceptedCount) 件")
+                        debugRow("HRV重複除外",   "\(viewModel.hrvManagerDuplicateCount) 件")
+                        debugRow("HRV古値除外",   "\(viewModel.hrvManagerStaleCount) 件")
                         debugRow("HRV新規受信",   "\(viewModel.hrvObserverUpdateCount) 回")
                         debugRow("HRV最終通知",   formatTime(viewModel.lastHRVObserverDate))
                         debugRow("HRV経過",       hrvAgeString(viewModel.latestHRVSampleDate))
