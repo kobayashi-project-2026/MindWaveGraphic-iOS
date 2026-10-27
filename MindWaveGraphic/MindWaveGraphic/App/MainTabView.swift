@@ -13,13 +13,24 @@ struct MainTabView: View {
 
     // MARK: - 状態
 
-    @StateObject private var viewModel    = MindWaveViewModel()
-    @StateObject private var historyStore = GuideHistoryStore()
-    @State       private var selectedTab  = Int(ProcessInfo.processInfo.environment["INITIAL_TAB"] ?? "0") ?? 0
+    // 計測ViewModelと履歴ストアは AppRootContainerView が所有する。
+    // ログアウト→再ログインや状況選択でこのViewが作り直されても、計測状態・履歴を失わないため。
+    @EnvironmentObject private var viewModel: MindWaveViewModel
+    @EnvironmentObject private var historyStore: GuideHistoryStore
     @EnvironmentObject private var flowState: AppFlowState
-    // 共通メニューの画面遷移状態を受け取る
+    // メインアプリ内の画面遷移の唯一の情報源（タブ・モーダル）
     @EnvironmentObject private var navManager: AppNavigationManager
-    @State private var showSettings = false
+
+    /// 既存Viewが参照する Int 型のタブ番号（navManager から導出。独自の状態は持たない）
+    private var selectedTab: Int { navManager.selectedTab.rawValue }
+
+    /// HomeView / GuideView / CockpitLeverNav に渡す Binding。書き込みは navManager へ委譲する。
+    private var selectedTabBinding: Binding<Int> {
+        Binding(
+            get: { navManager.selectedTab.rawValue },
+            set: { navManager.selectTab(index: $0) }
+        )
+    }
 
     // タブ切替フラッシュ
     @State private var transitionOpacity: Double = 0
@@ -29,11 +40,11 @@ struct MainTabView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            TabView(selection: $selectedTab) {
-                HomeView(selectedTab: $selectedTab)
+            TabView(selection: selectedTabBinding) {
+                HomeView(selectedTab: selectedTabBinding)
                     .tag(0)
                     .toolbar(.hidden, for: .tabBar)
-                GuideView(selectedTab: $selectedTab)
+                GuideView(selectedTab: selectedTabBinding)
                     .tag(1)
                     .toolbar(.hidden, for: .tabBar)
                 HistoryView()
@@ -83,22 +94,16 @@ struct MainTabView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        
-        .environmentObject(viewModel)
-        .environmentObject(historyStore)
         .withGlobalMenuBar()
         .preferredColorScheme(.dark)
         .onAppear {
             viewModel.measurementContext = flowState.measurementContext
-            syncNavigationToTab()
         }
         .onChange(of: flowState.measurementContext) { _, newCtx in
             viewModel.measurementContext = newCtx
         }
-        .onChange(of: selectedTab) { old, newValue in
-            // タブ操作と共通ナビゲーションを同期する
-            syncNavigationToTab()
-            print("[UI][Tab] selected index=\(newValue)")
+        .onChange(of: navManager.selectedTab) { old, newValue in
+            MindWaveDebugLogger.log(.navigation, "tab visible index=\(newValue.rawValue)")
             guard old != newValue, !reduceMotion else { return }
             withAnimation(.linear(duration: 0.07)) {
                 transitionOpacity = 0.07
@@ -109,50 +114,37 @@ struct MainTabView: View {
                 }
             }
         }
-        .onChange(of: navManager.currentScreen) { _, screen in
-            // 共通メニューから既存の画面へ移動する
-            switch screen {
-            case .tensionGraphic:
-                selectedTab = 0
-            case .dialogue, .improvement:
-                selectedTab = 1
-            case .pastLogs:
-                selectedTab = 2
-            case .settings:
-                showSettings = true
-            case .title:
-                flowState.returnToSplash()
-            case .confirmation, .feedback:
-                // これらはガイドセッション内で管理する画面
-                break
-            }
-        }
-        .sheet(isPresented: $showSettings, onDismiss: {
-            syncNavigationToTab()
-        }) {
-            SettingsView()
+        // 共通メニューから開くモーダル。表示状態は navManager.activeModal のみで管理する
+        .sheet(item: $navManager.activeModal) { modal in
+            AppModalDestinationView(modal: modal)
                 .environmentObject(viewModel)
+                .environmentObject(historyStore)
+                .environmentObject(flowState)
+                .environmentObject(navManager)
         }
-
+        // タイトルへ戻る＝ログアウト。計測中の表示がリセットされるため確認する
+        .confirmationDialog(
+            "タイトル画面へ戻りますか？",
+            isPresented: $navManager.isTitleReturnConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("ログアウトしてタイトルへ戻る", role: .destructive) {
+                returnToTitle()
+            }
+            Button("キャンセル", role: .cancel) {}
+        } message: {
+            Text("ライブ計測は停止します。保存済みの履歴は削除されません。")
+        }
     }
-    
-    // タブ選択と共通メニューの現在位置を一致させる
-    private func syncNavigationToTab() {
-        let screen: AppScreen
 
-        switch selectedTab {
-        case 1:
-            screen = .improvement
-        case 2:
-            screen = .pastLogs
-        default:
-            screen = .tensionGraphic
+    /// タイトル（認証フロー先頭）へ戻る。履歴は保持し、ライブ計測だけ停止する。
+    private func returnToTitle() {
+        if viewModel.isLiveMonitoring {
+            viewModel.stopLiveMonitoring()
         }
-
-        // 同じ状態への不要な更新を防ぐ
-        if navManager.currentScreen != screen {
-            navManager.navigate(to: screen)
-        }
+        navManager.resetForSignOut()
+        flowState.returnToSplash()
+        MindWaveDebugLogger.log(.navigation, "returned to title (sign-out)")
     }
 
     // MARK: - Accent color (matches HomeView)
@@ -238,7 +230,7 @@ struct MainTabView: View {
                 .animation(.easeInOut(duration: 1.0), value: si)
 
                 // Home / 整える / 履歴 のレバー（HomeView と同一コンポーネント）
-                CockpitLeverNav(selectedTab: $selectedTab, accentColor: ac)
+                CockpitLeverNav(selectedTab: selectedTabBinding, accentColor: ac)
                     .padding(.horizontal, 12)
                     .frame(height: 44)
             }
@@ -251,4 +243,8 @@ struct MainTabView: View {
 
 #Preview {
     MainTabView()
+        .environmentObject(AppFlowState())
+        .environmentObject(AppNavigationManager())
+        .environmentObject(MindWaveViewModel())
+        .environmentObject(GuideHistoryStore())
 }

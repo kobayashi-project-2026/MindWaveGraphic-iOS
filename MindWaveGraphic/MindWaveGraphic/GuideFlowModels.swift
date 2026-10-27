@@ -187,6 +187,30 @@ final class GuideHistoryStore: ObservableObject {
         MindWaveDebugLogger.log(.flow, "record saved id=\(record.id.uuidString.prefix(8)) scene=\(record.scene.rawValue)")
     }
 
+    /// 既存記録の感想メモだけを更新する（共通メニュー「フィードバック」から使用）。
+    /// 計測値・AIインサイト等の他フィールドは変更しない。空文字は「メモなし」として保存する。
+    @discardableResult
+    func updateEmotionMemo(id: UUID, memo: String) -> Bool {
+        guard let index = records.firstIndex(where: { $0.id == id }) else {
+            MindWaveDebugLogger.log(.error, "[History] memo update target not found id=\(id.uuidString.prefix(8))")
+            return false
+        }
+        let r = records[index]
+        let trimmed = memo.trimmingCharacters(in: .whitespacesAndNewlines)
+        records[index] = GuideSessionRecord(
+            id: r.id, startedAt: r.startedAt, scene: r.scene, exercise: r.exercise,
+            durationSeconds: r.durationSeconds, before: r.before, after: r.after,
+            hrvUpdated: r.hrvUpdated,
+            emotionMemo: trimmed.isEmpty ? nil : String(trimmed.prefix(200)),
+            selfReportBefore: r.selfReportBefore, selfReportAfter: r.selfReportAfter,
+            aiInsightTitle: r.aiInsightTitle, aiInsightSummary: r.aiInsightSummary,
+            aiInsightRecommendation: r.aiInsightRecommendation, localAIVersion: r.localAIVersion
+        )
+        save()
+        MindWaveDebugLogger.log(.flow, "record memo updated id=\(id.uuidString.prefix(8)) hasMemo=\(!trimmed.isEmpty)")
+        return true
+    }
+
     // MARK: Persistence (Codable-free — stores raw values as dicts)
 
     private func save() {

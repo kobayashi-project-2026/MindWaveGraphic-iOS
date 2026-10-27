@@ -13,6 +13,14 @@ struct ContextCalibrationView: View {
 
     @ObservedObject var flowState: AppFlowState
 
+    /// メインアプリ内（共通メニュー「対話（状況確認）」）から開いた場合の完了コールバック。
+    /// nil のときは従来どおり認証フローの一部として mainApp へ進む。
+    /// 指定時は計測ViewModelを作り直さないよう authStatus を変更せず、呼び出し元がモーダルを閉じる。
+    var onComplete: (() -> Void)? = nil
+
+    /// メインアプリ内から開いたか
+    private var isInAppEdit: Bool { onComplete != nil }
+
     @State private var selectedScene: ContextScene = .calm
     @State private var selectedConditions: Set<BodyCondition> = [.none]
 
@@ -33,6 +41,13 @@ struct ContextCalibrationView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
+            }
+            .onAppear {
+                // メインアプリ内から開いた場合は、現在選択中のコンテキストを初期表示する
+                guard isInAppEdit else { return }
+                selectedScene      = flowState.measurementContext.scene
+                selectedConditions = flowState.measurementContext.conditions.isEmpty
+                    ? [.none] : flowState.measurementContext.conditions
             }
             // CTAをスクロールエリアの外（画面下部固定）に配置
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -226,11 +241,17 @@ struct ContextCalibrationView: View {
                 .accessibilityIdentifier("context_primary_start_button")
 
                 Button {
+                    if let onComplete {
+                        // メインアプリ内：現在のコンテキストを変更せずに閉じる
+                        print("[Navigation] context edit cancelled (in-app)")
+                        onComplete()
+                        return
+                    }
                     flowState.measurementContext = .default
                     flowState.authStatus = .mainApp
                     print("[Navigation] context skipped -> mainApp")
                 } label: {
-                    Text("あとで選ぶ")
+                    Text(isInAppEdit ? "変更しない" : "あとで選ぶ")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(Color.white.opacity(0.40))
                         .frame(maxWidth: .infinity)
@@ -278,6 +299,12 @@ struct ContextCalibrationView: View {
         ctx.scene      = selectedScene
         ctx.conditions = selectedConditions
         flowState.measurementContext = ctx
+        if let onComplete {
+            // メインアプリ内：authStatus は mainApp のまま。MainTabView が onChange で ViewModel へ反映する
+            print("[Navigation] context updated in-app: scene=\(selectedScene.rawValue)")
+            onComplete()
+            return
+        }
         flowState.authStatus = .mainApp
         print("[Navigation] context set: scene=\(selectedScene.rawValue) -> mainApp")
     }

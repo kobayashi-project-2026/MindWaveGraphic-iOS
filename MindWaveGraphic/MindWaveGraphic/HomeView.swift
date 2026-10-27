@@ -17,9 +17,10 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject var viewModel: MindWaveViewModel
     @EnvironmentObject var flowState: AppFlowState
+    // 設定画面は共通メニューと同じ経路（AppNavigationManager.activeModal）で開き、表示状態を一元化する
+    @EnvironmentObject var navManager: AppNavigationManager
     @Binding var selectedTab: Int
 
-    @State private var showSettingsSheet    = false
     @State private var showStatusDetail     = false
     @State private var buttonPulse: Bool    = false
     #if DEBUG
@@ -160,9 +161,6 @@ struct HomeView: View {
                 buttonPulse = true
             }
         }
-        .sheet(isPresented: $showSettingsSheet) {
-            SettingsView().environmentObject(viewModel)
-        }
         #if DEBUG
         .sheet(isPresented: $showDebugDiagnostics) {
             NavigationStack {
@@ -257,7 +255,7 @@ struct HomeView: View {
             Spacer()
 
             // 右: 設定（Simulator+DEBUGのみ長押しでデモ操作パネルを開く。実機では長押し無効）
-            Button { showSettingsSheet = true } label: {
+            Button { navManager.navigate(to: .settings) } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 14, weight: .light))
                     .foregroundStyle(Color.white.opacity(0.38))
@@ -1401,4 +1399,5 @@ private struct SimulatorDemoControlsView: View {
     HomeView(selectedTab: .constant(0))
         .environmentObject(MindWaveViewModel())
         .environmentObject(AppFlowState())
+        .environmentObject(AppNavigationManager())
 }

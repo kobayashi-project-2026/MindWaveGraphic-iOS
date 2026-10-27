@@ -68,6 +68,7 @@ struct AppRootView: View {
 
         case .mainApp:
             // フェーズ3：3タブのMainTabViewへ切り替え。
+            // MindWaveViewModel / GuideHistoryStore / AppNavigationManager は AppRootContainerView から受け取る。
             MainTabView()
                 .environmentObject(flowState)
         }
@@ -75,5 +76,6 @@ struct AppRootView: View {
 }
 
 #Preview {
-    AppRootView()
+    // 計測ViewModel・履歴・画面遷移は AppRootContainerView が所有するため、コンテナ経由でプレビューする
+    AppRootContainerView()
 }

@@ -18,6 +18,9 @@ struct FeedbackRecordView: View {
 
     let onSave: (String) -> Void
     let onCancel: () -> Void
+    /// 既存メモの初期値（共通メニューの「フィードバック」から過去記録を編集する場合に使う）。
+    /// ガイドフローからの呼び出しでは省略され、従来どおり空欄から始まる。
+    var initialMemo: String = ""
 
     // MARK: - State（変更なし）
 
@@ -216,6 +219,11 @@ struct FeedbackRecordView: View {
                 }
             }
             .onTapGesture { isMemoFocused = false }
+        }
+        .onAppear {
+            if emotionMemo.isEmpty && !initialMemo.isEmpty {
+                emotionMemo = String(initialMemo.prefix(200))
+            }
         }
         .preferredColorScheme(.dark)
     }

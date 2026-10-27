@@ -2,6 +2,8 @@ import SwiftUI
 
 struct GlobalMenuBarModifier: ViewModifier {
     @EnvironmentObject var navManager: AppNavigationManager
+    // 「確認」「フィードバック」は保存済みのガイド記録が必要なため、履歴の有無で有効/無効を切り替える
+    @EnvironmentObject var historyStore: GuideHistoryStore
 
     func body(content: Content) -> some View {
         ZStack(alignment: .topTrailing) {
@@ -13,30 +15,26 @@ struct GlobalMenuBarModifier: ViewModifier {
             if navManager.currentScreen != .title {
                 Menu {
                     Section("主要画面") {
-                        Button {
-                            navManager.navigate(to: .dialogue)
-                        } label: {
-                            Label("対話画面", systemImage: AppScreen.dialogue.iconName)
-                        }
+                        menuButton(.dialogue, label: "対話（状況確認）")
+                        menuButton(.tensionGraphic, label: "緊張グラフィック")
+                        menuButton(.improvement, label: "改善（ワーク）")
+                    }
 
-                        Button {
-                            navManager.navigate(to: .tensionGraphic)
-                        } label: {
-                            Label("緊張グラフィック", systemImage: AppScreen.tensionGraphic.iconName)
-                        }
+                    Section("直近のセッション") {
+                        menuButton(.confirmation, label: "結果の確認")
+                        menuButton(.feedback, label: "フィードバック")
                     }
 
                     Section("記録・環境設定") {
-                        Button {
-                            navManager.navigate(to: .pastLogs)
-                        } label: {
-                            Label("過去ログ確認", systemImage: AppScreen.pastLogs.iconName)
-                        }
+                        menuButton(.pastLogs, label: "過去ログ確認")
+                        menuButton(.settings, label: "設定")
+                    }
 
-                        Button {
-                            navManager.navigate(to: .settings)
+                    Section {
+                        Button(role: .destructive) {
+                            navManager.navigate(to: .title)
                         } label: {
-                            Label("設定", systemImage: AppScreen.settings.iconName)
+                            Label("タイトルへ戻る", systemImage: "rectangle.portrait.and.arrow.right")
                         }
                     }
                 } label: {
@@ -47,9 +45,23 @@ struct GlobalMenuBarModifier: ViewModifier {
                         .padding(.top, 12)
                         .padding(.trailing, 18)
                 }
+                .accessibilityLabel("共通メニュー")
+                .accessibilityIdentifier("global_menu_button")
                 .padding(.top, 34) // Safe Area (Dynamic Island) 考慮
             }
         }
+    }
+
+    /// メニュー項目。現在表示中の画面にはチェックを付け、記録が必要な画面は記録がなければ無効化する。
+    @ViewBuilder
+    private func menuButton(_ screen: AppScreen, label: String) -> some View {
+        let isCurrent = navManager.currentScreen == screen
+        Button {
+            navManager.navigate(to: screen)
+        } label: {
+            Label(label, systemImage: isCurrent ? "checkmark" : screen.iconName)
+        }
+        .disabled(screen.requiresSessionRecord && historyStore.records.isEmpty)
     }
 }
 
