@@ -1,0 +1,11 @@
+# Cloudflare Workers 設定（デプロイ手順は docs/OPENAI_SETUP.md）
+# 秘密情報（OPENAI_API_KEY / CLIENT_TOKENS）はここに書かず、`wrangler secret put` で登録する。
+name = "mindwave-insight-server"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+# 使用モデル（Structured Outputs 対応モデルを指定する）
+OPENAI_MODEL = "gpt-4o-mini"
+# OpenAI 呼び出しのタイムアウト（ミリ秒）。iOS 側タイムアウト(20秒)より短くする
+OPENAI_TIMEOUT_MS = "15000"

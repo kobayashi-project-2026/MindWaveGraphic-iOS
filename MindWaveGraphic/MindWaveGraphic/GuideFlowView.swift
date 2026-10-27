@@ -63,6 +63,10 @@ struct GuideFlowView: View {
     @State private var sessionIsFinished: Bool = false
     @State private var aiFeedbackResult: LocalAIFeedbackResult? = nil
     @State private var latestAIInsight:  MindWaveAIInsight?     = nil
+    /// latestAIInsight の生成元（保存時に localAIVersion へ記録。"local-v1" / "remote:openai:<model>"）
+    @State private var insightProviderVersion: String           = "local-v1"
+    /// 外部AI（サーバー経由）でのインサイト取得タスク。新しいセッション・再生成時にキャンセルする
+    @State private var remoteInsightTask: Task<Void, Never>?     = nil
     @State private var selfReportBefore: SelfReportLevel?       = nil
     @State private var selfReportAfter:  SelfReportLevel?       = nil
 
@@ -1527,6 +1531,7 @@ struct GuideFlowView: View {
             source:            "local"
         )
         latestAIInsight = LocalMindWaveAIEngine.generate(context: ctx)
+        requestEnhancedInsight(context: ctx)
         step = .result
     }
 
@@ -1545,7 +1550,7 @@ struct GuideFlowView: View {
             aiInsightTitle:          latestAIInsight?.title,
             aiInsightSummary:        latestAIInsight?.summary,
             aiInsightRecommendation: latestAIInsight?.recommendation,
-            localAIVersion:          "local-v1"
+            localAIVersion:          insightProviderVersion
         )
         historyStore.add(record)
         showFeedbackView = false
@@ -1572,9 +1577,33 @@ struct GuideFlowView: View {
             source:            "local"
         )
         latestAIInsight = LocalMindWaveAIEngine.generate(context: ctx)
+        requestEnhancedInsight(context: ctx)
+    }
+
+    /// 外部AIでの振り返りを要求する。ローカル結果は既に表示済みで、
+    /// 同意・サーバー設定・実測データの条件を満たし、かつ取得に成功した場合だけ置き換える。
+    /// 失敗・タイムアウト時はローカル結果のまま（InsightService がフォールバックを保証）。
+    private func requestEnhancedInsight(context ctx: MindWaveAIContext) {
+        remoteInsightTask?.cancel()
+        insightProviderVersion = "local-v1"
+        guard let before = beforeSnapshot else { return }
+        let input = InsightSessionInput(context: ctx, before: before, after: afterSnapshot,
+                                        durationSeconds: sessionDurationSeconds)
+        if let reason = InsightService.shared.remoteIneligibility(for: input) {
+            MindWaveDebugLogger.log(.insight, "guide result uses local insight reason=\(reason.rawValue)")
+            return
+        }
+        remoteInsightTask = Task { @MainActor in
+            let outcome = await InsightService.shared.generate(input)
+            guard !Task.isCancelled, outcome.usedRemote else { return }
+            latestAIInsight        = outcome.insight
+            insightProviderVersion = outcome.providerVersion
+        }
     }
 
     private func resetForNewSession() {
+        remoteInsightTask?.cancel()
+        insightProviderVersion = "local-v1"
         sessionIsFinished  = false
         sessionIsRunning   = false
         sessionElapsed     = sessionDurationSeconds
@@ -2345,7 +2374,8 @@ private struct AIInsightBadgeRow: View {
 
 // MARK: - Local MindWave AI Engine
 
-private enum LocalMindWaveAIEngine {
+// Insights/InsightProvider.swift の LocalInsightProvider から利用するため internal にしている（ロジックは変更なし）
+enum LocalMindWaveAIEngine {
 
     static func generate(context ctx: MindWaveAIContext) -> MindWaveAIInsight {
         let tone = displayTone(for: ctx)

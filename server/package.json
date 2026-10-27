@@ -1,0 +1,21 @@
+{
+  "name": "mindwave-insight-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mind Wave Graphic: OpenAI を安全に呼び出すための最小 API サーバー（Cloudflare Workers）",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "dev": "node scripts/dev-server.ts",
+    "dev:stub": "node scripts/dev-server.ts --stub-openai",
+    "deploy": "npx wrangler@4 deploy"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}

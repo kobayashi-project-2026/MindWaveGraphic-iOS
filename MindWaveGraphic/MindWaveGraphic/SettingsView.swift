@@ -20,6 +20,15 @@ struct SettingsView: View {
 
     @State private var showAccountSheet = false
     @State private var showPrivacyAlert = false
+    /// 外部AIへの要約送信の同意（InsightConsentStore と同じキー・値。0 = 未同意）
+    @AppStorage(InsightConsentStore.defaultsKey) private var externalAIConsentVersion = 0
+
+    private var externalAIConsentBinding: Binding<Bool> {
+        Binding(
+            get: { externalAIConsentVersion == InsightConsentStore.currentConsentVersion },
+            set: { InsightConsentStore().setConsented($0); externalAIConsentVersion = $0 ? InsightConsentStore.currentConsentVersion : 0 }
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -121,9 +130,23 @@ struct SettingsView: View {
                                 Text("データの扱い")
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(MindWaveCyberTheme.textPrimary)
-                                Text("計測データはこのデバイス上でのみ処理されます。サーバーへの送信は現在行っていません。")
+                                Text(externalAIConsentBinding.wrappedValue
+                                     ? "計測データはこのデバイス上で処理されます。外部AIを有効にしている場合のみ、ガイド結果の要約（場面・方法・前後の状態・丸めた心拍）をサーバーへ送信します。"
+                                     : "計測データはこのデバイス上でのみ処理されます。サーバーへの送信は行っていません。")
                                     .font(.system(size: 11, weight: .light))
                                     .foregroundStyle(MindWaveCyberTheme.textTertiary)
+
+                                Divider().background(MindWaveCyberTheme.borderColor).padding(.vertical, 2)
+
+                                // 外部AI（OpenAI をサーバー経由で利用）への同意。既定は OFF
+                                cyberToggleRow(
+                                    title: "外部AIで振り返りを生成",
+                                    subtitle: InsightService.shared.isRemoteConfigured
+                                        ? "ガイド結果の要約のみを送信します。メモ・日時・HRVの数値・Mockデータは送信しません。失敗時は端末内AIで表示します。"
+                                        : "サーバーが未設定のため利用できません（端末内AIで表示します）。",
+                                    binding: externalAIConsentBinding
+                                )
+                                .disabled(!InsightService.shared.isRemoteConfigured)
 
                                 Divider().background(MindWaveCyberTheme.borderColor).padding(.vertical, 2)
 
