@@ -45,7 +45,7 @@ if ! xcrun swiftc \
   -enable-upcoming-feature MemberImportVisibility \
   -enable-upcoming-feature InferIsolatedConformances \
   -enable-upcoming-feature NonisolatedNonsendingByDefault \
-  -D DEBUG -Onone \
+  -D DEBUG -Onone -wmo \
   -module-name MindWaveGraphic \
   -o "$OUT_DIR/MindWaveCoreTests" \
   "${SOURCES[@]}" 2> "$OUT_DIR/build.log"; then

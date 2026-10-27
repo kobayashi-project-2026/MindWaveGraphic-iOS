@@ -98,6 +98,13 @@ struct MainTabView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             viewModel.measurementContext = flowState.measurementContext
+            #if DEBUG
+            // シミュレーター検証用（INITIAL_TAB と同様）: INITIAL_SCREEN=<AppScreen の case 名> で起動直後に遷移する
+            if let name = ProcessInfo.processInfo.environment["INITIAL_SCREEN"],
+               let screen = AppScreen.allCases.first(where: { "\($0)" == name }) {
+                navManager.navigate(to: screen)
+            }
+            #endif
         }
         .onChange(of: flowState.measurementContext) { _, newCtx in
             viewModel.measurementContext = newCtx

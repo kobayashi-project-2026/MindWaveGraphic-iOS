@@ -997,6 +997,8 @@ final class MindWaveViewModel: ObservableObject {
     /// データソース種別に応じた推定確からしさ（0〜1）を返す。
     /// watchLive: sample.hrv が実測値ありなら0.75、なし（HRV未取得）なら0.50。
     /// currentHRV（デモ初期値含む）は使用しない。
+    /// ※ 現在の確からしさは Analysis/MindAnalyzer.swift の StressScoreAnalyzerV1 が同じ規則で算出している。
+    ///   この関数は既存実装の参照として残しており、呼び出し元はない（削除はチームで判断する）。
     private func computeConfidence(sample: MindWaveSample) -> Double {
         switch sample.source {
         case .mock:        return mockConfidence
