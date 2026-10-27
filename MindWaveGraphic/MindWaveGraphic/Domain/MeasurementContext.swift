@@ -10,7 +10,7 @@ import Foundation
 // MARK: - MeasurementScene (測定場面)
 
 /// 測定時の場面カテゴリ。単一選択。
-enum ContextScene: String, CaseIterable, Identifiable, Codable {
+nonisolated enum ContextScene: String, CaseIterable, Identifiable, Codable {
     case calm      = "calm"
     case interview = "interview"
     case sports    = "sports"
@@ -59,7 +59,7 @@ enum ContextScene: String, CaseIterable, Identifiable, Codable {
 // MARK: - BodyCondition (身体状態)
 
 /// 測定時の身体状態フラグ。複数選択可。
-enum BodyCondition: String, CaseIterable, Identifiable, Codable {
+nonisolated enum BodyCondition: String, CaseIterable, Identifiable, Codable {
     case running    = "running"
     case stairs     = "stairs"
     case smoking    = "smoking"
@@ -112,7 +112,7 @@ enum BodyCondition: String, CaseIterable, Identifiable, Codable {
 // MARK: - MeasurementContext
 
 /// 測定コンテキスト全体。AppFlowStateが保持し、ScoreCalculatorへ渡す。
-struct MeasurementContext: Equatable, Codable {
+nonisolated struct MeasurementContext: Equatable, Codable {
     var scene:      ContextScene          = .calm
     var conditions: Set<BodyCondition>    = [.none]
 

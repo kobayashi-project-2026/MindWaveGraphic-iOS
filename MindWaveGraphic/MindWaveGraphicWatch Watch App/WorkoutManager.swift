@@ -198,10 +198,13 @@ final class WorkoutManager: NSObject, ObservableObject {
     ///   sendMessage 失敗時 or isReachable=false 時のキュー転送フォールバック。
     private func sendHeartRateToiPhone(_ heartRate: Double) {
         let now = Date().timeIntervalSince1970
+        // iPhone 側 Contracts/WatchPayloadContract.swift（schema v1）と対応。
+        // 既存3キーは変更しない。schemaVersion は追加キーのため旧iPhoneアプリでも無視されるだけで互換。
         let payload: [String: Any] = [
-            "type":      "heartRate",
-            "heartRate": heartRate,
-            "timestamp": now
+            "type":          "heartRate",
+            "heartRate":     heartRate,
+            "timestamp":     now,
+            "schemaVersion": 1
         ]
 
         isWCReachable = WCSession.default.isReachable

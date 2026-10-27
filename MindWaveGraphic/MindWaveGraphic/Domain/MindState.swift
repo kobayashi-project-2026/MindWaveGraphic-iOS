@@ -2,7 +2,7 @@ import Foundation
 
 // グラフィックチームと共有する3状態。
 // 表示名・閾値はここだけで管理する。
-enum MindState: String, CaseIterable, Equatable, Sendable {
+nonisolated enum MindState: String, CaseIterable, Equatable, Sendable {
     case underAroused
     case optimalTension
     case overTense

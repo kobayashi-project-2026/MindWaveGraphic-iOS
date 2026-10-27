@@ -119,6 +119,8 @@ struct GuideSnapshot: Equatable {
     let heartRateSampleDate: Date?
     /// HRVサンプルの記録時刻（診断用）
     let hrvSampleDate: Date?
+    /// 取得時のデータソース（旧データ・未指定は nil。Mock判定は isMockData を正とする）
+    var dataSource: MindDataSource? = nil
 }
 
 // MARK: - GuideSessionRecord
@@ -174,12 +176,37 @@ struct GuideSessionRecord: Identifiable, Equatable {
 // MARK: - GuideHistoryStore
 
 /// ガイドセッション履歴ストア。UserDefaultsでローカル永続化。
+///
+/// 保存形式（docs/DATA_CONTRACTS.md「履歴文書」）:
+/// - 正本: "mindwave.guideHistory.v3.json"（GuideHistoryDocument の JSON。schema_version 付き）
+/// - 互換: "mindwave.guideHistory.v2"（旧形式の辞書配列）。他メンバーのブランチのビルドでも
+///         履歴が読めるよう、移行期間中は両方へ書き込む。読み込みは v3 を優先する。
 final class GuideHistoryStore: ObservableObject {
     @Published private(set) var records: [GuideSessionRecord] = []
 
+    /// 旧形式（辞書配列）のキー。変更しないこと
     private let defaultsKey = "mindwave.guideHistory.v2"
+    /// JSON 契約形式のキー
+    static let jsonDefaultsKey = "mindwave.guideHistory.v3.json"
 
-    init() { load() }
+    private let defaults: UserDefaults
+
+    /// - Parameter defaults: 保存先（テストでは専用の suite を渡す）
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        load()
+    }
+
+    /// 実測のみの記録（Mock 計測を含む記録を除く）。AI学習・傾向分析はこちらを使う。
+    var realMeasurementRecords: [GuideSessionRecord] {
+        records.filter { !$0.before.isMockData && !($0.after?.isMockData ?? false) }
+    }
+
+    /// 履歴全体を契約形式の JSON で書き出す（デバッグ・エクスポート用）
+    func exportJSON() -> Data? {
+        let document = GuideHistoryDocument(savedAt: Date(), records: records.map { GuideSessionRecordDTO(record: $0) })
+        return try? MindWaveContract.makeEncoder().encode(document)
+    }
 
     func add(_ record: GuideSessionRecord) {
         records.insert(record, at: 0)
@@ -211,9 +238,50 @@ final class GuideHistoryStore: ObservableObject {
         return true
     }
 
-    // MARK: Persistence (Codable-free — stores raw values as dicts)
+    // MARK: Persistence
 
     private func save() {
+        saveJSON()
+        saveLegacy()
+    }
+
+    /// 正本（JSON 契約形式）を保存する
+    private func saveJSON() {
+        let document = GuideHistoryDocument(savedAt: Date(), records: records.map { GuideSessionRecordDTO(record: $0) })
+        do {
+            let data = try MindWaveContract.makeEncoder().encode(document)
+            defaults.set(data, forKey: Self.jsonDefaultsKey)
+            MindWaveDebugLogger.log(.contract, "history saved format=v3.json count=\(records.count) bytes=\(data.count)")
+        } catch {
+            MindWaveDebugLogger.log(.error, "[History] json encode failed: \(error)")
+        }
+    }
+
+    private func load() {
+        if let data = defaults.data(forKey: Self.jsonDefaultsKey) {
+            do {
+                let document = try MindWaveContract.makeDecoder().decode(GuideHistoryDocument.self, from: data)
+                let restored = document.records.compactMap { $0.domainRecord }
+                records = restored
+                let unknown = document.records.count - restored.count
+                MindWaveDebugLogger.log(.contract, "history loaded format=v3.json count=\(restored.count) skippedCorrupt=\(document.skippedRecordCount) skippedUnknownValue=\(unknown)")
+                return
+            } catch {
+                // JSON が読めない場合も旧形式から復元を試みる（データは削除しない）
+                MindWaveDebugLogger.log(.error, "[History] json decode failed, falling back to legacy: \(error)")
+            }
+        }
+        guard let legacy = loadLegacy() else { return }
+        records = legacy
+        MindWaveDebugLogger.log(.contract, "history migrated legacy v2 -> v3.json count=\(legacy.count)")
+        // 旧形式から読めた場合は JSON 正本を作成する（旧形式のデータは残す）
+        if !legacy.isEmpty { saveJSON() }
+    }
+
+    // MARK: Legacy persistence (Codable-free — stores raw values as dicts)
+
+    /// 旧形式（辞書配列）で保存する。他ブランチのビルドとの互換のため形式を変更しない。
+    private func saveLegacy() {
         let dicts = records.map { r -> [String: Any] in
             var d: [String: Any] = [
                 "id":              r.id.uuidString,
@@ -234,12 +302,13 @@ final class GuideHistoryStore: ObservableObject {
             if let v = r.localAIVersion   { d["aiVersion"]    = v }
             return d
         }
-        UserDefaults.standard.set(dicts, forKey: defaultsKey)
+        defaults.set(dicts, forKey: defaultsKey)
     }
 
-    private func load() {
-        guard let dicts = UserDefaults.standard.array(forKey: defaultsKey) as? [[String: Any]] else { return }
-        records = dicts.compactMap { d -> GuideSessionRecord? in
+    /// 旧形式（辞書配列）から読み込む。キーがなければ nil。
+    private func loadLegacy() -> [GuideSessionRecord]? {
+        guard let dicts = defaults.array(forKey: defaultsKey) as? [[String: Any]] else { return nil }
+        return dicts.compactMap { d -> GuideSessionRecord? in
             guard
                 let idStr   = d["id"]              as? String,
                 let id      = UUID(uuidString: idStr),

@@ -6,7 +6,7 @@
 import Foundation
 
 /// スコア計算の出力値
-struct StressScoreResult {
+nonisolated struct StressScoreResult: Equatable, Sendable {
     /// 心拍上昇率：(currentHR - avgHR) / avgHR。正の値ほど心拍が上昇している
     let heartRateIncreaseRate: Double
     /// HRV低下率：(avgHRV - currentHRV) / avgHRV。正の値ほどHRVが低下（ゆらぎ増加）
@@ -16,7 +16,7 @@ struct StressScoreResult {
     let stressScore: Double
 }
 
-struct StressScoreCalculator {
+nonisolated struct StressScoreCalculator {
 
     /// 心理的ゆらぎスコアを算出する。
     /// 個人の平常時平均からの変化率を使い個人差を補正する。
