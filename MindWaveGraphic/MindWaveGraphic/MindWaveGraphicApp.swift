@@ -19,7 +19,8 @@ struct MindWaveGraphicApp: App {
             // フェーズ2：認証フローを挿入。
             // mainApp状態になると AppRootView が既存の ContentView を表示する。
             // ContentView 本体は一切変更していない。
-            AppRootView()
+            AppRootContainerView()
+                .environmentObject(viewModel)
         }
     }
 }
