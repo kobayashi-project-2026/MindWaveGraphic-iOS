@@ -17,6 +17,9 @@ struct MainTabView: View {
     @StateObject private var historyStore = GuideHistoryStore()
     @State       private var selectedTab  = Int(ProcessInfo.processInfo.environment["INITIAL_TAB"] ?? "0") ?? 0
     @EnvironmentObject private var flowState: AppFlowState
+    // 共通メニューの画面遷移状態を受け取る
+    @EnvironmentObject private var navManager: AppNavigationManager
+    @State private var showSettings = false
 
     // タブ切替フラッシュ
     @State private var transitionOpacity: Double = 0
@@ -80,22 +83,75 @@ struct MainTabView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        
         .environmentObject(viewModel)
         .environmentObject(historyStore)
+        .withGlobalMenuBar()
         .preferredColorScheme(.dark)
         .onAppear {
             viewModel.measurementContext = flowState.measurementContext
+            syncNavigationToTab()
         }
         .onChange(of: flowState.measurementContext) { _, newCtx in
             viewModel.measurementContext = newCtx
         }
         .onChange(of: selectedTab) { old, newValue in
+            // タブ操作と共通ナビゲーションを同期する
+            syncNavigationToTab()
             print("[UI][Tab] selected index=\(newValue)")
             guard old != newValue, !reduceMotion else { return }
-            withAnimation(.linear(duration: 0.07)) { transitionOpacity = 0.07 }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
-                withAnimation(.easeOut(duration: 0.24)) { transitionOpacity = 0 }
+            withAnimation(.linear(duration: 0.07)) {
+                transitionOpacity = 0.07
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
+                withAnimation(.easeOut(duration: 0.24)) {
+                    transitionOpacity = 0
+                }
+            }
+        }
+        .onChange(of: navManager.currentScreen) { _, screen in
+            // 共通メニューから既存の画面へ移動する
+            switch screen {
+            case .tensionGraphic:
+                selectedTab = 0
+            case .dialogue, .improvement:
+                selectedTab = 1
+            case .pastLogs:
+                selectedTab = 2
+            case .settings:
+                showSettings = true
+            case .title:
+                flowState.returnToSplash()
+            case .confirmation, .feedback:
+                // これらはガイドセッション内で管理する画面
+                break
+            }
+        }
+        .sheet(isPresented: $showSettings, onDismiss: {
+            syncNavigationToTab()
+        }) {
+            SettingsView()
+                .environmentObject(viewModel)
+        }
+
+    }
+    
+    // タブ選択と共通メニューの現在位置を一致させる
+    private func syncNavigationToTab() {
+        let screen: AppScreen
+
+        switch selectedTab {
+        case 1:
+            screen = .improvement
+        case 2:
+            screen = .pastLogs
+        default:
+            screen = .tensionGraphic
+        }
+
+        // 同じ状態への不要な更新を防ぐ
+        if navManager.currentScreen != screen {
+            navManager.navigate(to: screen)
         }
     }
 

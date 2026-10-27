@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// アプリ全体の遷移対象画面の定義
 enum AppScreen: String, CaseIterable, Identifiable {

@@ -1,37 +1,16 @@
+// 未完成の新ナビゲーションを一時的に無効化
+
 import SwiftUI
 
+/// 認証フローと共通ナビゲーションを接続するルートコンテナ
 struct AppRootContainerView: View {
+
+    // チームが追加した画面遷移管理を保持する
     @StateObject private var navManager = AppNavigationManager()
-    @EnvironmentObject var viewModel: MindWaveViewModel
-    @StateObject private var historyStore = GuideHistoryStore() // 過去ログ管理ストア
 
     var body: some View {
-        Group {
-            switch navManager.currentScreen {
-            case .title:
-                TitleView()
-            case .dialogue:
-                DialogueView()
-            case .tensionGraphic:
-                LiveWaveView() // コックピット緊張グラフィック画面
-            case .improvement:
-                GuideView() // 改善（ワーク）画面[cite: 3]
-            case .confirmation:
-                ConfirmationView()
-            case .feedback:
-                FeedbackView()
-            case .pastLogs:
-                // 過去ログ確認画面[cite: 3, 4]
-                NewRecordListView(records: .constant(historyStore.records))
-            case .settings:
-                // 設定画面[cite: 3]
-                SettingsView()
-                    .environmentObject(viewModel)
-            }
-        }
-        .environmentObject(navManager)
-        .environmentObject(historyStore)
-        .withGlobalMenuBar() // 全画面の右上に共通メニューバーを配置
-        .preferredColorScheme(.dark)
+        // 既存のログイン・状況選択・メインアプリの流れを維持する
+        AppRootView()
+            .environmentObject(navManager)
     }
 }
