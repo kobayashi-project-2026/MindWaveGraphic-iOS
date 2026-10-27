@@ -139,17 +139,35 @@ WCSession は plist 辞書を送るため、この契約だけ JSON ではなく
 読み込み手順: v3 を decode → 失敗またはキーなしなら v2 を読み、v3 を生成（v2 は残す）。
 壊れた1件は読み飛ばし（`skipped` をログ出力）、未知の場面・エクササイズの記録も読み飛ばす（クラッシュしない）。
 
-## 9. 個人ベースライン（参考：保存形式）
+## 9. 個人ベースライン・鮮度規則
 
-UserDefaults `mindwave.personalBaseline.v1`（JSON）。実測（Watch／HealthKit）のみで更新し、Mock は除外する。
+### 決定順（心拍・HRV それぞれ独立）
+
+1. HealthKit の直近7日平均（既存の `fetchAverageHeartRate/HRV(days: 7)`。本人の HealthKit 履歴） → `personal`
+2. アプリが受信・蓄積した実測サンプルの平均（十分な件数がある場合） → `personal`
+3. 参照値（心拍 65 bpm／HRV 45 ms。既存デモシナリオと同値） → `provisional`（個人の平常値ではない）
+
+### 蓄積の保存形式
+
+UserDefaults `mindwave.personalBaseline.v1`（JSON）。
 
 ```json
 {"schema_version":1,"heart_rate_samples":[{"value":64,"measured_at":"..."}],"hrv_samples":[{"value":48.5,"measured_at":"..."}]}
 ```
 
-- 直近 14 日・最大 500 件を保持
+- 実測（Watch／HealthKit）のみ記録。Mock・身体状態（運動直後・カフェイン等）を申告中の心拍は記録しない
+- 心拍は5分に1件へ間引く。直近14日・各最大500件
 - 個人値とみなす最小件数: 心拍 30 件以上かつ 3 日以上／HRV 5 件以上
-- 不足時は既存の参照値（心拍 65 bpm／HRV 45 ms）を使ってスコアを算出するが、`baseline_status = provisional` を付け、画面・JSON で個人値と区別する
+
+### 有効サンプルの鮮度（`Analysis/ActiveSampleSelector.swift`）
+
+| データ | 「現在値」とみなす上限 | 超えた場合 |
+|---|---|---|
+| Watch 心拍 | 15 秒 | HealthKit へフォールバック |
+| HealthKit 心拍 | 30 分 | 未計測として扱う |
+| HRV（HealthKit discreteSample） | 6 時間 | スコアに使わず `hrv_status = stale` |
+
+心拍・HRV がどちらも鮮度切れの場合は有効サンプルなし（グラフィックは neutral）。
 
 ---
 

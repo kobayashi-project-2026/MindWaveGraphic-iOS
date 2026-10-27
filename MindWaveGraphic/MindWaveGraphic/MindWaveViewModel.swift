@@ -157,6 +157,8 @@ final class MindWaveViewModel: ObservableObject {
     @Published var graphicInput: GraphicInput = .neutral
     /// 最新の解析結果（診断用）
     @Published var lastAnalysisResult: MindAnalysisResult? = nil
+    /// スコア算出に使っている個人ベースライン（provisional = 参照値で、個人の平常値ではない）
+    @Published private(set) var baseline: BaselineSnapshot = .reference
 
     // MARK: - データソース仲裁（診断用）
 
@@ -188,6 +190,31 @@ final class MindWaveViewModel: ObservableObject {
     var isWatchSampleFresh: Bool {
         guard let age = watchSampleAge else { return false }
         return age <= Self.watchLiveExpirySeconds
+    }
+
+    // MARK: - Computed: 分析結果の外部出力・ガイド記録用
+
+    /// 最新の分析結果を JSON 契約（AnalysisResultDTO）で返す。未計測なら nil。
+    var latestAnalysisContract: AnalysisResultDTO? {
+        lastAnalysisResult.map { AnalysisResultDTO(result: $0, context: measurementContext) }
+    }
+
+    /// ガイドのスナップショットに記録する心拍。
+    /// 実測時はスコアに使った鮮度内の値だけを記録し、古い値・未計測を「現在値」として保存しない。
+    /// Mock 時は既存の記録方法を維持する（isMockData=true で区別され、分析には使われない）。
+    var snapshotHeartRate: Double? {
+        if isMockMode {
+            return latestWatchHeartRate ?? (didFetchHeartRate ? currentHeartRate : nil)
+        }
+        return lastAnalysisResult?.metadata.heartRate
+    }
+
+    /// ガイドのスナップショットに記録するHRV（実測時は鮮度内でスコアに使った値のみ）
+    var snapshotHRV: Double? {
+        if isMockMode {
+            return didFetchHRV ? currentHRV : nil
+        }
+        return lastAnalysisResult?.metadata.hrv
     }
 
     // MARK: - Computed: スコア計算（診断表示用）
@@ -225,14 +252,31 @@ final class MindWaveViewModel: ObservableObject {
     private var latestMockSample:      MindWaveSample? = nil
     /// ingest を通じて保存された最新の Watch サンプル。Mock ON 中でも更新される。
     private var latestWatchSample:     MindWaveSample? = nil
-    /// ingest を通じて保存された最新の HealthKit サンプル。現時点では期限切れ判定なし。
+    /// ingest を通じて保存された最新の HealthKit サンプル（既存の補完処理・診断用に保持）。
     private var latestHealthKitSample: MindWaveSample? = nil
+    /// HealthKit 心拍の最新実測値と計測時刻（鮮度判定に使う）
+    private var healthKitHeartRate: TimedValue? = nil
+    /// HealthKit HRV の最新実測値（discreteSample のみ）と計測時刻（鮮度判定に使う）
+    private var healthKitHRV: TimedValue? = nil
+    /// HealthKit の直近7日平均（取得できたときのみ。個人ベースラインの第一候補）
+    private var healthKitAverageHeartRate: Double? = nil
+    private var healthKitAverageHRV: Double? = nil
+
+    // MARK: - 分析・ベースライン
+
+    /// スコアの評価方式（Analysis/MindAnalyzer.swift）。差し替えは init で行う。
+    private let analyzer: MindAnalyzer
+    /// 個人ベースラインの蓄積・算出
+    private let baselineStore: PersonalBaselineStore
 
     // MARK: - Init
 
     /// ViewModelを初期化する。シナリオ0のデモデータをロードし、Watch心拍コールバックを登録する。
     /// Mock ON 状態からスタートし、最初のデモサンプルを ingest する。
-    init() {
+    init(analyzer: MindAnalyzer = StressScoreAnalyzerV1(),
+         baselineStore: PersonalBaselineStore = PersonalBaselineStore()) {
+        self.analyzer = analyzer
+        self.baselineStore = baselineStore
         loadDemoScenario(index: 0)
         subscribeToWatchHeartRate()
         MindWaveDebugLogger.log(.lifecycle, "MindWaveViewModel initialized")
@@ -252,9 +296,16 @@ final class MindWaveViewModel: ObservableObject {
         case .watchLive:
             latestWatchSample = sample
             scheduleWatchExpiry(at: sample.timestamp)
+            if let hr = sample.heartRate {
+                baselineStore.recordHeartRate(hr, at: sample.timestamp, source: .watchLive, context: measurementContext)
+            }
             MindWaveDebugLogger.log(.pipeline, "latest Watch sample stored")
         case .healthKit:
             latestHealthKitSample = sample
+            if let hr = sample.heartRate {
+                healthKitHeartRate = TimedValue(value: hr, measuredAt: sample.timestamp)
+                baselineStore.recordHeartRate(hr, at: sample.timestamp, source: .healthKit, context: measurementContext)
+            }
             MindWaveDebugLogger.log(.pipeline, "latest HealthKit sample stored")
         case .unavailable:
             break
@@ -265,31 +316,17 @@ final class MindWaveViewModel: ObservableObject {
     // MARK: - ▼ selectActiveSample: 有効サンプル選択 ▼
 
     /// 現時刻 now を基に有効なサンプルを1つ選ぶ。nil = unavailable。
-    /// Mock ON なら問答無用で latestMockSample を返す。
-    /// Watch が watchLiveExpirySeconds 以内なら Watch を返す（HRV補完あり）。
-    /// それ以外は latestHealthKitSample、なければ nil。
-    private func selectActiveSample(now: Date) -> MindWaveSample? {
-        if isMockMode {
-            return latestMockSample
-        }
-        if let watch = latestWatchSample,
-           now.timeIntervalSince(watch.timestamp) <= Self.watchLiveExpirySeconds {
-            // WatchにHRVがなく、HealthKitにHRVがあれば補完（sourceはwatchLiveを維持）
-            if watch.hrv == nil, let hkHrv = latestHealthKitSample?.hrv {
-                return MindWaveSample(
-                    heartRate: watch.heartRate,
-                    hrv: hkHrv,
-                    contextScore: nil,
-                    source: .watchLive,
-                    timestamp: watch.timestamp
-                )
-            }
-            return watch
-        }
-        if let hk = latestHealthKitSample {
-            return hk
-        }
-        return nil
+    /// 優先順位（Mock → 15秒以内のWatch(HRV補完) → 鮮度内のHealthKit）と鮮度規則は
+    /// Analysis/ActiveSampleSelector.swift に集約している（単体テスト可能にするため）。
+    private func selectActiveSample(now: Date) -> SelectedSample? {
+        ActiveSampleSelector.select(SampleSelectionInput(
+            isMockMode: isMockMode,
+            mock: latestMockSample,
+            watch: latestWatchSample,
+            healthKitHeartRate: healthKitHeartRate,
+            healthKitHRV: healthKitHRV,
+            now: now
+        ))
     }
 
     // MARK: - ▼ reevaluateActiveSource: 仲裁・GraphicInput更新 ▼
@@ -299,7 +336,7 @@ final class MindWaveViewModel: ObservableObject {
     /// サンプルあり → StressScoreCalculator で解析し、activeDataSource と graphicInput を更新する。
     /// ingest と scheduleWatchExpiry の Task からのみ呼ばれる。
     private func reevaluateActiveSource(now: Date) {
-        guard let sample = selectActiveSample(now: now) else {
+        guard let selected = selectActiveSample(now: now) else {
             activeDataSource      = .unavailable
             graphicInput          = .neutral
             lastAnalysisResult    = nil
@@ -310,45 +347,43 @@ final class MindWaveViewModel: ObservableObject {
             return
         }
 
+        let sample = selected.sample
         if let hr  = sample.heartRate { currentHeartRate = hr }
         if let hrv = sample.hrv       { currentHRV       = hrv }
 
-        let rawScore: Double
-        if let ctx = sample.contextScore {
-            // Mock: contextScore を直接使用（デモ値として明示）
-            rawScore = ctx
-        } else {
-            // 非Mock: sample.hrv が nil の場合は実測HRVなし。
-            // avgHRV=0 を渡すと StressScoreCalculator の guard averageHRV > 0 が失敗し
-            // stressScore=50（中立）が返る。架空の currentHRV を使用しない。
-            rawScore = StressScoreCalculator.calculate(
-                currentHeartRate: currentHeartRate,
-                averageHeartRate: averageHeartRate,
-                currentHRV:    sample.hrv ?? 0.0,
-                averageHRV:    sample.hrv != nil ? averageHRV : 0.0,
-                context:       measurementContext
-            ).stressScore
+        // 個人ベースライン（HealthKit 7日平均 → アプリ蓄積 → 参照値 の順）。Mock では使わない。
+        baseline = baselineStore.snapshot(now: now,
+                                          healthKitAverageHeartRate: healthKitAverageHeartRate,
+                                          healthKitAverageHRV: healthKitAverageHRV)
+        if sample.source != .mock {
+            averageHeartRate = baseline.heartRate
+            averageHRV       = baseline.hrv
         }
-        let tensionScore = min(100, max(0, rawScore))
-        let confidence   = min(1,   max(0, computeConfidence(sample: sample)))
+
+        // スコア算出は Analyzer に委譲する（現行: StressScoreAnalyzerV1 = StressScoreCalculator）
+        let analysis = analyzer.analyze(AnalyzerInput(
+            selected: selected,
+            baseline: baseline,
+            context: measurementContext,
+            mockConfidence: mockConfidence
+        ))
+        let tensionScore = analysis.tensionScore
+        let confidence   = analysis.confidence
+        let state        = analysis.state
         MindWaveDebugLogger.log(.pipeline,
             "rebuild trigger=\(lastGraphicUpdateTrigger) " +
             "hr=\(sample.heartRate.map { String(format: "%.0f", $0) } ?? "nil") " +
             "hrv=\(sample.hrv.map { String(format: "%.0f", $0) } ?? "nil") " +
+            "hrvStatus=\(selected.hrvStatus.rawValue) " +
+            "baseline=\(analysis.metadata.baselineStatus.rawValue) " +
+            "analyzer=\(analysis.metadata.analyzerID) " +
             "score=\(String(format: "%.1f", tensionScore))")
-        let state        = MindState.from(score: tensionScore)
 
         #if DEBUG
         assert(tensionScore >= 0 && tensionScore <= 100)
         assert(confidence >= 0 && confidence <= 1)
         #endif
 
-        let analysis = MindAnalysisResult(
-            tensionScore: tensionScore,
-            confidence: confidence,
-            state: state,
-            timestamp: sample.timestamp
-        )
         let previousSource    = activeDataSource
         lastAnalysisResult    = analysis
         graphicInput          = GraphicInput(
@@ -601,6 +636,11 @@ final class MindWaveViewModel: ObservableObject {
             source: .healthKit,
             timestamp: result.sampleDate ?? Date()
         )
+
+        // 鮮度判定・個人ベースライン用に計測時刻付きで保持する
+        let hrvMeasuredAt = result.sampleEndDate ?? result.sampleDate ?? Date()
+        healthKitHRV = TimedValue(value: newValue, measuredAt: hrvMeasuredAt)
+        baselineStore.recordHRV(newValue, at: hrvMeasuredAt)
 
         // 経路別採用カウンター（集計フォールバックは含まない）
         switch source {
@@ -914,6 +954,10 @@ final class MindWaveViewModel: ObservableObject {
             hrvInitialQueryStatus = "0件"
             MindWaveDebugLogger.log(.healthKit, "[HRV] fetch result: no value")
         }
+
+        // ── 個人ベースライン候補（HealthKit 直近7日平均）を保持 ─────────
+        if let avg = avgHR, avg > 0 { healthKitAverageHeartRate = avg }
+        if let avg = avgHRV, avg > 0 { healthKitAverageHRV = avg }
 
         // ── HealthKit値をingestパイプラインへ ─────────────────────
         // HR+HRV合算サンプルをingestする。HR取得失敗時はHRV単体更新のみ（上で実施済み）。

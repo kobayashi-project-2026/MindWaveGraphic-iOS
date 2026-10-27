@@ -86,7 +86,8 @@ struct HistoryView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         pageHeader
                             .padding(.top, 16)
-                        AITrendPanel(records: historyStore.records)
+                        // AI学習ログは実測の記録のみで分析する（Mock を含む記録は除外）
+                        AITrendPanel(records: historyStore.realMeasurementRecords)
                         if historyStore.records.isEmpty {
                             emptyState
                         } else {

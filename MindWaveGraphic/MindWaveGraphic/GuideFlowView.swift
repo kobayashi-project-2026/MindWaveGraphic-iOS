@@ -1434,7 +1434,7 @@ struct GuideFlowView: View {
                         afterState:        nil,
                         selfReportBefore:  selfReportBefore,
                         selfReportAfter:   nil,
-                        baselineHeartRate: nil,
+                        baselineHeartRate: viewModel.baseline.heartRateStatus == .personal ? viewModel.baseline.heartRate : nil,
                         source:            "local"
                     )
                     latestAIInsight = LocalMindWaveAIEngine.generate(context: ctx)
@@ -1474,11 +1474,12 @@ struct GuideFlowView: View {
             score:               viewModel.graphicInput.score,
             confidence:          viewModel.graphicInput.confidence,
             state:               viewModel.graphicInput.state,
-            heartRate:           viewModel.latestWatchHeartRate ?? (viewModel.didFetchHeartRate ? viewModel.currentHeartRate : nil),
-            hrv:                 viewModel.didFetchHRV ? viewModel.currentHRV : nil,
+            heartRate:           viewModel.snapshotHeartRate,
+            hrv:                 viewModel.snapshotHRV,
             isMockData:          viewModel.isMockMode,
             heartRateSampleDate: viewModel.latestHeartRateSampleDate,
-            hrvSampleDate:       viewModel.latestHRVSampleDate
+            hrvSampleDate:       viewModel.latestHRVSampleDate,
+            dataSource:          viewModel.activeDataSource
         )
     }
 
@@ -1500,11 +1501,12 @@ struct GuideFlowView: View {
             score:               viewModel.graphicInput.score,
             confidence:          viewModel.graphicInput.confidence,
             state:               viewModel.graphicInput.state,
-            heartRate:           viewModel.latestWatchHeartRate ?? (viewModel.didFetchHeartRate ? viewModel.currentHeartRate : nil),
-            hrv:                 viewModel.didFetchHRV ? viewModel.currentHRV : nil,
+            heartRate:           viewModel.snapshotHeartRate,
+            hrv:                 viewModel.snapshotHRV,
             isMockData:          viewModel.isMockMode,
             heartRateSampleDate: viewModel.latestHeartRateSampleDate,
-            hrvSampleDate:       viewModel.latestHRVSampleDate
+            hrvSampleDate:       viewModel.latestHRVSampleDate,
+            dataSource:          viewModel.activeDataSource
         )
         afterSnapshot = snap
         // afterSnapshot が確定した後にAIインサイトを再生成してbeforeとの変化を反映
@@ -1521,7 +1523,7 @@ struct GuideFlowView: View {
             afterState:        snap.state,
             selfReportBefore:  selfReportBefore,
             selfReportAfter:   nil,
-            baselineHeartRate: nil,
+            baselineHeartRate: viewModel.baseline.heartRateStatus == .personal ? viewModel.baseline.heartRate : nil,
             source:            "local"
         )
         latestAIInsight = LocalMindWaveAIEngine.generate(context: ctx)
@@ -1566,7 +1568,7 @@ struct GuideFlowView: View {
             afterState:        afterSnapshot?.state,
             selfReportBefore:  selfReportBefore,
             selfReportAfter:   selfReportAfter,
-            baselineHeartRate: nil,
+            baselineHeartRate: viewModel.baseline.heartRateStatus == .personal ? viewModel.baseline.heartRate : nil,
             source:            "local"
         )
         latestAIInsight = LocalMindWaveAIEngine.generate(context: ctx)

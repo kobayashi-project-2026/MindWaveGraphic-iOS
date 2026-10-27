@@ -52,6 +52,27 @@ struct DebugDiagnosticsView: View {
                                  viewModel.graphicInput.state.displayName)
                     }
 
+                    // ── 分析メタデータ・個人ベースライン ──────────────────
+                    debugBlock {
+                        let meta = viewModel.lastAnalysisResult?.metadata
+                        debugRow("Analyzer", meta.map { "\($0.analyzerID) v\($0.analyzerVersion)" } ?? "---")
+                        debugRow("HRV状態", meta?.hrvStatus.rawValue ?? "---")
+                        debugRow("ベースライン状態", meta?.baselineStatus.rawValue ?? "---")
+                        debugRow("平常心拍(出所)",
+                                 String(format: "%.0f bpm (%@)", viewModel.baseline.heartRate, viewModel.baseline.heartRateOrigin.rawValue))
+                        debugRow("平常HRV(出所)",
+                                 String(format: "%.0f ms (%@)", viewModel.baseline.hrv, viewModel.baseline.hrvOrigin.rawValue))
+                        debugRow("蓄積サンプル", "HR \(viewModel.baseline.collectedHeartRateCount) / HRV \(viewModel.baseline.collectedHRVCount)")
+                        if let dto = viewModel.latestAnalysisContract,
+                           let data = try? MindWaveContract.makeEncoder().encode(dto),
+                           let json = String(data: data, encoding: .utf8) {
+                            Text(json)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundStyle(Color.white.opacity(0.6))
+                                .textSelection(.enabled)
+                        }
+                    }
+
                     // ── Watch ライブ心拍 ────────────────────────────────
                     debugBlock {
                         debugRow("Watch心拍", viewModel.latestWatchHeartRate != nil
