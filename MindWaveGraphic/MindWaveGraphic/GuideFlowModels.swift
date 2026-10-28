@@ -180,7 +180,7 @@ struct GuideSessionRecord: Identifiable, Equatable {
 /// 保存形式（docs/DATA_CONTRACTS.md「履歴文書」）:
 /// - 正本: "mindwave.guideHistory.v3.json"（GuideHistoryDocument の JSON。schema_version 付き）
 /// - 互換: "mindwave.guideHistory.v2"（旧形式の辞書配列）。他メンバーのブランチのビルドでも
-///         履歴が読めるよう、移行期間中は両方へ書き込む。読み込みは v3 を優先する。
+///         履歴が読めるよう、移行期間中は両方へ書き込む。読み込みは v3 を優先し、v2 にしかない記録は取り込む。
 final class GuideHistoryStore: ObservableObject {
     @Published private(set) var records: [GuideSessionRecord] = []
 
@@ -262,9 +262,20 @@ final class GuideHistoryStore: ObservableObject {
             do {
                 let document = try MindWaveContract.makeDecoder().decode(GuideHistoryDocument.self, from: data)
                 let restored = document.records.compactMap { $0.domainRecord }
-                records = restored
                 let unknown = document.records.count - restored.count
                 MindWaveDebugLogger.log(.contract, "history loaded format=v3.json count=\(restored.count) skippedCorrupt=\(document.skippedRecordCount) skippedUnknownValue=\(unknown)")
+                // 移行期間中は他メンバーのブランチのビルドが旧形式(v2)だけに記録を追加することがある。
+                // v3 だけを読むと、その記録が読まれないまま次の保存で v2 ごと上書きされて消えるため、
+                // v2 にしかない記録（id で判定）を取り込む。同じ id は v3（項目が多い）を優先する。
+                let known = Set(restored.map(\.id))
+                let legacyOnly = (loadLegacy() ?? []).filter { !known.contains($0.id) }
+                if legacyOnly.isEmpty {
+                    records = restored
+                } else {
+                    records = (restored + legacyOnly).sorted { $0.startedAt > $1.startedAt }
+                    MindWaveDebugLogger.log(.contract, "history merged legacy-only records count=\(legacyOnly.count)")
+                    saveJSON()
+                }
                 return
             } catch {
                 // JSON が読めない場合も旧形式から復元を試みる（データは削除しない）

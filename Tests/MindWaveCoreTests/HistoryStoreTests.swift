@@ -57,14 +57,25 @@ enum HistoryStoreTests {
             T.expectEqual(store.records.first?.id, id)
         }
 
-        T.test("v3 が v2 より優先される") {
+        T.test("同じ id は v3 を優先し、v2 にしかない記録（他ブランチのビルドで追加）も取り込んで消さない") {
             let d = T.freshDefaults("priority")
             let store = GuideHistoryStore(defaults: d)
             let r = ContractTests.makeRecord()
             store.add(r)
-            // 他ブランチの旧ビルドが v2 だけを書き換えた想定
-            d.set([legacyDict(id: UUID(), mock: false)], forKey: "mindwave.guideHistory.v2")
-            T.expectEqual(GuideHistoryStore(defaults: d).records.first?.id, r.id)
+            // 他ブランチの旧ビルドが v2 だけに記録を1件追加した想定（v2 = 既存 r ＋ 新規）
+            var legacy = d.array(forKey: "mindwave.guideHistory.v2") as? [[String: Any]] ?? []
+            let otherBranchID = UUID()
+            legacy.insert(legacyDict(id: otherBranchID, mock: false), at: 0)
+            d.set(legacy, forKey: "mindwave.guideHistory.v2")
+
+            let reloaded = GuideHistoryStore(defaults: d)
+            T.expectEqual(reloaded.records.count, 2)
+            T.expectEqual(reloaded.records.first(where: { $0.id == r.id })?.before.dataSource, .watchLive, "v3 の項目を保持")
+            T.expect(reloaded.records.contains { $0.id == otherBranchID }, "v2 のみの記録を取り込む")
+            // 次の保存後も両形式に2件とも残る
+            reloaded.add(ContractTests.makeRecord())
+            T.expectEqual((d.array(forKey: "mindwave.guideHistory.v2") as? [[String: Any]])?.count, 3)
+            T.expectEqual(GuideHistoryStore(defaults: d).records.count, 3)
         }
 
         T.test("感想メモの更新は他フィールドを変えない") {
