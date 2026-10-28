@@ -2,43 +2,38 @@
 // Mokorin
 //
 // もこりんの表示コンポーネント。
-// リポジトリにもこりんの画像アセットがない（2026-10-28 時点）ため、
-// Assets.xcassets に「Mokorin」という名前の画像を追加すると自動でその画像を表示し、
-// ない場合は差し替え前提の簡易イラスト（SwiftUI 図形）を表示する。
-// キャラクターデザインの担当者が画像を追加するときは、このファイルの変更は不要。
+// 友達が作成したもこりん（HTML/CSS/JavaScript、third_party/mokorin_friend_source）を
+// 統合先のコピー（Mokorin/Web/）から WKWebView で表示し、表情・動作を pose で制御する（MokorinWebView）。
+// 同梱ファイルが見つからない場合だけ、差し替え前提の簡易イラストを表示する（キャラクターを作り替えるものではない）。
 
 import SwiftUI
-import UIKit
 
 struct MokorinAvatarView: View {
     var size: CGFloat = 64
-    /// 返答作成中は軽く揺らす
-    var isThinking: Bool = false
-
-    /// 正式な画像アセット名
-    static let assetName = "Mokorin"
-    static var hasAsset: Bool { UIImage(named: assetName) != nil }
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var bob = false
+    var pose: MokorinPose = MokorinPose()
 
     var body: some View {
         Group {
-            if Self.hasAsset {
-                Image(Self.assetName)
-                    .resizable()
-                    .scaledToFit()
+            if MokorinWebView.resourceURL != nil {
+                MokorinWebView(pose: pose)
             } else {
                 MokorinPlaceholderShape()
             }
         }
         .frame(width: size, height: size)
-        .offset(y: bob ? -3 : 0)
-        .animation(isThinking && !reduceMotion ? .easeInOut(duration: 0.5).repeatForever(autoreverses: true) : .default, value: bob)
-        .onChange(of: isThinking) { _, thinking in bob = thinking && !reduceMotion }
         .accessibilityElement()
         .accessibilityLabel("もこりん")
+        .accessibilityValue(Self.emotionDescription(pose.emotion))
         .accessibilityIdentifier("mokorin_avatar")
+    }
+
+    static func emotionDescription(_ e: MokorinEmotion) -> String {
+        switch e {
+        case .happy:  return "うれしそう"
+        case .calm:   return "おだやか"
+        case .sad:    return "かなしそう"
+        case .sleepy: return "ねむそう"
+        }
     }
 }
 
@@ -81,5 +76,5 @@ private struct MokorinPlaceholderShape: View {
 }
 
 #Preview {
-    MokorinAvatarView(size: 96).padding().background(Color.black)
+    MokorinAvatarView(size: 120, pose: MokorinPose(emotion: .happy, action: .wave, actionID: 1)).padding().background(Color.black)
 }

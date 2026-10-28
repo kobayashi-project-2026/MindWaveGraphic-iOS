@@ -58,6 +58,8 @@ enum MokorinTests {
         await remoteFlow()
         T.suite("Mokorin / 契約")
         contract()
+        T.suite("Mokorin / 友達のキャラクター（WKWebView）の制御")
+        await webCharacter()
         await e2e()
     }
 
@@ -285,6 +287,68 @@ enum MokorinTests {
         }
     }
 
+    // MARK: - 友達のキャラクター（WKWebView）の制御
+
+    static func webCharacter() async {
+        T.test("表情・動作は原本と同じ許可値（happy/calm/sad/sleepy、wave/jump/nod）") {
+            T.expectEqual(MokorinEmotion.allCases.map(\.rawValue), ["happy", "calm", "sad", "sleepy"])
+            T.expectEqual(MokorinAction.allCases.map(\.rawValue), ["wave", "jump", "nod"])
+        }
+        T.test("JavaScript 呼び出し: enum の値だけを使い、セリフは JSON 文字列にして渡す（コードとして解釈されない）") {
+            T.expectEqual(MokorinWebScript.setEmotion(.sleepy), "setEmotion('sleepy')")
+            T.expectEqual(MokorinWebScript.setAction(.jump), "setAction('jump')")
+            let tricky = "こんにちは'); alert(1); ('\n\"<b>"
+            let script = MokorinWebScript.setDialogue(tricky)
+            T.expect(script.hasPrefix("setDialogue(\"") && script.hasSuffix("\")"), script)
+            // JSON として読み戻すと元の文字列になる
+            let inner = String(script.dropFirst("setDialogue(".count).dropLast())
+            let decoded = try JSONSerialization.jsonObject(with: Data("[\(inner)]".utf8)) as? [String]
+            T.expectEqual(decoded?.first, tricky)
+        }
+        T.test("pose: 動作を指定するたびに actionID が増え、同じ動作も再生し直せる") {
+            let p0 = MokorinPose()
+            let p1 = p0.with(.happy, .nod)
+            let p2 = p1.with(.happy, .nod)
+            T.expectEqual(p1.actionID, 1); T.expectEqual(p2.actionID, 2)
+            T.expectEqual(p2.with(.sad, nil).actionID, 2, "表情だけの変更では動作を再生しない")
+        }
+        T.test("同梱リソース: mokorin.html が見つからなくてもクラッシュせず代替表示（テスト実行ファイルにはリソースがない）") {
+            T.expect(MokorinWebView.resourceURL == nil || MokorinWebView.resourceURL?.lastPathComponent == "mokorin.html", "resource lookup")
+        }
+        await T.test("会話の表情: 最初は happy + wave、端末内の定型文は規則で決める（睡眠不足は sleepy、確認は happy）") {
+            let vm = localVM()
+            T.expectEqual(vm.pose.emotion, .happy); T.expectEqual(vm.pose.action, .wave)
+            await vm.submit("面接があります")
+            T.expectEqual(vm.pose.emotion, .calm); T.expectEqual(vm.pose.action, .nod)
+            await vm.submit("寝不足です")
+            T.expectEqual(vm.pose.emotion, .sleepy)
+            let vm2 = localVM()
+            vm2.selectScene(.interview); vm2.toggleCondition(.stairs); vm2.confirmConditions()
+            T.expectEqual(vm2.pose.emotion, .happy)
+        }
+        await T.test("外部AIの表情・動作を使い、返答文はそのまま表示（固定セリフで上書きしない）。不正な値は calm / nod") {
+            let client = FakeContextClient { req in
+                ContextAssistResponseDTO(schemaVersion: 1, requestId: req.requestId, conversationId: req.conversationId, provider: "openai",
+                                         model: "m", generatedAt: Date(),
+                                         result: ContextAssistResultDTO(reply: "面接前なんだね！応援してるよ。今は移動してきたところ？", sceneCandidate: "interview",
+                                                                        conditionCandidates: [], needsClarification: false, clarificationQuestion: nil,
+                                                                        emotion: "happy", action: "jump"), usage: nil)
+            }
+            let vm = remoteVM(client: client)
+            await vm.submit("面接があります")
+            T.expectEqual(vm.pose.emotion, .happy); T.expectEqual(vm.pose.action, .jump)
+            T.expectEqual(vm.messages.last?.text, "面接前なんだね！応援してるよ。今は移動してきたところ？")
+            let bad = ContextAssistResultDTO(reply: "x", sceneCandidate: nil, conditionCandidates: [], needsClarification: true,
+                                             clarificationQuestion: nil, emotion: "angry", action: "dance")
+            T.expect(bad.typedExpression == (.calm, .nod), "fallback")
+        }
+        T.test("古いサーバー（emotion / action なし）の応答も読める") {
+            let json = #"{"reply":"x","scene_candidate":null,"condition_candidates":[],"needs_clarification":true,"clarification_question":null}"#
+            let r = try MindWaveContract.makeDecoder().decode(ContextAssistResultDTO.self, from: Data(json.utf8))
+            T.expect(r.emotion == nil && r.typedExpression == (.calm, .nod), "defaults")
+        }
+    }
+
     // MARK: - E2E（ローカルサーバー＋OpenAI スタブ）
 
     static func e2e() async {
@@ -307,6 +371,7 @@ enum MokorinTests {
             T.expectEqual(vm.step, .review)
             T.expect(vm.messages.contains { if case .stub = $0.origin { return true }; return false }, "stub labelled")
             T.expect(vm.notice == nil, "no fallback: \(vm.notice ?? "")")
+            T.expectEqual(vm.pose.action, .nod, "サーバーの action を反映")
         }
     }
 }

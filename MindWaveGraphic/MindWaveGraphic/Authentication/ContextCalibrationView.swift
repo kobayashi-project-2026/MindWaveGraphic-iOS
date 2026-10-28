@@ -326,7 +326,8 @@ struct ContextCalibrationView: View {
     private var mokorinSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .center, spacing: 8) {
-                MokorinAvatarView(size: 56, isThinking: mokorin.isSending)
+                // 友達が作成したもこりん（WKWebView）。表情・動作は会話に合わせて MokorinContextViewModel が決める
+                MokorinAvatarView(size: 84, pose: mokorin.pose)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("もこりん")
                         .font(.system(size: 13, weight: .medium))

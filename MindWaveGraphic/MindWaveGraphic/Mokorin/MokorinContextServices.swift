@@ -124,3 +124,19 @@ nonisolated enum MokorinScript {
         return phrases.joined(separator: "、")
     }
 }
+
+// MARK: - もこりんの表情・動作（外部AIを使わないとき）
+
+/// 定型文で応答するときの表情・動作の決め方（AI の判断ではない、固定の規則）。
+/// 外部AIの応答には emotion / action が含まれるので、そちらを優先する。
+nonisolated enum MokorinExpressionRules {
+    static let greeting: (MokorinEmotion, MokorinAction) = (.happy, .wave)
+
+    static func forReply(step: MokorinContextViewModel.Step, userText: String?, conditions: Set<BodyCondition>) -> (MokorinEmotion, MokorinAction) {
+        let text = userText ?? ""
+        if ["つらい", "悲しい", "しんどい", "落ち込"].contains(where: { text.contains($0) }) { return (.sad, .nod) }
+        if conditions.contains(.sleepLack) || ["眠い", "ねむい", "寝不足"].contains(where: { text.contains($0) }) { return (.sleepy, .nod) }
+        if step == .review { return (.happy, .nod) }
+        return (.calm, .nod)
+    }
+}

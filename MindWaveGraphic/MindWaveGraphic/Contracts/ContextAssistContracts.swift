@@ -55,13 +55,22 @@ nonisolated struct ContextAssistResultDTO: Codable, Equatable, Sendable {
     var conditionCandidates: [String]
     var needsClarification: Bool
     var clarificationQuestion: String?
+    /// もこりんの表情（happy / calm / sad / sleepy）。古いサーバーでは無い。不正な値は無視して calm
+    var emotion: String? = nil
+    /// もこりんの動作（wave / jump / nod）。不正な値は無視して nod
+    var action: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case reply
+        case reply, emotion, action
         case sceneCandidate        = "scene_candidate"
         case conditionCandidates   = "condition_candidates"
         case needsClarification    = "needs_clarification"
         case clarificationQuestion = "clarification_question"
+    }
+
+    /// 表情・動作は見た目だけのため、不正・欠落は既定値にする（候補の採否には影響させない。原本 app.py と同じ既定値）
+    var typedExpression: (emotion: MokorinEmotion, action: MokorinAction) {
+        (emotion.flatMap(MokorinEmotion.init(rawValue:)) ?? .calm, action.flatMap(MokorinAction.init(rawValue:)) ?? .nod)
     }
 
     /// 既存の enum に変換した候補。未知の値があれば throw（採用しない）

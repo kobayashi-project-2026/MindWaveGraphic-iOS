@@ -27,7 +27,10 @@ struct AppRootView: View {
     var body: some View {
         Group {
             #if DEBUG
-            if ProcessInfo.processInfo.environment["SKIP_ONBOARDING"] == "1" {
+            if ProcessInfo.processInfo.environment["MW_MOKORIN_GALLERY"] == "1" {
+                // シミュレーター検証用: もこりんの表情・動作の一覧
+                MokorinGalleryView()
+            } else if ProcessInfo.processInfo.environment["SKIP_ONBOARDING"] == "1" {
                 // PureLogoSplashViewを生成しないことでタイマーが発火せず authStatus が上書きされない
                 MainTabView()
                     .environmentObject(flowState)

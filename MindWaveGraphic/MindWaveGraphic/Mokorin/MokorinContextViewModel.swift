@@ -69,6 +69,8 @@ final class MokorinContextViewModel: ObservableObject {
     @Published private(set) var notice: String? = nil
     @Published private(set) var isTextConsented: Bool
     @Published private(set) var conversationId = UUID()
+    /// もこりんの表情・動作（MokorinWebView へ渡す）。外部AIの応答があればその値、なければ固定の規則
+    @Published private(set) var pose = MokorinPose()
 
     private let initialContext: MeasurementContext
     private let isInAppEdit: Bool
@@ -125,6 +127,7 @@ final class MokorinContextViewModel: ObservableObject {
         if step == .scene {
             appendUser("場面は「\(scene.displayName)」です")
             advance(fixedReply: true)
+            applyRuleExpression(userText: nil)
         } else if !wasAnswered || step == .review {
             refreshSummaryIfReviewing()
         }
@@ -154,6 +157,7 @@ final class MokorinContextViewModel: ObservableObject {
         let names = BodyCondition.allCases.filter { selectedConditions.contains($0) }.map(\.displayName).joined(separator: "・")
         appendUser("からだの状態は「\(names)」です")
         advance(fixedReply: true)
+        applyRuleExpression(userText: nil)
     }
 
     // MARK: - 操作（文章）
@@ -202,6 +206,13 @@ final class MokorinContextViewModel: ObservableObject {
 
     private func start() {
         appendMokorin(isInAppEdit ? MokorinScript.greetingForEdit(current: initialContext) : MokorinScript.greeting, origin: .fixed)
+        pose = pose.with(MokorinExpressionRules.greeting.0, MokorinExpressionRules.greeting.1)
+    }
+
+    /// 定型文で応答したときの表情・動作
+    private func applyRuleExpression(userText: String?) {
+        let e = MokorinExpressionRules.forReply(step: step, userText: userText, conditions: selectedConditions)
+        pose = pose.with(e.0, e.1)
     }
 
     private func perform(_ rawText: String) async {
@@ -224,6 +235,9 @@ final class MokorinContextViewModel: ObservableObject {
                 }
                 updateStep()
                 appendMokorin(reply, origin: origin)
+                // 外部AIが選んだ表情・動作（不正な値は calm / nod）。返答文は固定文で上書きしない
+                let expression = response.result.typedExpression
+                pose = pose.with(expression.emotion, expression.action)
                 // 返答に次の質問・確認が含まれない場合は、段階に合わせた定型の質問を添える（会話が止まらないように）
                 let asksSomething = reply.contains("？") || reply.contains("?")
                 switch step {
@@ -251,6 +265,7 @@ final class MokorinContextViewModel: ObservableObject {
         let local = MokorinKeywordInterpreter.interpret(text)
         applyCandidates(scene: local.scene, conditions: local.conditions)
         advance(fixedReply: true, clarifyIfUnchanged: local.scene == nil && local.conditions.isEmpty)
+        applyRuleExpression(userText: text)
         MindWaveDebugLogger.log(.insight, "mokorin local step=\(step) scene=\(local.scene != nil) conditions=\(local.conditions.count)")
         isSending = false
     }

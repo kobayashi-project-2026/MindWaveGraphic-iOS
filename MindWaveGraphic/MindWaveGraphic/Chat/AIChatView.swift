@@ -14,6 +14,8 @@ struct AIChatView: View {
 
     @State private var isResetConfirmationPresented = false
     @FocusState private var isInputFocused: Bool
+    /// もこりんの表情・動作（固定の規則。返答の文章は変更しない）
+    @State private var mokorinPose = MokorinPose()
 
     private let bottomAnchorID = "chat_bottom_anchor"
 
@@ -22,6 +24,7 @@ struct AIChatView: View {
             ZStack {
                 MindWaveCyberBackground()
                 VStack(spacing: 0) {
+                    mokorinHeader
                     statusBanner
                     messageList
                 }
@@ -53,7 +56,37 @@ struct AIChatView: View {
             }
         }
         .preferredColorScheme(.dark)
-        .onAppear { chat.refreshConsent() }
+        .onAppear {
+            chat.refreshConsent()
+            mokorinPose = mokorinPose.with(.happy, .wave)
+        }
+        // もこりんの表情・動作: 考え中は calm、返答が届いたらうなずく、失敗は sad、リセットで手をふる
+        .onChange(of: chat.isSending) { _, sending in
+            if sending { mokorinPose = mokorinPose.with(.calm, nil) }
+        }
+        .onChange(of: chat.messages.count) { _, count in
+            guard let last = chat.messages.last else {
+                mokorinPose = mokorinPose.with(.happy, .wave)
+                return
+            }
+            if last.role == .assistant, count > 0 {
+                mokorinPose = mokorinPose.with(chat.lastFailureMessage == nil ? .calm : .sad, .nod)
+            }
+        }
+    }
+
+    // MARK: - もこりん
+
+    private var mokorinHeader: some View {
+        HStack(spacing: 10) {
+            MokorinAvatarView(size: 64, pose: mokorinPose)
+            Text(chat.isSending ? "もこりんが考え中…" : "もこりんが一緒に考えるよ")
+                .font(.system(size: 12))
+                .foregroundStyle(MindWaveCyberTheme.textSecondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
     }
 
     // MARK: - 状態の表示
