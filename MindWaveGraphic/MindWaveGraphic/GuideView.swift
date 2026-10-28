@@ -11,6 +11,8 @@ import SwiftUI
 struct GuideView: View {
     @EnvironmentObject var viewModel: MindWaveViewModel
     @EnvironmentObject var historyStore: GuideHistoryStore
+    // AI相談は共通の画面遷移管理（AppNavigationManager のモーダル）で開く
+    @EnvironmentObject var navManager: AppNavigationManager
     @Binding var selectedTab: Int
 
     @State private var selectedScene: MeasurementScene? = nil
@@ -34,6 +36,8 @@ struct GuideView: View {
                             .padding(.horizontal, 20)
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
+                    AIConsultEntryCard { navManager.navigate(to: .aiChat) }
+                        .padding(.horizontal, 20)
                     Spacer().frame(height: 8)
                 }
                 .padding(.top, 4)
@@ -684,5 +688,42 @@ private struct AISceneSuggestionView: View {
     GuideView(selectedTab: .constant(1))
         .environmentObject(MindWaveViewModel())
         .environmentObject(GuideHistoryStore())
+        .environmentObject(AppNavigationManager())
         .preferredColorScheme(.dark)
+}
+
+// MARK: - AI相談への入口
+
+/// 「整える」から AI相談（AIChatView）を開くカード
+private struct AIConsultEntryCard: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "text.bubble.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color.cyan.opacity(0.85))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("AIに相談する")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                    Text("緊張していることを文章で相談できます")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.white.opacity(0.45))
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.35))
+            }
+            .padding(14)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.cyan.opacity(0.22), lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("AIに相談する")
+        .accessibilityHint("緊張や不安について文章で相談する画面を開きます")
+        .accessibilityIdentifier("guide_ai_consult_button")
+    }
 }

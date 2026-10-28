@@ -10,6 +10,8 @@ struct AppModalDestinationView: View {
     @EnvironmentObject private var flowState: AppFlowState
     @EnvironmentObject private var navManager: AppNavigationManager
     @EnvironmentObject private var historyStore: GuideHistoryStore
+    @EnvironmentObject private var viewModel: MindWaveViewModel
+    @EnvironmentObject private var chatViewModel: ChatViewModel
 
     var body: some View {
         switch modal {
@@ -21,6 +23,13 @@ struct AppModalDestinationView: View {
 
         case .settings:
             SettingsView()
+
+        case .aiChat:
+            AIChatView(chat: chatViewModel) { navManager.dismissModal() }
+                .onAppear { connectChatContext() }
+                #if DEBUG
+                .task { await runChatDebugHooks() }
+                #endif
 
         case .latestRecordConfirmation:
             if let record = historyStore.records.first {
@@ -65,6 +74,40 @@ struct AppModalDestinationView: View {
             }
         }
     }
+}
+
+extension AppModalDestinationView {
+
+    /// AI相談に「選んだ場面」と「計測の要約（送信可否は ChatBiometricPolicy が判定）」を接続する
+    private func connectChatContext() {
+        let flowState = self.flowState
+        let viewModel = self.viewModel
+        chatViewModel.configureContext(
+            scene: { flowState.measurementContext.scene },
+            measurement: {
+                // 同意 ＋ 本物の利用者認証が揃うまで nil（現在は認証がモックのため常に nil）
+                ChatBiometricPolicy.measurementContext(from: viewModel.lastAnalysisResult, now: Date(),
+                                                       consented: InsightConsentStore().isConsented)
+            },
+            biometricConsent: { InsightConsentStore().isConsented }
+        )
+    }
+
+    #if DEBUG
+    /// シミュレーター検証用（DEBUG のみ）:
+    /// - MW_CHAT_TEST_CONSENT=1 / 0 : 外部AIへの文章送信に同意した／していない状態にする
+    /// - MW_CHAT_AUTOPLAY="文1||文2||…" : 画面表示後に順番に送信し、各返答を待つ（実際の送信経路・画面をそのまま使う）
+    private func runChatDebugHooks() async {
+        let env = ProcessInfo.processInfo.environment
+        if env["MW_CHAT_TEST_CONSENT"] == "1" { chatViewModel.setTextConsent(true) }
+        if env["MW_CHAT_TEST_CONSENT"] == "0" { chatViewModel.setTextConsent(false) }
+        guard let script = env["MW_CHAT_AUTOPLAY"], chatViewModel.messages.isEmpty else { return }
+        for line in script.components(separatedBy: "||") where !line.isEmpty {
+            try? await Task.sleep(for: .seconds(1))
+            await chatViewModel.submit(line)
+        }
+    }
+    #endif
 }
 
 /// 記録がまだ無いときの案内。架空の記録は表示せず、ガイド開始へ誘導する。

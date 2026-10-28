@@ -18,6 +18,7 @@ struct GlobalMenuBarModifier: ViewModifier {
                         menuButton(.dialogue, label: "対話（状況確認）")
                         menuButton(.tensionGraphic, label: "緊張グラフィック")
                         menuButton(.improvement, label: "改善（ワーク）")
+                        menuButton(.aiChat, label: "AI相談")
                     }
 
                     Section("直近のセッション") {

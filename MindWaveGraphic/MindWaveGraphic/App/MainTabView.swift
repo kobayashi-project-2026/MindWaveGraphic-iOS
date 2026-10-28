@@ -20,6 +20,8 @@ struct MainTabView: View {
     @EnvironmentObject private var flowState: AppFlowState
     // メインアプリ内の画面遷移の唯一の情報源（タブ・モーダル）
     @EnvironmentObject private var navManager: AppNavigationManager
+    // AI相談の会話（ログアウト時に消去する）
+    @EnvironmentObject private var chatViewModel: ChatViewModel
 
     /// 既存Viewが参照する Int 型のタブ番号（navManager から導出。独自の状態は持たない）
     private var selectedTab: Int { navManager.selectedTab.rawValue }
@@ -128,6 +130,7 @@ struct MainTabView: View {
                 .environmentObject(historyStore)
                 .environmentObject(flowState)
                 .environmentObject(navManager)
+                .environmentObject(chatViewModel)
         }
         // タイトルへ戻る＝ログアウト。計測中の表示がリセットされるため確認する
         .confirmationDialog(
@@ -150,6 +153,8 @@ struct MainTabView: View {
             viewModel.stopLiveMonitoring()
         }
         navManager.resetForSignOut()
+        // 次に使う人へ会話が残らないよう、AI相談の会話を消去する
+        chatViewModel.reset()
         flowState.returnToSplash()
         MindWaveDebugLogger.log(.navigation, "returned to title (sign-out)")
     }
@@ -254,4 +259,5 @@ struct MainTabView: View {
         .environmentObject(AppNavigationManager())
         .environmentObject(MindWaveViewModel())
         .environmentObject(GuideHistoryStore())
+        .environmentObject(ChatViewModel(configurationProvider: { nil }))
 }

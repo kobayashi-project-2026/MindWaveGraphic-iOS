@@ -23,6 +23,16 @@ struct SettingsView: View {
     /// 外部AIへの要約送信の同意（InsightConsentStore と同じキー・値。0 = 未同意）
     @AppStorage(InsightConsentStore.defaultsKey) private var externalAIConsentVersion = 0
 
+    /// AI相談で入力した文章を外部AIへ送ることへの同意（ChatTextConsentStore と同じキー・値。0 = 未同意）
+    @AppStorage(ChatTextConsentStore.defaultsKey) private var chatTextConsentVersion = 0
+
+    private var chatTextConsentBinding: Binding<Bool> {
+        Binding(
+            get: { chatTextConsentVersion == ChatTextConsentStore.currentConsentVersion },
+            set: { ChatTextConsentStore().setConsented($0); chatTextConsentVersion = $0 ? ChatTextConsentStore.currentConsentVersion : 0 }
+        )
+    }
+
     private var externalAIConsentBinding: Binding<Bool> {
         Binding(
             get: { externalAIConsentVersion == InsightConsentStore.currentConsentVersion },
@@ -147,6 +157,15 @@ struct SettingsView: View {
                                     binding: externalAIConsentBinding
                                 )
                                 .disabled(!InsightService.shared.isRemoteConfigured)
+
+                                Divider().background(MindWaveCyberTheme.borderColor).padding(.vertical, 2)
+
+                                // AI相談（入力した文章の送信）への同意。計測データは送らない。いつでも取り消せる
+                                cyberToggleRow(
+                                    title: "AI相談の文章を外部AIへ送信",
+                                    subtitle: "AI相談で入力した文章と直近の会話・選んだ場面だけを送信します。計測データは送信しません。OFF にすると端末内の定型アドバイスで応答します。",
+                                    binding: chatTextConsentBinding
+                                )
 
                                 Divider().background(MindWaveCyberTheme.borderColor).padding(.vertical, 2)
 

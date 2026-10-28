@@ -12,6 +12,7 @@ import Combine
 /// - feedback       : 直近ガイドセッションへの感想メモ（FeedbackRecordView）
 /// - pastLogs       : 履歴タブ（HistoryView）
 /// - settings       : 設定（SettingsView）をモーダル表示
+/// - aiChat         : AI相談（AIChatView）をモーダル表示（2026-10-28 追加。「整える」から入る）
 enum AppScreen: String, CaseIterable, Identifiable {
     case title = "タイトル"
     case dialogue = "対話（状況確認）"
@@ -21,6 +22,7 @@ enum AppScreen: String, CaseIterable, Identifiable {
     case feedback = "フィードバック"
     case pastLogs = "過去ログ確認"
     case settings = "設定"
+    case aiChat = "AI相談"
 
     var id: String { rawValue }
 
@@ -35,6 +37,7 @@ enum AppScreen: String, CaseIterable, Identifiable {
         case .feedback: return "square.and.pencil"
         case .pastLogs: return "clock.arrow.circlepath"
         case .settings: return "gearshape.fill"
+        case .aiChat: return "text.bubble.fill"
         }
     }
 
@@ -55,6 +58,7 @@ enum AppScreen: String, CaseIterable, Identifiable {
         case .confirmation: return .latestRecordConfirmation
         case .feedback:     return .latestRecordFeedback
         case .settings:     return .settings
+        case .aiChat:       return .aiChat
         default:            return nil
         }
     }
@@ -87,6 +91,7 @@ enum AppModal: String, Identifiable {
     case settings
     case latestRecordConfirmation
     case latestRecordFeedback
+    case aiChat
 
     var id: String { rawValue }
 
@@ -96,6 +101,7 @@ enum AppModal: String, Identifiable {
         case .settings:                 return .settings
         case .latestRecordConfirmation: return .confirmation
         case .latestRecordFeedback:     return .feedback
+        case .aiChat:                   return .aiChat
         }
     }
 }

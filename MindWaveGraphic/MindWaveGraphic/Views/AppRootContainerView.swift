@@ -10,6 +10,7 @@ import SwiftUI
 /// - MindWaveViewModel : 計測（Watch受信・HealthKit監視）を認証画面の切り替えで作り直さないため
 /// - GuideHistoryStore  : 履歴ストアを1インスタンスに保つため
 /// - AppNavigationManager : メインアプリ内の画面遷移の唯一の情報源
+/// - ChatViewModel      : AI相談の会話（メモリ上のみ。ログアウトで消去）
 struct AppRootContainerView: View {
 
     // 画面遷移管理（チームが追加した仕組みを、メインアプリ内の唯一の遷移状態として使う）
@@ -21,11 +22,15 @@ struct AppRootContainerView: View {
     // ガイドセッション履歴。ガイド・履歴・共通メニュー（確認/フィードバック）で共有する
     @StateObject private var historyStore = GuideHistoryStore()
 
+    // AI相談の会話（メモリ上のみ）。画面を閉じても起動中は保持し、ログアウト時に消去する
+    @StateObject private var chatViewModel = ChatViewModel()
+
     var body: some View {
         // 既存のログイン・状況選択・メインアプリの流れを維持する
         AppRootView()
             .environmentObject(navManager)
             .environmentObject(viewModel)
             .environmentObject(historyStore)
+            .environmentObject(chatViewModel)
     }
 }
