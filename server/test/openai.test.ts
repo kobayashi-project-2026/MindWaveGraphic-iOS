@@ -46,3 +46,23 @@ test("HTTP 500 → upstream_error", async () => { await expectCode("http_500", "
 test("拒否（refusal）→ upstream_refusal", async () => { await expectCode("refusal", "upstream_refusal"); });
 test("JSON でない出力 → invalid_upstream_response", async () => { await expectCode("invalid_json", "invalid_upstream_response"); });
 test("禁止表現を含む出力 → invalid_upstream_response", async () => { await expectCode("prohibited", "invalid_upstream_response"); });
+
+test("本文の受信が止まった場合もタイムアウト → upstream_timeout", async () => {
+  // ヘッダー（200）は即座に返し、本文のストリームを閉じないまま止める
+  const stalledFetch: typeof fetch = async (_input, init) => {
+    const signal = (init as RequestInit | undefined)?.signal ?? undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("{\"output\":"));
+        signal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")));
+      },
+    });
+    return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const config: OpenAIConfig = { ...cfg("ok"), timeoutMs: 50, fetchImpl: stalledFetch };
+  await assert.rejects(generateInsight(validRequest(), config), (e: unknown) => {
+    assert.ok(e instanceof UpstreamError);
+    assert.equal(e.code, "upstream_timeout");
+    return true;
+  });
+});

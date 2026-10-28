@@ -131,37 +131,43 @@ export async function generateInsight(
   cfg: OpenAIConfig,
 ): Promise<{ insight: InsightBody; model: string }> {
   const controller = new AbortController();
+  // タイムアウトは応答ヘッダーだけでなく本文の読み込みまで含める（本文の受信が止まった場合も打ち切る）
   const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
-  let response: Response;
-  try {
-    response = await cfg.fetchImpl(`${cfg.baseUrl.replace(/\/$/, "")}/responses`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${cfg.apiKey}`,
-      },
-      body: JSON.stringify(buildResponsesRequest(req, cfg.model)),
-      signal: controller.signal,
-    });
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new UpstreamError("upstream_timeout", `timeout after ${cfg.timeoutMs}ms`);
-    }
-    throw new UpstreamError("upstream_error", "network error");
-  } finally {
-    clearTimeout(timer);
-  }
-
-  if (!response.ok) {
-    // 応答本文には入力の一部が含まれうるため読まない・ログに出さない
-    throw new UpstreamError("upstream_error", `openai status=${response.status}`, response.status);
-  }
-
   let json: unknown;
   try {
-    json = await response.json();
-  } catch {
-    throw new UpstreamError("invalid_upstream_response", "応答が JSON ではない");
+    let response: Response;
+    try {
+      response = await cfg.fetchImpl(`${cfg.baseUrl.replace(/\/$/, "")}/responses`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
+        body: JSON.stringify(buildResponsesRequest(req, cfg.model)),
+        signal: controller.signal,
+      });
+    } catch {
+      if (controller.signal.aborted) {
+        throw new UpstreamError("upstream_timeout", `timeout after ${cfg.timeoutMs}ms`);
+      }
+      throw new UpstreamError("upstream_error", "network error");
+    }
+
+    if (!response.ok) {
+      // 応答本文には入力の一部が含まれうるため読まない・ログに出さない
+      throw new UpstreamError("upstream_error", `openai status=${response.status}`, response.status);
+    }
+
+    try {
+      json = await response.json();
+    } catch {
+      if (controller.signal.aborted) {
+        throw new UpstreamError("upstream_timeout", `timeout after ${cfg.timeoutMs}ms (body)`);
+      }
+      throw new UpstreamError("invalid_upstream_response", "応答が JSON ではない");
+    }
+  } finally {
+    clearTimeout(timer);
   }
   const text = extractOutputText(json);
 
