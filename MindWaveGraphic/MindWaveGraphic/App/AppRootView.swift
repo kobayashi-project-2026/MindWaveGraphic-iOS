@@ -19,6 +19,11 @@ struct AppRootView: View {
     /// アプリ全体で1つだけ生成するフロー状態
     @StateObject private var flowState = AppFlowState()
 
+    #if DEBUG
+    /// INITIAL_AUTH の置き換えを1回だけ行うためのフラグ（DEBUG のみ）
+    @State private var debugDidRedirect = false
+    #endif
+
     var body: some View {
         Group {
             #if DEBUG
@@ -36,6 +41,17 @@ struct AppRootView: View {
         }
         .preferredColorScheme(.dark)
         .animation(.easeInOut(duration: 0.3), value: flowState.authStatus)
+        #if DEBUG
+        .onChange(of: flowState.authStatus) { _, status in
+            // シミュレーター検証用: INITIAL_AUTH=contextCalibration で、スプラッシュの後に初回の状況選択（もこりん）へ進む
+            // （スプラッシュのタイマーが案内画面へ切り替えた直後に1回だけ置き換える）
+            if status == .accountGuidance, !debugDidRedirect,
+               ProcessInfo.processInfo.environment["INITIAL_AUTH"] == "contextCalibration" {
+                debugDidRedirect = true
+                flowState.authStatus = .contextCalibration
+            }
+        }
+        #endif
     }
 
     @ViewBuilder

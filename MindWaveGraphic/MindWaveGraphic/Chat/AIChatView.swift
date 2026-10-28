@@ -87,7 +87,7 @@ struct AIChatView: View {
             .buttonStyle(.borderedProminent)
             .tint(MindWaveCyberTheme.cyan)
             .accessibilityIdentifier("chat_consent_accept")
-            Text("同意しない場合は、端末内の定型アドバイスで応答します（同意は設定画面の「AI相談の文章を外部AIへ送信」でいつでも取り消せます）")
+            Text("同意しない場合は、端末内の定型アドバイスで応答します（同意は設定画面の「AI相談・もこりんの文章を外部AIへ送信」でいつでも取り消せます）")
                 .font(.system(size: 10))
                 .foregroundStyle(MindWaveCyberTheme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)

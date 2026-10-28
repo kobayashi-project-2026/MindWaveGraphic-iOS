@@ -162,8 +162,8 @@ struct SettingsView: View {
 
                                 // AI相談（入力した文章の送信）への同意。計測データは送らない。いつでも取り消せる
                                 cyberToggleRow(
-                                    title: "AI相談の文章を外部AIへ送信",
-                                    subtitle: "AI相談で入力した文章と直近の会話・選んだ場面だけを送信します。計測データは送信しません。OFF にすると端末内の定型アドバイスで応答します。",
+                                    title: "AI相談・もこりんの文章を外部AIへ送信",
+                                    subtitle: "AI相談・もこりん（状況選択）で入力した文章と直近の会話・選んだ場面だけを送信します。計測データは送信しません。OFF にすると端末内の定型文で応答します。",
                                     binding: chatTextConsentBinding
                                 )
 
