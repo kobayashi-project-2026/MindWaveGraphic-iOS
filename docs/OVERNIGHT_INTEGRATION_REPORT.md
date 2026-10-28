@@ -1,5 +1,11 @@
 # 夜間統合作業レポート（2026-10-28）
 
+> **監査による訂正（2026-10-28、docs/INTEGRATION_AUDIT.md）**
+> - フェーズB「COMPLETE（全契約を実際の入出力に接続）」は過大。`MeasurementSampleDTO`・`GraphicInputDTO` は本体から未使用、`AnalysisResultDTO` はデバッグ表示のみ → **PARTIAL**
+> - 「Watch 心拍だけではグラフィックが変化しない」は不正確。研究スコアは 38 固定だが、ホームの表示は心拍 100 bpm 以上で変化する
+> - 最終検証中の原因不明の exit=1 は、テストスクリプトの終了コードの不具合（ビルド失敗をテスト失敗として報告）が原因。修正済み
+> - 監査で不具合 4 件を修正（履歴のデータ消失、Mock シナリオの平常値、サーバーのタイムアウト、テストスクリプト）
+
 - 作業ブランチ: `feature/overnight-integration-20261028`（`fix/build-navigation-20261028` の HEAD `0be98a3` から作成）
 - **push はしていない。** main・他メンバーのブランチは変更していない。reset/clean/force push は使っていない
 - 詳細: 構成 `docs/ARCHITECTURE.md` ／ JSON `docs/DATA_CONTRACTS.md` ／ OpenAI `docs/OPENAI_SETUP.md` ／ 機能ごとの状況 `docs/INTEGRATION_STATUS.md`

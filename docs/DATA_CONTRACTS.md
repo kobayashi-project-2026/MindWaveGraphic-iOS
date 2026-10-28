@@ -4,6 +4,19 @@
 実装の正本は `MindWaveGraphic/MindWaveGraphic/Contracts/*.swift`、サーバー側は `server/src/contract.ts`。
 **仕様を変えるときは、Swift・TypeScript・このドキュメント・テスト（`Tests/MindWaveCoreTests/ContractTests.swift`、`server/test/`）を同時に更新すること。**
 
+### 実装・接続状況（2026-10-28 監査時点。詳細は docs/INTEGRATION_AUDIT.md §7）
+
+| 契約 | 実際の処理経路での使用 |
+|---|---|
+| Watch 心拍辞書（§2） | **使用中**: iPhone の Watch 受信（WatchConnectivityManager）・Watch 送信（WorkoutManager） |
+| `MeasurementSampleDTO`（§3） | **未使用**（型・変換・テストのみ。サーバー同期・エクスポート用に定義） |
+| `MeasurementContextDTO`（§4） | `AnalysisResultDTO` の一部としてのみ使用（デバッグ表示） |
+| `AnalysisResultDTO`（§5） | **デバッグ診断画面の表示のみ**（保存・送信には未使用） |
+| `GraphicInputDTO`（§6） | **未使用**（グラフィックは Swift の `GraphicInput` を直接受け取る） |
+| `GuideSessionRecordDTO` / `GuideSnapshotDTO`（§7） | **使用中**: 履歴の保存・読み込み（v3 JSON） |
+| `GuideHistoryDocument`（§8） | **使用中**: 履歴の保存・読み込み。`exportJSON()` は呼び出し元なし |
+| `InsightRequestDTO` / `InsightResponseDTO` / `InsightErrorDTO`（§10） | **使用中**（外部AIの同意・サーバー設定がある場合のみ通る経路）。iOS ⇄ ローカルサーバー（OpenAI スタブ）で E2E 確認済み、OpenAI 実通信は未確認 |
+
 ---
 
 ## 1. 共通ルール
@@ -89,7 +102,7 @@ WCSession は plist 辞書を送るため、この契約だけ JSON ではなく
 ```json
 {"schema_version":1,"analyzer_id":"stress-score-v1","analyzer_version":"1.0",
  "analyzed_at":"2026-10-28T04:35:12.123Z","source":"watch_live","is_mock":false,
- "tension_score":52.4,"confidence":0.5,"state":"optimal_tension",
+ "tension_score":38,"confidence":0.5,"state":"optimal_tension",
  "inputs":{"heart_rate_bpm":78,"hrv_sdnn_ms":null,"hrv_status":"missing",
            "baseline_status":"provisional","baseline_heart_rate_bpm":65,"baseline_hrv_sdnn_ms":null},
  "context":{"scene":"calm","body_conditions":[],"total_score_offset":0},
@@ -97,6 +110,7 @@ WCSession は plist 辞書を送るため、この契約だけ JSON ではなく
 ```
 
 - `analyzer_id` / `analyzer_version` で算出方式を識別する（評価方式を差し替えても結果を区別できる）
+- 上の例は Watch 心拍のみ（`hrv_status = missing`）のため、現行の計算式では `tension_score` が中立値 38 に固定される（心拍の値に関係なく 38。docs/INTEGRATION_AUDIT.md §9）
 - `inputs.baseline_status = provisional` のスコアは「個人の平常値との比較」ではない
 - `confidence` の現行規則（変更なし）: Mock はスライダー値／Watch＋HRV 0.75／Watch のみ 0.50／HealthKit＋HRV 0.65／HealthKit のみ 0.40。ベースラインの状態は `baseline_status` で別途示す
 
@@ -136,7 +150,7 @@ WCSession は plist 辞書を送るため、この契約だけ JSON ではなく
 | `mindwave.guideHistory.v3.json` | 本文書の JSON（Data） | **正本**。読み込みはこちらを優先 |
 | `mindwave.guideHistory.v2` | 旧形式の辞書配列 | 互換用。他メンバーのブランチのビルドでも読めるよう、移行期間中は同時に書き込む。削除しない |
 
-読み込み手順: v3 を decode → 失敗またはキーなしなら v2 を読み、v3 を生成（v2 は残す）。
+読み込み手順: v3 を decode → 成功したら v2 にしかない記録（id で判定。他メンバーのブランチのビルドが追加した記録）を取り込み、同じ id は v3 を優先する → v3 が失敗またはキーなしなら v2 を読み、v3 を生成（v2 は残す）。
 壊れた1件は読み飛ばし（`skipped` をログ出力）、未知の場面・エクササイズの記録も読み飛ばす（クラッシュしない）。
 
 ## 9. 個人ベースライン・鮮度規則
