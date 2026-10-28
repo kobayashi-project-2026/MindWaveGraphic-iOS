@@ -52,6 +52,9 @@ export function stubContextResult(body: Record<string, unknown>): Record<string,
     condition_candidates: conds,
     needs_clarification: needs,
     clarification_question: needs ? "（スタブ）どんな場面の前か教えてください" : null,
+    // 機械的な決め方（AI の判断ではない）: 追加質問なら calm/nod、候補ありなら happy/nod、睡眠不足なら sleepy
+    emotion: conds.includes("sleep_lack") ? "sleepy" : needs ? "calm" : "happy",
+    action: "nod",
   };
 }
 

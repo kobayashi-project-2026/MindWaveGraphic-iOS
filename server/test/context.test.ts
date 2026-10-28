@@ -70,7 +70,7 @@ test("Structured Outputs: strict・全項目 required・候補は既存 enum に
 });
 
 test("結果の検証: 未知の候補・型不正・医療的表現は不採用、none と他の状態の同時指定は none を外す", () => {
-  const ok = { reply: "面接前なんだね", scene_candidate: "interview", condition_candidates: ["stairs", "none", "stairs"], needs_clarification: false, clarification_question: null };
+  const ok = { reply: "面接前なんだね", scene_candidate: "interview", condition_candidates: ["stairs", "none", "stairs"], needs_clarification: false, clarification_question: null, emotion: "calm", action: "nod" };
   const v = validateContextResult(ok);
   assert.ok(v.ok);
   if (v.ok) assert.deepEqual(v.value.condition_candidates, ["stairs"]);
@@ -132,4 +132,23 @@ test("既存の /v1/chat は影響を受けない（スタブの会話返答の�
   }), ENV);
   assert.equal(res.status, 200);
   assert.ok(String((await res.json() as any).reply.text).includes("受け取った履歴"));
+});
+
+test("表情・動作（友達の原本と同じ許可値）: schema の enum、不正・欠落は calm / nod（候補は採用したまま）", () => {
+  assert.deepEqual(CONTEXT_JSON_SCHEMA.properties.emotion.enum, ["happy", "calm", "sad", "sleepy"]);
+  assert.deepEqual(CONTEXT_JSON_SCHEMA.properties.action.enum, ["wave", "jump", "nod"]);
+  const base = { reply: "面接前なんだね", scene_candidate: "interview", condition_candidates: [], needs_clarification: false, clarification_question: null };
+  const good = validateContextResult({ ...base, emotion: "happy", action: "wave" });
+  assert.ok(good.ok && good.value.emotion === "happy" && good.value.action === "wave");
+  const bad = validateContextResult({ ...base, emotion: "angry", action: "dance" });
+  assert.ok(bad.ok && bad.value.emotion === "calm" && bad.value.action === "nod" && bad.value.scene_candidate === "interview");
+  const missing = validateContextResult(base);
+  assert.ok(missing.ok && missing.value.emotion === "calm" && missing.value.action === "nod");
+});
+
+test("200（スタブ）: 応答に emotion / action を含む", async () => {
+  const res = await setup().handler(post(request(FIRST)), ENV);
+  const b = await res.json() as any;
+  assert.ok(["happy", "calm", "sad", "sleepy"].includes(b.result.emotion));
+  assert.ok(["wave", "jump", "nod"].includes(b.result.action));
 });

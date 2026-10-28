@@ -16,6 +16,9 @@ import { UpstreamError } from "./openai.ts";
 export const CONTEXT_SCENES = CHAT_SCENES;
 export const BODY_CONDITIONS = ["running", "stairs", "smoking", "caffeine", "sleep_lack", "after_meal", "none"] as const;
 export const CONTEXT_STEPS = ["scene", "condition", "review"] as const;
+/** もこりんの表情・動作（友達の原本 app.py / script.js と同じ許可値。third_party/mokorin_friend_source） */
+export const MOKORIN_EMOTIONS = ["happy", "calm", "sad", "sleepy"] as const;
+export const MOKORIN_ACTIONS = ["wave", "jump", "nod"] as const;
 
 export type ContextScene = (typeof CONTEXT_SCENES)[number];
 export type BodyCondition = (typeof BODY_CONDITIONS)[number];
@@ -48,6 +51,10 @@ export interface ContextAssistResult {
   condition_candidates: BodyCondition[];
   needs_clarification: boolean;
   clarification_question: string | null;
+  /** もこりんの表情。不正な値は calm（原本 app.py の既定と同じ） */
+  emotion: (typeof MOKORIN_EMOTIONS)[number];
+  /** もこりんの動作。不正な値は nod（原本 app.py の既定と同じ） */
+  action: (typeof MOKORIN_ACTIONS)[number];
 }
 
 export interface ContextAssistResponse {
@@ -137,19 +144,22 @@ export const CONTEXT_INSTRUCTIONS = [
   "- 測定はアプリの画面で利用者が開始する。測定を開始した・結果が出たなどと言わない。",
   "- 緊張度や心拍などの数値を推測しない。医療的な診断・病名・治療の話をしない。",
   "- reply は利用者への返答そのもの（共感＋次の質問または確認）にする。",
+  "- emotion はもこりんの表情（happy / calm / sad / sleepy）、action は動作（wave / jump / nod）。返答の雰囲気に合わせる（あいさつは wave、共感・確認は nod、つらそうな相談は sad、睡眠不足は sleepy など）。",
 ].join("\n");
 
 /** OpenAI Structured Outputs（strict）に渡す JSON Schema */
 export const CONTEXT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question"],
+  required: ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "emotion", "action"],
   properties: {
     reply: { type: "string", description: "もこりんの返答（120文字程度まで）" },
     scene_candidate: { type: ["string", "null"], enum: [...CONTEXT_SCENES, null], description: "明言された場面。なければ null" },
     condition_candidates: { type: "array", items: { type: "string", enum: [...BODY_CONDITIONS] }, description: "明言された身体状態" },
     needs_clarification: { type: "boolean" },
     clarification_question: { type: ["string", "null"], description: "追加で尋ねる質問。不要なら null" },
+    emotion: { type: "string", enum: [...MOKORIN_EMOTIONS], description: "もこりんの表情" },
+    action: { type: "string", enum: [...MOKORIN_ACTIONS], description: "もこりんの動作" },
   },
 } as const;
 
@@ -184,7 +194,7 @@ const PROHIBITED = ["と診断", "診断結果", "病気", "治療", "処方", "
 export function validateContextResult(v: unknown): Validation<ContextAssistResult> {
   const fail = (message: string): Validation<ContextAssistResult> => ({ ok: false, message });
   if (!isObject(v)) return fail("result がオブジェクトではない");
-  const extra = extraKeys(v, ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question"], "result");
+  const extra = extraKeys(v, ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "emotion", "action"], "result");
   if (extra) return fail(extra);
   if (typeof v.reply !== "string" || v.reply.trim().length === 0) return fail("reply が空");
   if (chars(v.reply) > CONTEXT_LIMITS.maxReplyChars) return fail("reply が長すぎる");
@@ -205,6 +215,9 @@ export function validateContextResult(v: unknown): Validation<ContextAssistResul
       condition_candidates: conds,
       needs_clarification: v.needs_clarification,
       clarification_question: typeof q === "string" && q.trim().length > 0 ? q.trim() : null,
+      // 表情・動作は見た目だけのため、不正・欠落なら原本 app.py と同じ既定値（calm / nod）にする（候補の採否には影響させない）
+      emotion: isOneOf(v.emotion, MOKORIN_EMOTIONS) ? v.emotion : "calm",
+      action: isOneOf(v.action, MOKORIN_ACTIONS) ? v.action : "nod",
     },
   };
 }
