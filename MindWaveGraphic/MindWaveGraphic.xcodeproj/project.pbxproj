@@ -405,6 +405,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "心拍数と心拍変動を読み取り、心理状態のゆらぎを可視化するために使用します。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "もこりんと声で話すときに、マイクボタンを押してから話し終えるまでの間だけ音声を聞き取るために使用します。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "もこりんに話しかけた声を文字に変換するために使用します。変換した文字は会話にのみ使います。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -440,6 +442,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "心拍数と心拍変動を読み取り、心理状態のゆらぎを可視化するために使用します。";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "もこりんと声で話すときに、マイクボタンを押してから話し終えるまでの間だけ音声を聞き取るために使用します。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "もこりんに話しかけた声を文字に変換するために使用します。変換した文字は会話にのみ使います。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

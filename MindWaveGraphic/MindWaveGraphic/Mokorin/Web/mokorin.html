@@ -5,7 +5,8 @@
   - CSS/JS の参照をルート絶対パス（/static/...）から同じフォルダの相対パスへ（WKWebView でローカル読み込みするため）
   - ページ見出し・説明文・操作ボタンを削除（表情・動作・セリフは SwiftUI から JavaScript 関数で制御する）
   - キャラクターを #fit で包み、表示サイズに合わせて縮小する（キャラクター本体のアニメーションと干渉させないため）
-  キャラクター本体（#character 以下の要素・クラス名）は原本と同じ。
+  - 2026-10-28: 小さな手足（.feet）を追加（完成イメージ ~/Desktop/mokorin.png を参考にした表示品質の改善）
+  キャラクター本体の既存要素・クラス名（.sprout / .body / .cheek / .eyes / .mouth、表情・動作のクラス）は原本と同じ。
 -->
 <html lang="ja">
 <head>
@@ -24,6 +25,7 @@
         <div class="eyes"><span></span><span></span></div>
         <div class="mouth"></div>
       </div>
+      <div class="feet"><span></span><span></span></div>
     </div>
     <p id="emotion" hidden>RELAX ☁️</p>
     <div id="dialogue" hidden></div>

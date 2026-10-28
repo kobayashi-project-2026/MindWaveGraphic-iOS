@@ -12,10 +12,22 @@ struct MokorinAvatarView: View {
     var size: CGFloat = 64
     var pose: MokorinPose = MokorinPose()
 
+    /// 友達のキャラクターの表示準備ができたか（それまでは読み込み中の表示。キャラクターを別物に置き換えない）
+    @State private var isWebReady = false
+
     var body: some View {
         Group {
             if MokorinWebView.resourceURL != nil {
-                MokorinWebView(pose: pose)
+                ZStack {
+                    MokorinWebView(pose: pose, onReady: { isWebReady = true })
+                        .opacity(isWebReady ? 1 : 0)
+                    if !isWebReady {
+                        ProgressView()
+                            .tint(Color(red: 0.35, green: 0.75, blue: 0.95))
+                            .accessibilityLabel("もこりんを読み込み中")
+                    }
+                }
+                .animation(.easeIn(duration: 0.3), value: isWebReady)
             } else {
                 MokorinPlaceholderShape()
             }

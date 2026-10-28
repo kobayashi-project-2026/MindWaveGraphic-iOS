@@ -101,3 +101,27 @@ test("統合先: 準備完了をアプリへ通知し、表示枠に合わせて
   assert.equal(styleProps["--mokorin-scale"], "0.5");
   assert.equal(api.mokorinState().emotion, "calm");
 });
+
+test("統合先: setSpeaking は読み上げ中の口の動き（speaking クラス）を付け外しし、表情・セリフに触れない", () => {
+  const { api, elements } = run(INTEGRATED);
+  api.setDialogue("そっか。何か予定があるの？");
+  api.setEmotion("calm");
+  api.setSpeaking(true);
+  assert.ok(elements.character.classList.contains("speaking"));
+  assert.ok(elements.character.classList.contains("calm"));
+  assert.equal(elements.dialogue.textContent, "そっか。何か予定があるの？");
+  api.setSpeaking(false);
+  assert.ok(!elements.character.classList.contains("speaking"));
+  assert.equal(api.mokorinState().speaking, false);
+});
+
+test("統合先の HTML: 原本のキャラクター要素とクラスを保持し、手足（.feet）を追加。CSS に原本の表情・動作の定義が残る", () => {
+  const html = readFileSync(new URL("../../MindWaveGraphic/MindWaveGraphic/Mokorin/Web/mokorin.html", import.meta.url), "utf8");
+  for (const part of ['class="mocorin calm"', 'class="sprout"', 'class="body"', 'class="cheek left"', 'class="cheek right"', 'class="eyes"', 'class="mouth"', 'class="feet"']) {
+    assert.ok(html.includes(part), part);
+  }
+  const css = readFileSync(new URL("../../MindWaveGraphic/MindWaveGraphic/Mokorin/Web/mokorin.css", import.meta.url), "utf8");
+  for (const rule of [".happy .mouth", ".sad .mouth", ".sleepy .eyes span", "@keyframes jump", "@keyframes wave", "@keyframes nod", "#character.wave", "#character.jump", "#character.nod", "prefers-reduced-motion"]) {
+    assert.ok(css.includes(rule), rule);
+  }
+});

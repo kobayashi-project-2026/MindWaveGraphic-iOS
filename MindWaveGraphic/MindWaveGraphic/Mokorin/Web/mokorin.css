@@ -6,6 +6,8 @@
   - #fit を追加: 220×250 の枠でキャラクターを包み、JavaScript で表示サイズに合わせて縮小する
   - #character の margin を 0 に（元は 35px auto 15px。枠の中で位置を合わせるため。ジャンプ分の余白は #fit の上部で確保）
   - #emotion / #dialogue は既定で非表示（SwiftUI 側の吹き出しを使う。必要な画面だけ表示できる）
+  - 2026-10-28: 末尾に表示品質の改善（光沢・陰影・手足・まばたき・呼吸・話す口・滑らかな動き）を追加。
+    原本の定義はそのまま残し、後ろの規則で上書きしている
 */
 * {
   box-sizing: border-box;
@@ -186,7 +188,101 @@ html, body {
 
 /* ── 原本ここまで ── */
 
-/* 視差効果を減らす設定のときは浮遊アニメーションを止める（動作 wave/jump/nod は短時間のため維持） */
+/* ── 表示品質の改善（2026-10-28、完成イメージ ~/Desktop/mokorin.png を参考）──
+   原本の定義は上にそのまま残し、ここで上書き・追加する。表情（happy/calm/sad/sleepy）と
+   動作（wave/jump/nod）のクラスと意味は変えていない。 */
+
+/* 立体感: 左上の光沢・右下の内側の影・柔らかい輪郭と青みの外光 */
+.body {
+  border-color: rgba(181, 161, 141, 0.45);
+  background:
+    radial-gradient(ellipse 55% 45% at 34% 26%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(145deg, #fffdf5, #f2dfc9);
+  box-shadow: inset -10px -12px 18px rgba(214, 186, 156, 0.55),
+              inset 6px 8px 14px rgba(255, 255, 255, 0.6),
+              0 18px 30px rgba(0, 0, 0, 0.35),
+              0 0 36px rgba(120, 180, 255, 0.18);
+  animation: breathe 4.2s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+.happy .body {
+  background:
+    radial-gradient(ellipse 55% 45% at 34% 26%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(145deg, #fff6e4, #fff0d7);
+}
+
+/* 芽: 葉にやわらかいグラデーション */
+.sprout span {
+  background: linear-gradient(135deg, #d6e8b4, #a9c483);
+}
+
+/* 目: 小さなハイライトとまばたき */
+.eyes span {
+  position: relative;
+  transform-origin: 50% 50%;
+  animation: blink 5.2s ease-in-out infinite;
+}
+.eyes span::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+}
+.sleepy .eyes span { animation: none; }
+.sleepy .eyes span::after { display: none; }
+
+/* ほっぺ: ふんわりとにじませる */
+.cheek { filter: blur(1.5px); opacity: 0.95; }
+
+/* 小さな手足 */
+.feet {
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  width: 220px;
+  height: 26px;
+  pointer-events: none;
+}
+.feet span {
+  position: absolute;
+  bottom: 0;
+  width: 40px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 40% 30%, #fffdf5, #ecd6bd);
+  box-shadow: inset -3px -4px 6px rgba(214, 186, 156, 0.6), 0 6px 10px rgba(0, 0, 0, 0.25);
+}
+.feet span:first-child { left: 52px; }
+.feet span + span { right: 52px; }
+
+/* 話している間: 口をやさしく開け閉めする（setSpeaking で付け外し） */
+#character.speaking .mouth { animation: talk 0.28s ease-in-out infinite alternate; transform-origin: 50% 0; }
+
+/* 動作をより自然に（タイミングは原本と同じ回数・長さ。曲線だけを滑らかに） */
+#character.wave { animation: wave .6s cubic-bezier(.45, .05, .35, 1) 3; }
+#character.jump { animation: jump .5s cubic-bezier(.33, 0, .2, 1) 4; }
+#character.nod  { animation: nod .6s cubic-bezier(.45, .05, .35, 1) 3; }
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.015, 0.99); }
+}
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.12); }
+}
+@keyframes talk {
+  from { transform: scaleY(1); }
+  to { transform: scaleY(1.7); }
+}
+
+/* 視差効果を減らす設定: 常時動くアニメーション（浮遊・呼吸・まばたき・口）を止める。
+   動作 wave/jump/nod は利用者の操作に応じた短時間のものなので維持する */
 @media (prefers-reduced-motion: reduce) {
   #character { animation: none; }
+  .body, .eyes span, #character.speaking .mouth { animation: none; }
 }

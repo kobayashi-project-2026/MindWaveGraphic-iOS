@@ -6,6 +6,7 @@
 //   原本の固定文は defaultLines として残し、getDefaultLine() で参照できる（端末内の定型文として使う場合のみ）
 // - setAction() の許可値・クラスの付け外し・2.5 秒後の解除は原本と同じ
 // - 表示サイズに合わせた縮小（fit）と、アプリ（WKWebView）への準備完了通知を追加
+// - 2026-10-28: 読み上げ中の口の動き setSpeaking() を追加
 // - 未知の表情・動作は無視する（原本と同じ）
 
 (function () {
@@ -69,6 +70,13 @@
     return true;
   }
 
+  /** 話している間の口の動き（読み上げ中に SwiftUI から付け外しする） */
+  function setSpeaking(on) {
+    if (on === true) character.classList.add("speaking");
+    else character.classList.remove("speaking");
+    return true;
+  }
+
   /** 原本の固定セリフ（端末内の定型文として使う場合のみ） */
   function getDefaultLine(emotion) {
     return defaultLines[emotion] || "";
@@ -84,6 +92,7 @@
     return {
       emotion: currentEmotion,
       actions: ACTIONS.filter((a) => character.classList.contains(a)),
+      speaking: character.classList.contains("speaking"),
       dialogue: dialogue.textContent
     };
   }
@@ -94,6 +103,7 @@
   window.setEmotion = setEmotion;
   window.setAction = setAction;
   window.setDialogue = setDialogue;
+  window.setSpeaking = setSpeaking;
   window.getDefaultLine = getDefaultLine;
   window.mokorinState = state;
 

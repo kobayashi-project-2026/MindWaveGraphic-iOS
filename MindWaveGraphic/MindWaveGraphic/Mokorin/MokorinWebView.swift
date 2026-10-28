@@ -29,6 +29,8 @@ nonisolated struct MokorinPose: Equatable, Sendable {
     var actionID: Int = 0
     /// セリフ（showsDialogue のときだけキャラクターの吹き出しに表示）
     var dialogue: String? = nil
+    /// 読み上げ中（口をやさしく動かす）
+    var speaking: Bool = false
 
     /// 表情を変え、動作を1回再生した新しい状態
     func with(_ emotion: MokorinEmotion, _ action: MokorinAction?) -> MokorinPose {
@@ -56,17 +58,20 @@ nonisolated enum MokorinWebScript {
     }
 
     static let showDialogue = "document.body.classList.add('show-dialogue')"
+    static func setSpeaking(_ on: Bool) -> String { "setSpeaking(\(on ? "true" : "false"))" }
 }
 
 struct MokorinWebView: UIViewRepresentable {
     var pose: MokorinPose
     /// キャラクター自身の吹き出しにセリフを表示するか（既定は非表示。会話は SwiftUI の吹き出しで表示する）
     var showsDialogue: Bool = false
+    /// 表示の準備ができたとき（初回の WebView 起動は数秒かかることがあるため、呼び出し側で読み込み中の表示に使う）
+    var onReady: (() -> Void)? = nil
 
     /// 同梱した HTML（ない場合は nil → 呼び出し側で代替表示）
     static var resourceURL: URL? { Bundle.main.url(forResource: "mokorin", withExtension: "html") }
 
-    func makeCoordinator() -> Coordinator { Coordinator(showsDialogue: showsDialogue) }
+    func makeCoordinator() -> Coordinator { Coordinator(showsDialogue: showsDialogue, onReady: onReady) }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -104,9 +109,11 @@ struct MokorinWebView: UIViewRepresentable {
         private var isReady = false
         private var applied: MokorinPose? = nil
         private let showsDialogue: Bool
+        private let onReady: (() -> Void)?
 
-        init(showsDialogue: Bool) {
+        init(showsDialogue: Bool, onReady: (() -> Void)?) {
             self.showsDialogue = showsDialogue
+            self.onReady = onReady
             self.pending = MokorinPose()
         }
 
@@ -118,6 +125,7 @@ struct MokorinWebView: UIViewRepresentable {
             if applied?.emotion != pose.emotion { scripts.append(MokorinWebScript.setEmotion(pose.emotion)) }
             if let action = pose.action, applied?.actionID != pose.actionID { scripts.append(MokorinWebScript.setAction(action)) }
             if showsDialogue, applied?.dialogue != pose.dialogue { scripts.append(MokorinWebScript.setDialogue(pose.dialogue ?? "")) }
+            if applied?.speaking != pose.speaking { scripts.append(MokorinWebScript.setSpeaking(pose.speaking)) }
             applied = pose
             guard !scripts.isEmpty else { return }
             webView.evaluateJavaScript(scripts.joined(separator: ";")) { _, error in
@@ -131,6 +139,7 @@ struct MokorinWebView: UIViewRepresentable {
             if showsDialogue { webView?.evaluateJavaScript(MokorinWebScript.showDialogue) }
             applied = nil
             apply(pending)
+            onReady?()
         }
 
         /// 同梱ファイル以外への移動は拒否する
