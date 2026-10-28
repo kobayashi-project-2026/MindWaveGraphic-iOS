@@ -49,7 +49,10 @@ if ! xcrun swiftc \
   -module-name MindWaveGraphic \
   -o "$OUT_DIR/MindWaveCoreTests" \
   "${SOURCES[@]}" 2> "$OUT_DIR/build.log"; then
-  grep -E "error:" "$OUT_DIR/build.log" | head -40 >&2
+  # コンパイラが強制終了された場合など "error:" 行がないこともある。
+  # set -e / pipefail の下で grep の不一致（終了コード1）がスクリプト全体の終了コードにならないよう || true を付ける
+  # （以前はこのため、ビルド失敗が「テスト失敗(1)」として報告されていた）
+  { grep -E "error:" "$OUT_DIR/build.log" | head -40 >&2; } || tail -20 "$OUT_DIR/build.log" >&2 || true
   echo "[core-tests] ビルド失敗（全ログ: $OUT_DIR/build.log）" >&2
   exit 2
 fi
