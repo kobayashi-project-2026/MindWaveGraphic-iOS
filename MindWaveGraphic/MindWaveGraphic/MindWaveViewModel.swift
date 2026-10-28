@@ -365,7 +365,10 @@ final class MindWaveViewModel: ObservableObject {
             selected: selected,
             baseline: baseline,
             context: measurementContext,
-            mockConfidence: mockConfidence
+            mockConfidence: mockConfidence,
+            // Mock のデモシナリオは loadDemoScenario が設定した平常値で算出する（統合前と同じ）
+            mockAverageHeartRate: averageHeartRate,
+            mockAverageHRV: averageHRV
         ))
         let tensionScore = analysis.tensionScore
         let confidence   = analysis.confidence

@@ -116,6 +116,15 @@ enum PipelineTests {
             T.expectEqual(r.metadata.baselineStatus, .notApplicable)
             T.expect(r.metadata.isMock, "mock")
         }
+        T.test("Mock デモシナリオ: シナリオの平常値で算出（統合前の reevaluateActiveSource と同値）") {
+            let r = StressScoreAnalyzerV1().analyze(AnalyzerInput(
+                selected: SelectedSample(sample: MindWaveSample(heartRate: 80, hrv: 35, contextScore: nil, source: .mock, timestamp: now),
+                                         hrvStatus: .notApplicable, heartRateMeasuredAt: nil, hrvMeasuredAt: nil),
+                baseline: .reference, context: .default, mockConfidence: 0.8,
+                mockAverageHeartRate: 72, mockAverageHRV: 50))
+            let expected = StressScoreCalculator.calculate(currentHeartRate: 80, averageHeartRate: 72, currentHRV: 35, averageHRV: 50, context: .default).stressScore
+            T.expectEqual(r.tensionScore, expected)
+        }
         T.test("心拍未計測（HRVのみ）は心拍項を平常扱い・metadata.heartRate=nil") {
             let r = analyze(MindWaveSample(heartRate: nil, hrv: 30, contextScore: nil, source: .healthKit, timestamp: now), hrv: .measured)
             let expected = StressScoreCalculator.calculate(currentHeartRate: 65, averageHeartRate: 65, currentHRV: 30, averageHRV: 45).stressScore

@@ -14,6 +14,11 @@ nonisolated struct AnalyzerInput: Sendable {
     let context: MeasurementContext
     /// Mock モード時の確からしさ（デバッグ画面のスライダー値）
     let mockConfidence: Double
+    /// Mock のデモシナリオ（contextScore なし）で使う平常値。
+    /// 統合前は MindWaveViewModel.averageHeartRate / averageHRV（loadDemoScenario が設定）で算出していたため、
+    /// 同じ値を渡して既存挙動を保つ。nil なら参照値（65 / 45）を使う。
+    var mockAverageHeartRate: Double? = nil
+    var mockAverageHRV: Double? = nil
 }
 
 /// 評価方式のインターフェース
@@ -27,7 +32,7 @@ nonisolated protocol MindAnalyzer: Sendable {
 /// 現行方式: StressScoreCalculator（docs/FORMULA.md）をそのまま使う。
 ///
 /// 既存の MindWaveViewModel.reevaluateActiveSource と同一の計算になるよう実装している:
-/// - Mock: contextScore があればそのまま、なければサンプルの心拍・HRV と参照ベースラインで算出
+/// - Mock: contextScore があればそのまま、なければサンプルの心拍・HRV とデモシナリオの平常値で算出
 /// - 実測: HRV がないときは averageHRV=0 を渡す（計算式の guard により中立値 38 になる＝既存挙動）
 /// - 確からしさ: Mock=スライダー値 / Watch 0.75(HRVあり)・0.50 / HealthKit 0.65・0.40
 ///
@@ -55,13 +60,15 @@ nonisolated struct StressScoreAnalyzerV1: MindAnalyzer {
             if let score = sample.contextScore {
                 rawScore = score
             } else {
-                // デモシナリオ（loadDemoScenario）: 参照ベースラインで算出
+                // デモシナリオ（loadDemoScenario）: シナリオの平常値で算出（未指定なら参照値）
                 let ref = BaselineSnapshot.reference
+                let avgHR  = input.mockAverageHeartRate ?? ref.heartRate
+                let avgHRV = input.mockAverageHRV ?? ref.hrv
                 rawScore = StressScoreCalculator.calculate(
-                    currentHeartRate: sample.heartRate ?? ref.heartRate,
-                    averageHeartRate: ref.heartRate,
+                    currentHeartRate: sample.heartRate ?? avgHR,
+                    averageHeartRate: avgHR,
                     currentHRV: sample.hrv ?? 0,
-                    averageHRV: sample.hrv != nil ? ref.hrv : 0,
+                    averageHRV: sample.hrv != nil ? avgHRV : 0,
                     context: input.context
                 ).stressScore
             }
