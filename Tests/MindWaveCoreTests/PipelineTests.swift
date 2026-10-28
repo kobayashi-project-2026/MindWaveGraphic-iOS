@@ -105,6 +105,25 @@ enum PipelineTests {
             T.expectEqual(r.tensionScore, 38)
             T.expectEqual(r.confidence, 0.50)
         }
+        T.test("スコア38問題の特性: HRVなしの実測は心拍・場面・身体状態・ベースラインに関係なく 38（context 補正も効かない）") {
+            var tense = MeasurementContext(); tense.scene = .interview; tense.conditions = [.running, .caffeine]
+            var personal = BaselineSnapshot.reference
+            personal.heartRate = 58; personal.heartRateOrigin = .healthKit7DayAverage
+            for hr in [45.0, 65, 90, 120, 160, 200] {
+                for ctx in [MeasurementContext.default, tense] {
+                    for b in [BaselineSnapshot.reference, personal] {
+                        for src in [MindDataSource.watchLive, .healthKit] {
+                            let r = analyze(MindWaveSample(heartRate: hr, hrv: nil, contextScore: nil, source: src, timestamp: now),
+                                            baseline: b, context: ctx)
+                            T.expectEqual(r.tensionScore, 38, "hr=\(hr) src=\(src)")
+                            T.expectEqual(r.state, .optimalTension)
+                        }
+                    }
+                }
+            }
+            // 計算式そのもの: averageHRV<=0 の guard が context 補正より先に中立値を返す
+            T.expectEqual(StressScoreCalculator.calculate(currentHeartRate: 160, averageHeartRate: 65, currentHRV: 0, averageHRV: 0, context: tense).stressScore, 38)
+        }
         T.test("HealthKit 確からしさ 0.65 / 0.40") {
             T.expectEqual(analyze(MindWaveSample(heartRate: 70, hrv: 40, contextScore: nil, source: .healthKit, timestamp: now)).confidence, 0.65)
             T.expectEqual(analyze(MindWaveSample(heartRate: 70, hrv: nil, contextScore: nil, source: .healthKit, timestamp: now)).confidence, 0.40)

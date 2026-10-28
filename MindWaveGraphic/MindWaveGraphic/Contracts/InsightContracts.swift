@@ -175,7 +175,7 @@ nonisolated struct InsightErrorDTO: Codable, Equatable, Sendable {
 
 // MARK: - 検証
 
-/// AI応答の内容検証。サーバー（server/src/validation.ts）と同じ規則をクライアントでも再確認する。
+/// AI応答の内容検証。サーバー（server/src/contract.ts の validateInsightBody）と同じ規則をクライアントでも再確認する。
 nonisolated enum InsightValidation {
 
     /// 各フィールドの最大文字数
