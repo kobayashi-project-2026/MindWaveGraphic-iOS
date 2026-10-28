@@ -31,7 +31,11 @@ iOS (GuideFlowView)
 |---|---|---|
 | `OPENAI_API_KEY` | secret | OpenAI の APIキー。**`wrangler secret put` で登録。ファイルに書かない** |
 | `CLIENT_TOKENS` | secret | iOS アプリが送る Bearer トークン（カンマ区切りで複数可、各16文字以上）。未設定なら全リクエスト 401 |
-| `OPENAI_MODEL` | var | 使用モデル。既定 `gpt-4o-mini`（Structured Outputs 対応モデルを指定） |
+| `OPENAI_MODEL` | var | 使用モデル。既定 `gpt-6-luna`（2026-10-28 変更。`gpt-4o-mini` は 2027-01-14 提供終了予定で、公式の後継が `gpt-6-luna`。Structured Outputs 対応） |
+| `OPENAI_REASONING_EFFORT` | var | 推論の深さ。既定 `low`。非推論モデルを使う場合は空にする |
+| `RATE_LIMIT_PER_MINUTE` | var | トークンあたり 1 分の上限（既定 20、インスタンス単位） |
+
+AI 相談（`/v1/chat`）の設定・手順は docs/OPENAI_CHAT_SETUP.md を参照。
 | `OPENAI_TIMEOUT_MS` | var | OpenAI 呼び出しのタイムアウト。既定 15000 |
 | `OPENAI_BASE_URL` | var | 既定 `https://api.openai.com/v1`。通常は変更しない |
 
@@ -47,7 +51,7 @@ npm run typecheck
 
 # OpenAI スタブで起動（課金なし）
 CLIENT_TOKENS=dev-token-0123456789abcdef npm run dev:stub
-# 異常系の再現: STUB_OPENAI_MODE=timeout|http_500|refusal|invalid_json|prohibited
+# 異常系の再現: STUB_OPENAI_MODE=timeout|http_500|http_429|http_401|refusal|invalid_json|prohibited
 curl -s http://127.0.0.1:8787/v1/health
 ```
 
