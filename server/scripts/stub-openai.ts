@@ -2,7 +2,9 @@
 // OpenAI Responses API の「ローカル専用」スタブ。APIキーなし・課金なしで通信処理を検証するために使う。
 // 本番の Worker（src/index.ts）からは import しない。dev-server の --stub-openai とテストだけが使う。
 //
-// STUB_OPENAI_MODE で異常系を再現できる: ok（既定）/ timeout / http_500 / http_429 / http_401 / refusal / invalid_json / prohibited
+// STUB_OPENAI_MODE で異常系を再現できる: ok（既定）/ timeout / http_500 / http_429 / http_401 / refusal / invalid_json / prohibited / invalid_candidate
+//
+// もこりんの状況整理（/v1/context-assist）の要求には、最後の発言のキーワードから候補を機械的に作って返す（AI の判断ではない）。
 //
 // 会話（/v1/chat）の要求には、受け取った履歴の件数・最初の相談・直前の質問を引用した返答を返す。
 // これは「履歴が順番どおり届いているか」を確かめるための機械的な返答で、AI が生成した文章ではない。
@@ -10,7 +12,7 @@
 
 import { FIXED_CAUTION } from "../src/contract.ts";
 
-export type StubMode = "ok" | "timeout" | "http_500" | "http_429" | "http_401" | "refusal" | "invalid_json" | "prohibited";
+export type StubMode = "ok" | "timeout" | "http_500" | "http_429" | "http_401" | "refusal" | "invalid_json" | "prohibited" | "invalid_candidate";
 
 /** スタブの会話返答の先頭に必ず付ける文言 */
 export const STUB_CHAT_PREFIX = "（スタブ応答・実際のAIではありません）";
@@ -18,6 +20,39 @@ export const STUB_CHAT_PREFIX = "（スタブ応答・実際のAIではありま
 function clip(s: string, n: number): string {
   const chars = [...s.replace(/\s+/g, " ").trim()];
   return chars.length > n ? `${chars.slice(0, n).join("")}…` : chars.join("");
+}
+
+const STUB_SCENE_WORDS: Array<[string, RegExp]> = [
+  ["interview", /面接|面談|発表|プレゼン|スピーチ/], ["sports", /試合|大会|競技|レース/],
+  ["important", /大切な|大事な|デート|約束/], ["work", /作業|仕事|勉強|集中/], ["calm", /安静|リラックス|のんびり/],
+];
+const STUB_CONDITION_WORDS: Array<[string, RegExp]> = [
+  ["running", /走/], ["stairs", /階段|移動|歩いて/], ["smoking", /たばこ|タバコ|煙草|喫煙/],
+  ["caffeine", /コーヒー|カフェイン|エナジードリンク/], ["sleep_lack", /寝不足|睡眠不足|眠れなかった/],
+  ["after_meal", /食後|ご飯を食べ|食べた/], ["none", /特にない|特になし|座って/],
+];
+
+/** もこりんの状況整理の要求か */
+function isContextRequest(body: Record<string, unknown>): boolean {
+  const text = body.text as { format?: { name?: string } } | undefined;
+  return text?.format?.name === "mokorin_context";
+}
+
+/** 最後の利用者の発言からキーワードで候補を作る（AI の判断ではない） */
+export function stubContextResult(body: Record<string, unknown>): Record<string, unknown> {
+  const input = Array.isArray(body.input) ? (body.input as Array<{ role?: string; content?: unknown }>) : [];
+  const last = [...input].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content as string ?? "";
+  const scene = STUB_SCENE_WORDS.find(([, re]) => re.test(last))?.[0] ?? null;
+  let conds = STUB_CONDITION_WORDS.filter(([, re]) => re.test(last)).map(([c]) => c);
+  if (conds.includes("none") && conds.length > 1) conds = conds.filter((c) => c !== "none");
+  const needs = scene === null && conds.length === 0;
+  return {
+    reply: `${STUB_CHAT_PREFIX}キーワード判定: 場面=${scene ?? "なし"} / 身体状態=${conds.join(",") || "なし"}`,
+    scene_candidate: scene,
+    condition_candidates: conds,
+    needs_clarification: needs,
+    clarification_question: needs ? "（スタブ）どんな場面の前か教えてください" : null,
+  };
 }
 
 /** 会話の要求か（単発インサイトは json_schema を指定している） */
@@ -80,6 +115,7 @@ export function createStubFetch(mode: StubMode = "ok", calls: StubCall[] = []): 
     const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
     calls.push({ url, authorization: headers.get("Authorization"), body });
     const chat = isChatRequest(body);
+    const context = isContextRequest(body);
 
     switch (mode) {
       case "timeout":
@@ -100,12 +136,15 @@ export function createStubFetch(mode: StubMode = "ok", calls: StubCall[] = []): 
         });
       case "invalid_json":
         return chat ? new Response("{not json", { status: 200 }) : Response.json(responsesApiBody("{not json"));
+      case "invalid_candidate":
+        return Response.json(responsesApiBody(JSON.stringify({ ...stubContextResult(body), scene_candidate: "office_party" })));
       case "prohibited":
         return Response.json(responsesApiBody(chat
           ? `${STUB_CHAT_PREFIX}あなたは不安障害と診断します。`
           : JSON.stringify({ ...STUB_INSIGHT, analysis: "自律神経が整いました。" })));
       case "ok":
       default:
+        if (context) return Response.json(responsesApiBody(JSON.stringify(stubContextResult(body))));
         return Response.json(responsesApiBody(chat ? stubChatReply(body) : JSON.stringify(STUB_INSIGHT)));
     }
   }) as typeof fetch;

@@ -4,6 +4,7 @@
 //   GET  /v1/health    稼働確認（秘密情報は返さない）
 //   POST /v1/insights  ガイド要約 → OpenAI → 検証済みインサイト（docs/DATA_CONTRACTS.md §10）
 //   POST /v1/chat      複数往復の AI 相談（docs/OPENAI_CHAT_ARCHITECTURE.md）
+//   POST /v1/context-assist  もこりんとの会話による測定前の状況整理（docs/MOKORIN_CONTEXT_INTEGRATION.md）
 //
 // 処理順: 認証(401) → レート制限(429) → サイズ(413) → JSON(400) → 契約検証(400) → 同意・計測可否(403)
 //        → APIキー設定(503) → OpenAI 呼び出し(200 / 429 / 502 / 504)
@@ -24,6 +25,7 @@ import {
   validateChatRequest,
 } from "./chat.ts";
 import { FixedWindowRateLimiter } from "./ratelimit.ts";
+import { CONTEXT_LIMITS, type ContextAssistResponse, generateContextAssist, validateContextAssistRequest } from "./context.ts";
 
 export interface Env {
   /** OpenAI APIキー（wrangler secret put OPENAI_API_KEY） */
@@ -146,11 +148,14 @@ export function createHandler(deps: HandlerDeps = {}) {
       });
     }
 
-    const route = url.pathname === "/v1/insights" ? "insight" : url.pathname === "/v1/chat" ? "chat" : null;
+    const route = url.pathname === "/v1/insights" ? "insight"
+      : url.pathname === "/v1/chat" ? "chat"
+      : url.pathname === "/v1/context-assist" ? "context"
+      : null;
     if (!route) return errorResponse(404, "not_found", "not found", null);
     if (request.method !== "POST") return errorResponse(405, "method_not_allowed", "POST のみ", null);
 
-    const event = route === "insight" ? "insight_request" : "chat_request";
+    const event = route === "insight" ? "insight_request" : route === "chat" ? "chat_request" : "context_assist_request";
     const finish = (response: Response, outcome: string, requestId: string | null, extra: Record<string, unknown> = {}) => {
       log({ event, outcome, status: response.status, request_id: requestId, latency_ms: Date.now() - started, ...extra });
       return response;
@@ -227,6 +232,53 @@ export function createHandler(deps: HandlerDeps = {}) {
           insight: result.insight,
         };
         return finish(json(200, responseBody), "ok", req.request_id, { model: result.model });
+      } catch (error) {
+        return upstreamFailure(error, req.request_id);
+      }
+    }
+
+    // ── /v1/context-assist ─────────────────────────────────────
+    if (route === "context") {
+      const validated = validateContextAssistRequest(parsed.body);
+      if (!validated.ok) {
+        return finish(errorResponse(400, "invalid_request", validated.message, null), "invalid_request", null);
+      }
+      const req = validated.value;
+      if (!env.OPENAI_API_KEY) {
+        return finish(errorResponse(503, "not_configured", "サーバーに OpenAI が設定されていません", req.request_id), "not_configured", req.request_id);
+      }
+      try {
+        const result = await generateContextAssist(req, {
+          apiKey: env.OPENAI_API_KEY,
+          model: env.OPENAI_CHAT_MODEL || env.OPENAI_MODEL || DEFAULT_MODEL,
+          baseUrl,
+          timeoutMs,
+          maxOutputTokens: CONTEXT_LIMITS.maxOutputTokens,
+          reasoningEffort,
+          fetchImpl,
+        });
+        const responseBody: ContextAssistResponse = {
+          schema_version: SCHEMA_VERSION,
+          request_id: req.request_id,
+          conversation_id: req.conversation_id,
+          provider: providerName,
+          model: result.model,
+          generated_at: now().toISOString(),
+          result: result.result,
+          usage: result.usage,
+        };
+        // 候補の有無だけを記録する（会話本文・候補の値は記録しない）
+        return finish(json(200, responseBody), "ok", req.request_id, {
+          model: result.model,
+          provider: providerName,
+          step: req.step,
+          messages: req.messages.length,
+          has_scene_candidate: result.result.scene_candidate !== null,
+          condition_candidates: result.result.condition_candidates.length,
+          needs_clarification: result.result.needs_clarification,
+          input_tokens: result.usage?.input_tokens ?? null,
+          output_tokens: result.usage?.output_tokens ?? null,
+        });
       } catch (error) {
         return upstreamFailure(error, req.request_id);
       }
