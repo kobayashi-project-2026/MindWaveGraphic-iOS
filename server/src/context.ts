@@ -15,7 +15,9 @@ import { UpstreamError } from "./openai.ts";
 
 export const CONTEXT_SCENES = CHAT_SCENES;
 export const BODY_CONDITIONS = ["running", "stairs", "smoking", "caffeine", "sleep_lack", "after_meal", "none"] as const;
-export const CONTEXT_STEPS = ["scene", "condition", "review"] as const;
+export const CONTEXT_STEPS = ["tension", "scene", "condition", "review"] as const;
+/** 利用者の主観的な緊張（自己申告）。心拍・HRV から計算する緊張スコアとは別物で、計算には使わない */
+export const SUBJECTIVE_TENSIONS = ["calm", "slight", "high"] as const;
 /** もこりんの表情・動作（友達の原本 app.py / script.js と同じ許可値。third_party/mokorin_friend_source） */
 export const MOKORIN_EMOTIONS = ["happy", "calm", "sad", "sleepy"] as const;
 export const MOKORIN_ACTIONS = ["wave", "jump", "nod"] as const;
@@ -42,7 +44,7 @@ export interface ContextAssistRequest {
   step: (typeof CONTEXT_STEPS)[number];
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   /** 画面で現在選ばれている内容（利用者がボタンで選んだもの・確認済みの提案） */
-  current: { scene: ContextScene | null; conditions: BodyCondition[] };
+  current: { scene: ContextScene | null; conditions: BodyCondition[]; tension?: (typeof SUBJECTIVE_TENSIONS)[number] | null };
 }
 
 export interface ContextAssistResult {
@@ -51,6 +53,8 @@ export interface ContextAssistResult {
   condition_candidates: BodyCondition[];
   needs_clarification: boolean;
   clarification_question: string | null;
+  /** 利用者が述べた主観的な緊張（自己申告）。計測値ではない。不明・不正は null */
+  tension_candidate: (typeof SUBJECTIVE_TENSIONS)[number] | null;
   /** もこりんの表情。不正な値は calm（原本 app.py の既定と同じ） */
   emotion: (typeof MOKORIN_EMOTIONS)[number];
   /** もこりんの動作。不正な値は nod（原本 app.py の既定と同じ） */
@@ -115,10 +119,11 @@ export function validateContextAssistRequest(body: unknown): Validation<ContextA
 
   const current = body.current;
   if (!isObject(current)) return fail("current がない");
-  const cExtra = extraKeys(current, ["scene", "conditions"], "current");
+  const cExtra = extraKeys(current, ["scene", "conditions", "tension"], "current");
   if (cExtra) return fail(cExtra);
   if (!(current.scene === null || isOneOf(current.scene, CONTEXT_SCENES))) return fail("current.scene が不正");
   if (!Array.isArray(current.conditions) || !current.conditions.every((c) => isOneOf(c, BODY_CONDITIONS))) return fail("current.conditions が不正");
+  if (!(current.tension === undefined || current.tension === null || isOneOf(current.tension, SUBJECTIVE_TENSIONS))) return fail("current.tension が不正");
   return { ok: true, value: body as unknown as ContextAssistRequest };
 }
 
@@ -137,6 +142,8 @@ export const CONTEXT_INSTRUCTIONS = [
   `場面の候補は次のいずれか: ${CONTEXT_SCENES.map((s) => `${s}=${SCENE_LABELS[s]}`).join(", ")}`,
   `身体状態の候補は次のいずれか（複数可）: ${BODY_CONDITIONS.map((c) => `${c}=${CONDITION_LABELS[c]}`).join(", ")}`,
   "必ず守ること:",
+  "- 最初の段階（tension）では、利用者が今緊張しているかを聞く。答えは tension_candidate に calm（落ち着いている・緊張していない）/ slight（少し）/ high（かなり）で返す。これは本人の主観で、計測した緊張度ではない。緊張していなくても責めず、そのまま次の質問へ進む。",
+  "- tension の次は「何か予定があるの？」のように自然に場面を尋ね、その次に「今は落ち着いて座ってる？それとも移動してきたところ？」のように身体状態を尋ねる。すでに答えた内容は聞き直さない。",
   "- 利用者がはっきり述べた内容だけを候補にする。「緊張している」「不安」だけでは場面を決めず、scene_candidate を null にして、どんな場面の前かを尋ねる。",
   "- 身体状態は、利用者が「特にない」「座っている」「落ち着いている」など明言した場合だけ none にする。none と他の状態は同時に出さない。",
   "- 分からない・曖昧な場合は needs_clarification を true にし、clarification_question に短い質問を1つ書く。すでに答えてもらったことは聞き直さない。",
@@ -151,13 +158,14 @@ export const CONTEXT_INSTRUCTIONS = [
 export const CONTEXT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "emotion", "action"],
+  required: ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action"],
   properties: {
     reply: { type: "string", description: "もこりんの返答（120文字程度まで）" },
     scene_candidate: { type: ["string", "null"], enum: [...CONTEXT_SCENES, null], description: "明言された場面。なければ null" },
     condition_candidates: { type: "array", items: { type: "string", enum: [...BODY_CONDITIONS] }, description: "明言された身体状態" },
     needs_clarification: { type: "boolean" },
     clarification_question: { type: ["string", "null"], description: "追加で尋ねる質問。不要なら null" },
+    tension_candidate: { type: ["string", "null"], enum: [...SUBJECTIVE_TENSIONS, null], description: "利用者が述べた主観的な緊張。なければ null" },
     emotion: { type: "string", enum: [...MOKORIN_EMOTIONS], description: "もこりんの表情" },
     action: { type: "string", enum: [...MOKORIN_ACTIONS], description: "もこりんの動作" },
   },
@@ -167,7 +175,8 @@ export const CONTEXT_JSON_SCHEMA = {
 export function buildCurrentNote(req: ContextAssistRequest): string {
   const scene = req.current.scene ? SCENE_LABELS[req.current.scene] : "未選択";
   const conds = req.current.conditions.length > 0 ? req.current.conditions.map((c) => CONDITION_LABELS[c]).join("・") : "未選択";
-  return `現在の段階: ${req.step}。画面で選択中の場面: ${scene}。身体状態: ${conds}。`;
+  const tension = req.current.tension ? { calm: "落ち着いている", slight: "少し緊張", high: "かなり緊張" }[req.current.tension] : "未回答";
+  return `現在の段階: ${req.step}。本人の主観的な緊張: ${tension}。画面で選択中の場面: ${scene}。身体状態: ${conds}。`;
 }
 
 export function buildContextResponsesRequest(
@@ -194,7 +203,7 @@ const PROHIBITED = ["と診断", "診断結果", "病気", "治療", "処方", "
 export function validateContextResult(v: unknown): Validation<ContextAssistResult> {
   const fail = (message: string): Validation<ContextAssistResult> => ({ ok: false, message });
   if (!isObject(v)) return fail("result がオブジェクトではない");
-  const extra = extraKeys(v, ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "emotion", "action"], "result");
+  const extra = extraKeys(v, ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action"], "result");
   if (extra) return fail(extra);
   if (typeof v.reply !== "string" || v.reply.trim().length === 0) return fail("reply が空");
   if (chars(v.reply) > CONTEXT_LIMITS.maxReplyChars) return fail("reply が長すぎる");
@@ -215,6 +224,8 @@ export function validateContextResult(v: unknown): Validation<ContextAssistResul
       condition_candidates: conds,
       needs_clarification: v.needs_clarification,
       clarification_question: typeof q === "string" && q.trim().length > 0 ? q.trim() : null,
+      // 主観的な緊張は補助情報のため、不正・欠落は null（候補の採否には影響させない）
+      tension_candidate: isOneOf(v.tension_candidate, SUBJECTIVE_TENSIONS) ? v.tension_candidate : null,
       // 表情・動作は見た目だけのため、不正・欠落なら原本 app.py と同じ既定値（calm / nod）にする（候補の採否には影響させない）
       emotion: isOneOf(v.emotion, MOKORIN_EMOTIONS) ? v.emotion : "calm",
       action: isOneOf(v.action, MOKORIN_ACTIONS) ? v.action : "nod",

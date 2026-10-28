@@ -45,13 +45,20 @@ export function stubContextResult(body: Record<string, unknown>): Record<string,
   const scene = STUB_SCENE_WORDS.find(([, re]) => re.test(last))?.[0] ?? null;
   let conds = STUB_CONDITION_WORDS.filter(([, re]) => re.test(last)).map(([c]) => c);
   if (conds.includes("none") && conds.length > 1) conds = conds.filter((c) => c !== "none");
-  const needs = scene === null && conds.length === 0;
+  const tension = /かなり|すごく|とても|めちゃ/.test(last) && /緊張/.test(last) ? "high"
+    : /少し|ちょっと/.test(last) && /緊張/.test(last) ? "slight"
+    : /落ち着いて|緊張してない|緊張していない|大丈夫/.test(last) ? "calm" : null;
+  // 緊張の段階なら緊張の答えだけで次へ進める。それ以外の段階では場面・身体状態がなければ追加で質問する
+  const note = input.find((m) => m.role === "developer" && typeof m.content === "string")?.content as string ?? "";
+  const inTensionStep = note.includes("現在の段階: tension");
+  const needs = scene === null && conds.length === 0 && (!inTensionStep || tension === null);
   return {
     reply: `${STUB_CHAT_PREFIX}キーワード判定: 場面=${scene ?? "なし"} / 身体状態=${conds.join(",") || "なし"}`,
     scene_candidate: scene,
     condition_candidates: conds,
     needs_clarification: needs,
     clarification_question: needs ? "（スタブ）どんな場面の前か教えてください" : null,
+    tension_candidate: tension,
     // 機械的な決め方（AI の判断ではない）: 追加質問なら calm/nod、候補ありなら happy/nod、睡眠不足なら sleepy
     emotion: conds.includes("sleep_lack") ? "sleepy" : needs ? "calm" : "happy",
     action: "nod",

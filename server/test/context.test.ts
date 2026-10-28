@@ -152,3 +152,18 @@ test("200（スタブ）: 応答に emotion / action を含む", async () => {
   assert.ok(["happy", "calm", "sad", "sleepy"].includes(b.result.emotion));
   assert.ok(["wave", "jump", "nod"].includes(b.result.action));
 });
+
+test("主観的な緊張（tension 段階）: step と current.tension を受け付け、tension_candidate を返す。不正値は null", async () => {
+  assert.equal(validateContextAssistRequest(request([{ role: "user", content: "かなり緊張してる" }], { step: "tension" as never, current: { scene: null, conditions: [], tension: null } as never })).ok, true);
+  assert.equal(validateContextAssistRequest(request(FIRST, { current: { scene: null, conditions: [], tension: "panic" } as never })).ok, false);
+  assert.deepEqual(CONTEXT_JSON_SCHEMA.properties.tension_candidate.enum, ["calm", "slight", "high", null]);
+  const base = { reply: "そっか", scene_candidate: null, condition_candidates: [], needs_clarification: false, clarification_question: null, emotion: "calm", action: "nod" };
+  const ok = validateContextResult({ ...base, tension_candidate: "high" });
+  assert.ok(ok.ok && ok.value.tension_candidate === "high");
+  const bad = validateContextResult({ ...base, tension_candidate: "very" });
+  assert.ok(bad.ok && bad.value.tension_candidate === null);
+  const res = await setup().handler(post(request([{ role: "user", content: "かなり緊張してる" }], { step: "tension" as never })), ENV);
+  const b = await res.json() as any;
+  assert.equal(res.status, 200);
+  assert.equal(b.result.tension_candidate, "high");
+});
