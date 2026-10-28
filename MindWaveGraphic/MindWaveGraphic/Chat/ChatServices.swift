@@ -14,14 +14,15 @@ protocol ChatRemoteClient: Sendable {
     func send(_ request: ChatRequestDTO) async throws -> ChatResponseDTO
 }
 
-/// 自前サーバーの POST /v1/chat を呼ぶ。接続先・クライアントトークンは単発インサイトと共通
-/// （RemoteInsightConfiguration）。アプリは OpenAI の APIキーを持たない。
-struct RemoteChatClient: ChatRemoteClient {
+/// 自前サーバーへ JSON を POST する共通処理（AI 相談・もこりんの状況整理で共用）。
+/// 接続先・クライアントトークンは単発インサイトと共通（RemoteInsightConfiguration）。アプリは OpenAI の APIキーを持たない。
+struct ServerJSONPoster {
     let configuration: RemoteInsightConfiguration
     var session: URLSession = .shared
 
-    func send(_ body: ChatRequestDTO) async throws -> ChatResponseDTO {
-        var request = URLRequest(url: configuration.baseURL.appendingPathComponent("v1/chat"))
+    /// 200 なら本文、それ以外は InsightClientError を投げる
+    func post<Body: Encodable>(path: String, body: Body) async throws -> Data {
+        var request = URLRequest(url: configuration.baseURL.appendingPathComponent(path))
         request.httpMethod = "POST"
         request.timeoutInterval = configuration.timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -36,13 +37,23 @@ struct RemoteChatClient: ChatRemoteClient {
             throw error.code == .timedOut ? InsightClientError.timeout : InsightClientError.transport(code: error.code.rawValue)
         }
         guard let http = urlResponse as? HTTPURLResponse else { throw InsightClientError.invalidResponse("not http") }
-        let decoder = MindWaveContract.makeDecoder()
         guard http.statusCode == 200 else {
-            let code = (try? decoder.decode(InsightErrorDTO.self, from: data))?.error
+            let code = (try? MindWaveContract.makeDecoder().decode(InsightErrorDTO.self, from: data))?.error
             throw InsightClientError.httpStatus(http.statusCode, errorCode: code)
         }
+        return data
+    }
+}
+
+/// 自前サーバーの POST /v1/chat を呼ぶ
+struct RemoteChatClient: ChatRemoteClient {
+    let configuration: RemoteInsightConfiguration
+    var session: URLSession = .shared
+
+    func send(_ body: ChatRequestDTO) async throws -> ChatResponseDTO {
+        let data = try await ServerJSONPoster(configuration: configuration, session: session).post(path: "v1/chat", body: body)
         do {
-            let decoded = try decoder.decode(ChatResponseDTO.self, from: data)
+            let decoded = try MindWaveContract.makeDecoder().decode(ChatResponseDTO.self, from: data)
             try ChatResponseValidation.validate(decoded, expectedRequestId: body.requestId, expectedConversationId: body.conversationId)
             return decoded
         } catch {

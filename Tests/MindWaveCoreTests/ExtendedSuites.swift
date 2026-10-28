@@ -7,4 +7,5 @@ func runExtendedSuites() async {
     PipelineTests.run()
     await InsightTests.run()
     await ChatTests.run()
+    await MokorinTests.run()
 }
