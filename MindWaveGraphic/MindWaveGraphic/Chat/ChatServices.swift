@@ -22,6 +22,8 @@ struct ServerJSONPoster {
 
     /// 200 なら本文、それ以外は InsightClientError を投げる
     func post<Body: Encodable>(path: String, body: Body) async throws -> Data {
+        // 実機でループバックアドレスを指定している場合は、届かないことが確定しているので送らずに理由を返す
+        if ServerConnectionDiagnostics.isLoopbackUnreachable(configuration.baseURL) { throw InsightClientError.loopbackOnDevice }
         var request = URLRequest(url: configuration.baseURL.appendingPathComponent(path))
         request.httpMethod = "POST"
         request.timeoutInterval = configuration.timeout
@@ -82,6 +84,8 @@ extension InsightClientError {
             return "AIの応答を取得できませんでした（\(status)）。"
         case .invalidResponse:
             return "AIから想定外の応答が返りました。"
+        case .loopbackOnDevice:
+            return "実機では 127.0.0.1 は iPhone 自身を指すため、Mac のサーバーに接続できません（シミュレーターで試すか、docs/MOKORIN_VOICE_UI.md の実機の接続方法を確認してください）。"
         case .containsMockData:
             return "送信できないデータが含まれています。"
         }

@@ -57,29 +57,56 @@ nonisolated enum MokorinKeywordInterpreter {
     ]
 
     static func interpret(_ text: String) -> (scene: ContextScene?, conditions: Set<BodyCondition>) {
-        let scene = sceneWords.first { _, words in words.contains { text.contains($0) } }?.0
+        var scene = sceneWords.first { _, words in words.contains { text.contains($0) } }?.0
+        // 「予定は特にない」は安静として扱う（場面の段階での答え）
+        if scene == nil, ["予定はない", "予定は特にない", "特に予定", "何もない"].contains(where: { text.contains($0) }) { scene = .calm }
         var conditions = Set(conditionWords.filter { _, words in words.contains { text.contains($0) } }.map(\.0))
         if conditions.contains(.none) && conditions.count > 1 { conditions.remove(.none) }
         return (scene, conditions)
+    }
+
+    /// 主観的な緊張（自己申告）を読み取る。はっきりした言葉がなければ nil
+    static func interpretTension(_ text: String) -> SubjectiveTension? {
+        let negated = ["緊張してない", "緊張していない", "緊張はしてない", "緊張はない", "緊張しない"]
+        if negated.contains(where: { text.contains($0) }) || ["落ち着いて", "大丈夫", "リラックス"].contains(where: { text.contains($0) }) {
+            return .calm
+        }
+        let tense = ["緊張", "ドキドキ", "どきどき", "不安"].contains(where: { text.contains($0) })
+        guard tense else { return nil }
+        if ["かなり", "すごく", "とても", "めちゃ", "すごい", "やばい"].contains(where: { text.contains($0) }) { return .high }
+        if ["少し", "ちょっと", "やや", "少々"].contains(where: { text.contains($0) }) { return .slight }
+        return .slight
     }
 }
 
 // MARK: - もこりんの定型文（外部AIを使えないとき・ボタンで答えたとき）
 
 nonisolated enum MokorinScript {
-    static let greeting = "こんにちは！今はどんな状況かな？下のボタンで選んでも、文章で教えてくれても大丈夫だよ。"
+    /// 最初の質問（主観的な緊張）
+    static let greeting = "こんにちは。今、緊張してる？"
 
     static func greetingForEdit(current: MeasurementContext) -> String {
-        "今の状況を教えてね。いまは「\(current.scene.displayName)」になっているよ。変わったところはある？"
+        "今の状況を教えてね。いまは「\(current.scene.displayName)」になっているよ。今、緊張してる？"
     }
 
-    static let askScene = "教えてくれてありがとう。どんな場面の前かな？（面接や発表、試合、大切な予定など）下のボタンからも選べるよ。"
+    static let askTensionAgain = "教えてくれてありがとう。今の気持ちに近いのはどれかな？話しても、下から選んでも大丈夫だよ。"
+
+    /// 緊張の答えを受けて場面を尋ねる
+    static func askScene(after tension: SubjectiveTension?) -> String {
+        switch tension {
+        case .high, .slight: return "そっか。何か予定があるの？"
+        case .calm:          return "落ち着いているんだね。何か予定はある？"
+        case nil:            return "何か予定があるのかな？"
+        }
+    }
+
+    static let askScene = "何か予定があるのかな？面接や試合、作業など、近いものを教えてね。"
 
     static func askCondition(scene: ContextScene) -> String {
-        "\(sceneLead(scene))今は移動してきたところ？それとも座って落ち着いている？当てはまるものを下から選んでね。"
+        "\(sceneLead(scene))今は落ち着いて座ってる？それとも移動してきたところ？"
     }
 
-    static let askConditionAgain = "からだの状態を教えてね。走ってきた・階段を上った・コーヒーを飲んだなど、当てはまるものがなければ「特になし」を選んでね。"
+    static let askConditionAgain = "からだの状態を教えてね。走ってきた・階段を上った・コーヒーを飲んだなど。特になければ「座って落ち着いてる」を選んでね。"
 
     static func summary(scene: ContextScene, conditions: Set<BodyCondition>) -> String {
         "教えてくれてありがとう。\(sceneShort(scene))で、\(conditionPhrase(conditions))なんだね。この状況で測定してみようか？"
@@ -87,7 +114,7 @@ nonisolated enum MokorinScript {
 
     private static func sceneLead(_ scene: ContextScene) -> String {
         switch scene {
-        case .interview: return "面接や発表の前なんだね。緊張するよね。"
+        case .interview: return "面接前なんだね。"
         case .sports:    return "試合や大会の前なんだね。"
         case .important: return "大切な予定の前なんだね。"
         case .work:      return "作業や集中の時間なんだね。"
@@ -98,7 +125,7 @@ nonisolated enum MokorinScript {
 
     static func sceneShort(_ scene: ContextScene) -> String {
         switch scene {
-        case .interview: return "面接や発表の前"
+        case .interview: return "面接前"
         case .sports:    return "試合や大会の前"
         case .important: return "大切な予定の前"
         case .work:      return "作業や集中のとき"
@@ -109,11 +136,11 @@ nonisolated enum MokorinScript {
 
     static func conditionPhrase(_ conditions: Set<BodyCondition>) -> String {
         let ordered = BodyCondition.allCases.filter { conditions.contains($0) && $0 != .none }
-        if ordered.isEmpty { return "からだは特に変わりない状態" }
+        if ordered.isEmpty { return "落ち着いて座っている状態" }
         let phrases: [String] = ordered.map {
             switch $0 {
             case .running:   return "走ってきた直後"
-            case .stairs:    return "階段や移動の直後"
+            case .stairs:    return "階段を上った直後"
             case .smoking:   return "喫煙のあと"
             case .caffeine:  return "カフェインをとったあと"
             case .sleepLack: return "睡眠不足ぎみ"
@@ -132,11 +159,57 @@ nonisolated enum MokorinScript {
 nonisolated enum MokorinExpressionRules {
     static let greeting: (MokorinEmotion, MokorinAction) = (.happy, .wave)
 
-    static func forReply(step: MokorinContextViewModel.Step, userText: String?, conditions: Set<BodyCondition>) -> (MokorinEmotion, MokorinAction) {
+    /// 感情を決めつけすぎないよう、はっきりした言葉があるときだけ sad / sleepy / jump にする
+    static func forReply(step: MokorinContextViewModel.Step, userText: String?, conditions: Set<BodyCondition>,
+                         tension: SubjectiveTension? = nil) -> (MokorinEmotion, MokorinAction) {
         let text = userText ?? ""
         if ["つらい", "悲しい", "しんどい", "落ち込"].contains(where: { text.contains($0) }) { return (.sad, .nod) }
         if conditions.contains(.sleepLack) || ["眠い", "ねむい", "寝不足"].contains(where: { text.contains($0) }) { return (.sleepy, .nod) }
+        if ["楽しみ", "がんばる", "頑張る", "わくわく", "ワクワク"].contains(where: { text.contains($0) }) { return (.happy, .jump) }
         if step == .review { return (.happy, .nod) }
-        return (.calm, .nod)
+        switch tension {
+        case .high, .slight: return (.calm, .nod)
+        case .calm:          return (.happy, .nod)
+        case nil:            return (.calm, .nod)
+        }
+    }
+}
+
+// MARK: - 選択肢（クイック返信）
+
+/// 会話の段階に応じて表示する選択肢。タップしても文章を入力したのと同じ扱いで会話が進む
+nonisolated enum MokorinQuickReply: Hashable, Sendable {
+    case tension(SubjectiveTension)
+    case scene(ContextScene)
+    /// 予定は特にない（安静）
+    case noPlan
+    case condition(BodyCondition)
+    case confirmConditions
+
+    var label: String {
+        switch self {
+        case .tension(let t): return t.replyLabel
+        case .noPlan:         return "特に予定はない"
+        case .scene(let s):
+            switch s {
+            case .interview: return "面接・発表"
+            case .sports:    return "試合・大会"
+            case .important: return "大切な予定"
+            case .work:      return "作業・集中"
+            case .calm:      return "安静"
+            case .other:     return "その他"
+            }
+        case .condition(let c):
+            switch c {
+            case .none:      return "座って落ち着いてる"
+            case .stairs:    return "階段・移動してきた"
+            case .running:   return "走ってきた"
+            case .caffeine:  return "カフェインをとった"
+            case .sleepLack: return "寝不足"
+            case .afterMeal: return "食後"
+            case .smoking:   return "喫煙後"
+            }
+        case .confirmConditions: return "これで決定"
+        }
     }
 }

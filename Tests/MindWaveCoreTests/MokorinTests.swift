@@ -60,6 +60,8 @@ enum MokorinTests {
         contract()
         T.suite("Mokorin / 友達のキャラクター（WKWebView）の制御")
         await webCharacter()
+        T.suite("Mokorin / 音声対話（1ターンずつ・テスト用の音声入出力）")
+        await voice()
         await e2e()
     }
 
@@ -82,12 +84,12 @@ enum MokorinTests {
     // MARK: - 会話フロー（端末内）
 
     static func localFlow() async {
-        await T.test("もこりんが最初に場面を質問する（定型文と表示）") {
+        await T.test("もこりんが最初に「今、緊張してる？」と聞く（定型文と表示）") {
             let vm = localVM()
             T.expectEqual(vm.messages.count, 1)
-            T.expect(vm.messages[0].text.contains("どんな状況かな"), "greeting")
+            T.expectEqual(vm.messages[0].text, "こんにちは。今、緊張してる？")
             T.expectEqual(vm.messages[0].origin, .fixed)
-            T.expectEqual(vm.step, .scene)
+            T.expectEqual(vm.step, .tension)
             T.expect(!vm.usesRemoteAI, "未同意なので外部AIを使わない")
         }
         await T.test("ボタンだけで: 場面を1つ選ぶ → 身体状態を複数選ぶ → 決定 → 確認") {
@@ -119,19 +121,23 @@ enum MokorinTests {
             T.expectEqual(vm.selectedScene, .interview)
             T.expectEqual(vm.suggestedScene, .interview)
             T.expectEqual(vm.step, .condition)
-            T.expect(vm.messages.last?.text.contains("面接や発表の前なんだね") == true, "empathy + condition question")
+            T.expect(vm.messages.last?.text.contains("面接前なんだね") == true, "empathy + condition question")
             await vm.submit("さっき階段を上ってきました")
             T.expectEqual(vm.selectedConditions, [.stairs])
             T.expectEqual(vm.step, .review)
-            T.expect(vm.messages.last?.text.contains("階段や移動の直後") == true, "summary")
+            T.expect(vm.messages.last?.text.contains("階段を上った直後") == true, "summary")
             T.expect(vm.messages.allSatisfy { $0.origin == .user || $0.origin == .fixed }, "端末内は定型文と表示")
         }
-        await T.test("曖昧な文章では場面を決めず、追加で質問する（同じ段階のまま）") {
+        await T.test("「緊張しています」だけでは場面を決めず、予定を尋ねる。場面の段階で曖昧なら追加で質問する") {
             let vm = localVM()
             await vm.submit("少し緊張しています")
             T.expectEqual(vm.step, .scene)
+            T.expectEqual(vm.subjectiveTension, .slight)
             T.expect(!vm.hasSceneAnswer && vm.suggestedScene == nil, "not decided")
-            T.expect(vm.messages.last?.text.contains("どんな場面の前かな") == true, "clarification")
+            T.expect(vm.messages.last?.text.contains("何か予定があるの") == true, "asks plans")
+            await vm.submit("うーん")
+            T.expectEqual(vm.step, .scene)
+            T.expect(vm.messages.last?.text.contains("面接や試合、作業など") == true, "clarification")
         }
         await T.test("提案を修正できる: 場面を別のボタンに変えると提案表示が消え、確認のまとめも更新") {
             let vm = localVM()
@@ -154,13 +160,70 @@ enum MokorinTests {
             vm.selectScene(.interview)
             T.expectEqual(vm.step, .review, "回答済みなので確認へ")
         }
+        await T.test("体験の例（端末内の定型文）: かなり緊張 → 就活の面接 → 階段 → まとめ。主観的な緊張は MeasurementContext に入らない") {
+            let vm = localVM()
+            await vm.submit("かなり緊張してる")
+            T.expectEqual(vm.subjectiveTension, .high)
+            T.expectEqual(vm.messages.last?.text, "そっか。何か予定があるの？")
+            T.expectEqual(vm.pose.emotion, .calm); T.expectEqual(vm.pose.action, .nod)
+            await vm.submit("これから就活の面接なんだ")
+            T.expectEqual(vm.messages.last?.text, "面接前なんだね。今は落ち着いて座ってる？それとも移動してきたところ？")
+            await vm.submit("さっき階段を上ってきた")
+            T.expectEqual(vm.messages.last?.text, "教えてくれてありがとう。面接前で、階段を上った直後なんだね。この状況で測定してみようか？")
+            T.expectEqual(vm.step, .review)
+            T.expectEqual(vm.measurementContext.scene, .interview)
+            T.expectEqual(vm.measurementContext.conditions, [.stairs])
+        }
+        await T.test("選択肢だけで: 今は落ち着いてる → 特に予定はない → 座って落ち着いてる → 確認（緊張していなくても測定できる）") {
+            let vm = localVM()
+            T.expectEqual(vm.quickReplies.map(\.label), ["少し緊張してる", "かなり緊張してる", "今は落ち着いてる"])
+            vm.tap(.tension(.calm))
+            T.expectEqual(vm.messages.last?.text, "落ち着いているんだね。何か予定はある？")
+            T.expectEqual(vm.pose.emotion, .happy)
+            T.expect(vm.quickReplies.contains(.noPlan), "scene chips")
+            vm.tap(.noPlan)
+            T.expectEqual(vm.step, .condition)
+            vm.tap(.condition(.none))
+            T.expectEqual(vm.step, .review)
+            T.expectEqual(vm.measurementContext.scene, .calm)
+            T.expectEqual(vm.measurementContext.conditions, [.none])
+        }
+        await T.test("身体状態の選択肢: 複数選べて「これで決定」が出る。最初の選択で既定の「特になし」は外れる") {
+            let vm = localVM()
+            vm.tap(.tension(.slight)); vm.tap(.scene(.sports))
+            T.expect(!vm.quickReplies.contains(.confirmConditions), "no confirm yet")
+            vm.tap(.condition(.running)); vm.tap(.condition(.caffeine))
+            T.expectEqual(vm.selectedConditions, [.running, .caffeine])
+            T.expect(vm.isSelected(.condition(.running)) && !vm.isSelected(.condition(.stairs)), "selected state")
+            T.expect(vm.quickReplies.contains(.confirmConditions), "confirm chip")
+            vm.tap(.confirmConditions)
+            T.expectEqual(vm.step, .review)
+        }
+        await T.test("緊張の答えが2回はっきりしなくても先へ進む（同じ質問を繰り返さない）") {
+            let vm = localVM()
+            await vm.submit("うーん")
+            T.expectEqual(vm.step, .tension)
+            await vm.submit("よくわからない")
+            T.expectEqual(vm.step, .scene)
+        }
+        await T.test("選択の編集（シート）: 発言を増やさずに変更し、「完了」で確認へ") {
+            let vm = localVM()
+            let count = vm.messages.count
+            vm.editScene(.work); vm.editCondition(.afterMeal); vm.editCondition(.none); vm.editCondition(.smoking)
+            T.expectEqual(vm.messages.count, count)
+            T.expectEqual(vm.selectedConditions, [.smoking])
+            vm.finishManualEdit()
+            T.expectEqual(vm.step, .review)
+            T.expectEqual(vm.measurementContext.scene, .work)
+        }
         await T.test("やり直し: 会話と選択を最初の状態に戻し、会話IDを更新") {
             let vm = localVM()
             await vm.submit("面接の前です")
             let before = vm.conversationId
             vm.restart()
             T.expectEqual(vm.messages.count, 1)
-            T.expectEqual(vm.step, .scene)
+            T.expectEqual(vm.step, .tension)
+            T.expect(vm.subjectiveTension == nil, "tension cleared")
             T.expectEqual(vm.selectedScene, MeasurementContext.default.scene)
             T.expect(vm.conversationId != before, "new conversation")
         }
@@ -178,7 +241,7 @@ enum MokorinTests {
             T.expectEqual(vm.step, .condition)
             T.expectEqual(vm.messages.last?.origin, .openAI(model: "test-model"))
             let req = client.requests[0]
-            T.expectEqual(req.step, .scene)
+            T.expectEqual(req.step, .tension)
             T.expectEqual(req.messages.map(\.role), [.assistant, .user])
             T.expect(req.current.scene == nil && req.current.conditions.isEmpty, "未回答は null / 空")
         }
@@ -205,10 +268,10 @@ enum MokorinTests {
             T.expect(vm.messages.last?.text.contains("この状況で測定してみようか") == true, "summary appended")
         }
         await T.test("外部AI: 曖昧なときは追加質問を表示し、場面は決めない") {
-            let client = FakeContextClient.returning(reply: "緊張しているんだね。", scene: nil, clarify: true, question: "どんな場面の前かな？")
+            let client = FakeContextClient.returning(reply: "そうなんだね。", scene: nil, clarify: true, question: "どんな場面の前かな？")
             let vm = remoteVM(client: client)
-            await vm.submit("少し緊張しています")
-            T.expectEqual(vm.step, .scene)
+            await vm.submit("うーん")
+            T.expectEqual(vm.step, .tension, "緊張も場面も分からないので同じ段階のまま")
             T.expect(vm.messages.last?.text.contains("どんな場面の前かな？") == true, "question shown")
         }
         await T.test("スタブの返答は「スタブ」と表示（本物の AI として扱わない）。質問がない返答には定型の次の質問を添える") {
@@ -349,6 +412,77 @@ enum MokorinTests {
         }
     }
 
+    // MARK: - 音声対話
+
+    static func voice() async {
+        await T.test("マイク: 権限あり → 録音 → 途中経過 → 確定した文字を会話へ送る → 待機に戻る") {
+            let input = FakeSpeechInput(), output = FakeSpeechOutput()
+            let vc = MokorinVoiceController(input: input, output: output)
+            var received: [String] = []
+            vc.onUtterance = { received.append($0) }
+            await vc.micTapped()
+            T.expect(vc.isListening, "listening")
+            T.expect(vc.speaksReplies, "声で話したら読み上げを ON")
+            input.partial("面接")
+            try await Task.sleep(for: .milliseconds(20))
+            T.expectEqual(vc.partialTranscript, "面接")
+            await vc.micTapped()   // 話し終えて送る
+            try await Task.sleep(for: .milliseconds(30))
+            T.expectEqual(received, ["面接の前です"])
+            T.expectEqual(vc.state, .idle)
+        }
+        await T.test("権限がない・使えない: 録音せず理由を表示（文字入力で続けられる）") {
+            let input = FakeSpeechInput(); input.availability = .denied("マイクが許可されていません")
+            let vc = MokorinVoiceController(input: input, output: FakeSpeechOutput())
+            await vc.micTapped()
+            T.expectEqual(input.startCount, 0)
+            T.expectEqual(vc.state, .idle)
+            T.expect(vc.problem?.contains("マイク") == true, "problem shown")
+        }
+        await T.test("読み上げ中にマイク: 読み上げを止めてから録音（自分の声を認識しない）。録音中は読み上げない") {
+            let input = FakeSpeechInput(), output = FakeSpeechOutput()
+            let vc = MokorinVoiceController(input: input, output: output)
+            vc.speaksReplies = true
+            var speaking: [Bool] = []
+            vc.onSpeakingChanged = { speaking.append($0) }
+            vc.speakReply("そっか。何か予定があるの？")
+            T.expectEqual(vc.state, .speaking)
+            T.expectEqual(output.spoken, ["そっか。何か予定があるの？"])
+            await vc.micTapped()
+            T.expectEqual(output.stopCount, 1)
+            T.expect(input.stopBeforeStart, "読み上げ停止の後に録音開始")
+            T.expect(vc.isListening, "listening")
+            vc.speakReply("録音中は読まない")
+            T.expectEqual(output.spoken.count, 1)
+            T.expectEqual(speaking, [true, false])
+        }
+        await T.test("読み上げ OFF のときは読まない・空の認識結果は送らない") {
+            let input = FakeSpeechInput(), output = FakeSpeechOutput()
+            let vc = MokorinVoiceController(input: input, output: output)
+            vc.speakReply("こんにちは")
+            T.expectEqual(output.spoken.count, 0)
+            var received = 0
+            vc.onUtterance = { _ in received += 1 }
+            input.finalText = "  "
+            await vc.micTapped(); await vc.micTapped()
+            try await Task.sleep(for: .milliseconds(30))
+            T.expectEqual(received, 0)
+            T.expect(vc.problem?.contains("聞き取れなかった") == true, "retry message")
+        }
+        T.test("実機の接続診断: 実機で 127.0.0.1 / localhost は届かないと判定（シミュレーター・https の別ホストは対象外）") {
+            let local = URL(string: "http://127.0.0.1:8787")!
+            T.expect(ServerConnectionDiagnostics.isLoopbackUnreachable(local, isSimulator: false), "device + loopback")
+            T.expect(!ServerConnectionDiagnostics.isLoopbackUnreachable(local, isSimulator: true), "simulator ok")
+            T.expect(ServerConnectionDiagnostics.isLoopbackUnreachable(URL(string: "http://localhost:8787")!, isSimulator: false), "localhost")
+            T.expect(!ServerConnectionDiagnostics.isLoopbackUnreachable(URL(string: "https://insight.example.com")!, isSimulator: false), "remote https")
+            T.expect(InsightClientError.loopbackOnDevice.chatUserMessage.contains("iPhone 自身"), "clear message")
+        }
+        T.test("読み上げ中の口の動き: setSpeaking の呼び出し文") {
+            T.expectEqual(MokorinWebScript.setSpeaking(true), "setSpeaking(true)")
+            T.expectEqual(MokorinWebScript.setSpeaking(false), "setSpeaking(false)")
+        }
+    }
+
     // MARK: - E2E（ローカルサーバー＋OpenAI スタブ）
 
     static func e2e() async {
@@ -374,4 +508,38 @@ enum MokorinTests {
             T.expectEqual(vm.pose.action, .nod, "サーバーの action を反映")
         }
     }
+}
+
+// MARK: - テスト用の音声入出力
+
+nonisolated final class FakeSpeechInput: MokorinSpeechInput, @unchecked Sendable {
+    var availability: MokorinVoiceAvailability = .available
+    var finalText = "面接の前です"
+    var startCount = 0
+    var stopBeforeStart = false
+    weak var output: FakeSpeechOutput?
+    private var onPartial: ((String) -> Void)?
+    private var onFinal: ((String) -> Void)?
+
+    func requestAvailability() async -> MokorinVoiceAvailability { availability }
+    func start(onPartial: @escaping (String) -> Void, onFinal: @escaping (String) -> Void, onError: @escaping (String) -> Void) throws {
+        startCount += 1
+        stopBeforeStart = FakeSpeechOutput.lastStopTime != nil
+        self.onPartial = onPartial
+        self.onFinal = onFinal
+    }
+    func partial(_ text: String) { onPartial?(text) }
+    func stop() { let f = onFinal; onFinal = nil; f?(finalText) }
+    func cancel() { onFinal = nil }
+}
+
+nonisolated final class FakeSpeechOutput: MokorinSpeechOutput, @unchecked Sendable {
+    nonisolated(unsafe) static var lastStopTime: Date?
+    var onFinish: (() -> Void)?
+    var spoken: [String] = []
+    var stopCount = 0
+    var isSpeaking = false
+    init() { FakeSpeechOutput.lastStopTime = nil }
+    func speak(_ text: String) { spoken.append(text); isSpeaking = true }
+    func stop() { stopCount += 1; isSpeaking = false; FakeSpeechOutput.lastStopTime = Date() }
 }

@@ -6,9 +6,12 @@
 // 「あとで選ぶ」でスキップしてデフォルトコンテキストのままmainAppへ進める。
 //
 // 2026-10-28: もこりんとの会話で状況を整理できるようにした（Mokorin/、docs/MOKORIN_CONTEXT_INTEGRATION.md）。
-// - 会話・選択の状態は MokorinContextViewModel が持つ（この View は表示と既存の確定処理だけを担当）
-// - 既存のボタン操作・「特になし」の排他・applyAndProceed()・「あとで選ぶ」「変更しない」はそのまま
-// - もこりんの提案は選択に反映されるだけで、測定は利用者が「この状況で測定する」を押したときだけ始まる
+// 2026-10-28 改訂: もこりん中心の音声対話型 UI に変更（docs/MOKORIN_VOICE_UI.md）。
+// - 画面中央に大きなもこりん、その下に最新の会話と選択肢、下部にマイク・文字入力。確定したら測定ボタン
+// - 場面・身体状態の一覧（既存のボタン UI）は「選択を編集」のシートにまとめた（機能は削除していない）
+// - 会話・選択の状態は MokorinContextViewModel、音声は MokorinVoiceController が持つ（この View は表示と既存の確定処理だけ）
+// - 既存の「特になし」の排他・applyAndProceed()・「あとで選ぶ」「変更しない」はそのまま
+// - 測定は利用者が「この状況で測定する」を押したときだけ始まる
 
 import SwiftUI
 
@@ -28,15 +31,21 @@ struct ContextCalibrationView: View {
 
     /// もこりんとの会話と、場面・身体状態の選択状態
     @StateObject private var mokorin: MokorinContextViewModel
+    /// 音声入力・読み上げ（1ターンずつ）
+    @StateObject private var voice = MokorinVoiceController()
     @FocusState private var isInputFocused: Bool
+    @State private var isEditing = false
+    @State private var isHistoryPresented = false
+    /// 読み上げ済みの最後のもこりんの発言（同じ発言を二度読まない）
+    @State private var lastSpokenMessageID: UUID? = nil
+    @Environment(\.scenePhase) private var scenePhase
 
     private let accent = Color(red: 0.35, green: 0.75, blue: 0.95)
-    private let conversationBottomID = "mokorin_conversation_bottom"
 
     init(flowState: AppFlowState, onComplete: (() -> Void)? = nil) {
         self._flowState = ObservedObject(wrappedValue: flowState)
         self.onComplete = onComplete
-        // メインアプリ内から開いた場合は現在の状況を初期表示する（以前の onAppear と同じ内容）
+        // メインアプリ内から開いた場合は現在の状況を初期表示する
         self._mokorin = StateObject(wrappedValue: MokorinContextViewModel(
             initialContext: flowState.measurementContext,
             isInAppEdit: onComplete != nil
@@ -47,66 +56,462 @@ struct ContextCalibrationView: View {
     private var selectedConditions: Set<BodyCondition> { mokorin.selectedConditions }
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            LaunchStarfieldBG()
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                Color.black.ignoresSafeArea()
+                LaunchStarfieldBG()
+                    .opacity(0.55)
+                    .ignoresSafeArea()
 
-            // スクロールコンテンツ。CTAはsafeAreaInsetで分離し、タップ干渉を完全に防ぐ。
-            ScrollViewReader { proxy in
+                VStack(spacing: 14) {
+                    header
+                        .padding(.top, 8)
+                    Spacer(minLength: 0)
+                    characterStage(size: characterSize(for: geo.size.height))
+                    conversationArea
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 20)
+                .frame(width: geo.size.width)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+        }
+        .sheet(isPresented: $isEditing) { editSheet }
+        .sheet(isPresented: $isHistoryPresented) { historySheet }
+        .onAppear { connectVoice() }
+        .onDisappear { voice.cancelAll() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { voice.cancelAll() }   // 背面に回ったら録音・読み上げを止める
+        }
+        .onChange(of: mokorin.messages.count) { _, _ in speakPendingReply() }
+        .onChange(of: mokorin.isSending) { _, sending in if !sending { speakPendingReply() } }
+        #if DEBUG
+        .task { await runMokorinDebugHooks() }
+        #endif
+    }
+
+    // MARK: - Header（必要最低限）
+
+    private var header: some View {
+        VStack(spacing: 6) {
+            Text("今の状況を教えてください")
+                .font(.system(size: 20, weight: .medium))
+                .foregroundStyle(Color.white)
+            if !isInputFocused {
+                Text("もこりんと話しながら、いっしょに整理します。")
+                    .font(.system(size: 12, weight: .light))
+                    .foregroundStyle(Color.white.opacity(0.45))
+            }
+        }
+        .multilineTextAlignment(.center)
+    }
+
+    // MARK: - 中央のもこりん
+
+    private func characterSize(for height: CGFloat) -> CGFloat {
+        if isInputFocused { return 110 }            // キーボード表示中は小さくして入力欄と会話を見えるようにする
+        return min(240, max(150, height * 0.27))   // 小さい iPhone でも会話と選択肢が収まる大きさ
+    }
+
+    private func characterStage(size: CGFloat) -> some View {
+        // もこりん本体の大きさだけでレイアウトし、光の演出は背景に置く（画面幅より広い光で全体が押し広げられないように）
+        MokorinAvatarView(size: size, pose: mokorin.pose)
+            .frame(maxWidth: .infinity)
+            .frame(height: size * 1.05)
+            .background {
+                ZStack {
+                    // 惑星の地平線のような青い光（完成イメージを参考にした演出。静止）
+                    Ellipse()
+                        .stroke(LinearGradient(colors: [.clear, accent.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing),
+                                lineWidth: 1.2)
+                        .frame(width: size * 2.2, height: size * 0.5)
+                        .offset(y: size * 0.32)
+                    RadialGradient(colors: [accent.opacity(0.22), .clear], center: .center, startRadius: 0, endRadius: size * 0.75)
+                        .frame(width: size * 1.6, height: size * 1.1)
+                        .offset(y: size * 0.1)
+                }
+                .allowsHitTesting(false)
+            }
+            .animation(.easeInOut(duration: 0.25), value: size)
+            .allowsHitTesting(false)
+    }
+
+    // MARK: - 会話（最新の発言・選択肢）
+
+    private var conversationArea: some View {
+        VStack(spacing: 10) {
+            voiceStatus
+            if let message = mokorin.latestMokorinMessage {
+                mokorinBubble(message)
+            }
+            userEcho
+            quickReplies
+            if let notice = mokorin.notice ?? voice.problem {
+                Label(notice, systemImage: "exclamationmark.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.orange.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("mokorin_notice")
+            }
+        }
+    }
+
+    private func mokorinBubble(_ message: MokorinContextViewModel.Message) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(message.text)
+                .font(.system(size: 16))
+                .foregroundStyle(Color.white.opacity(0.95))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(originLabel(message.origin))
+                .font(.system(size: 9))
+                .foregroundStyle(isStub(message.origin) ? Color.orange.opacity(0.9) : Color.white.opacity(0.3))
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 22)
+                .fill(Color.white.opacity(0.06))
+                .overlay(RoundedRectangle(cornerRadius: 22)
+                    .strokeBorder(isStub(message.origin) ? Color.orange.opacity(0.5) : Color.white.opacity(0.12), lineWidth: 1))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("もこりん（\(originLabel(message.origin))）：\(message.text)")
+        .accessibilityIdentifier("mokorin_latest_message")
+        .animation(.easeInOut(duration: 0.2), value: message.id)
+    }
+
+    private func originLabel(_ origin: MokorinContextViewModel.Origin) -> String {
+        switch origin {
+        case .openAI(let model): return "OpenAI（\(model)）"
+        case .stub(let model):   return "スタブ応答（\(model)）・実際のAIではありません"
+        case .fixed:             return "端末内の定型文"
+        case .user:              return ""
+        }
+    }
+
+    private func isStub(_ origin: MokorinContextViewModel.Origin) -> Bool {
+        if case .stub = origin { return true }
+        return false
+    }
+
+    /// 自分の最後の発言（音声の場合は認識結果の確認になる）。録音中は途中の認識結果
+    @ViewBuilder
+    private var userEcho: some View {
+        let text: String? = voice.isListening
+            ? (voice.partialTranscript.isEmpty ? "聞いています…" : voice.partialTranscript)
+            : mokorin.latestUserMessage?.text
+        if let text, mokorin.messages.count > 1 || voice.isListening {
+            HStack {
+                Spacer(minLength: 40)
+                Text(text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.white.opacity(voice.isListening ? 0.7 : 0.6))
+                    .lineLimit(3)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(accent.opacity(voice.isListening ? 0.25 : 0.14)))
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(voice.isListening ? "認識中：\(text)" : "あなた：\(text)")
+        }
+    }
+
+    @ViewBuilder
+    private var voiceStatus: some View {
+        switch voice.state {
+        case .listening:
+            statusPill("聞いています。話し終えたら少し待つか、もう一度マイクを押してね", icon: "waveform", color: .red)
+        case .processing:
+            statusPill("もこりんが考え中…", icon: "ellipsis", color: accent)
+        case .speaking:
+            statusPill("もこりんが話しています", icon: "speaker.wave.2.fill", color: accent)
+        case .preparing:
+            statusPill("マイクを準備しています", icon: "mic", color: accent)
+        case .idle:
+            if mokorin.isSending { statusPill("もこりんが考え中…", icon: "ellipsis", color: accent) }
+        }
+    }
+
+    private func statusPill(_ text: String, icon: String, color: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(.system(size: 11))
+            .foregroundStyle(color.opacity(0.9))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(color.opacity(0.12)))
+            .accessibilityIdentifier("mokorin_voice_status")
+    }
+
+    /// 段階に応じた選択肢（タップでも会話が進む）
+    @ViewBuilder
+    private var quickReplies: some View {
+        let replies = mokorin.quickReplies
+        if !replies.isEmpty {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
+                ForEach(replies, id: \.self) { reply in
+                    let selected = mokorin.isSelected(reply)
+                    let isConfirm = reply == .confirmConditions
+                    Button {
+                        mokorin.tap(reply)
+                    } label: {
+                        Text(reply.label)
+                            .font(.system(size: 13, weight: isConfirm ? .semibold : .regular))
+                            .foregroundStyle(selected || isConfirm ? Color.black : Color.white.opacity(0.88))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(
+                                Capsule().fill(selected || isConfirm ? accent : Color.white.opacity(0.05))
+                            )
+                            .overlay(Capsule().strokeBorder(Color.white.opacity(selected || isConfirm ? 0 : 0.16), lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(mokorin.isSending || voice.isListening)
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                    .accessibilityIdentifier("mokorin_reply_\(reply.label)")
+                }
+            }
+        }
+    }
+
+    // MARK: - 下部（測定ボタン・マイク・文字入力）
+
+    private var bottomBar: some View {
+        VStack(spacing: 10) {
+            if mokorin.step == .review {
+                // 測定する内容（ここに表示された内容で測定する。変更は「選択を編集」）
+                Text("場面：\(selectedScene.displayName)　身体状態：\(BodyCondition.allCases.filter { selectedConditions.contains($0) }.map(\.displayName).joined(separator: " / "))")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.white.opacity(0.8))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("mokorin_summary_line")
+                measureButton
+            }
+            inputRow
+            footerRow
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .background(Color.black.opacity(0.92).ignoresSafeArea(edges: .bottom))
+    }
+
+    private var measureButton: some View {
+        Button {
+            voice.cancelAll()
+            applyAndProceed()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 15))
+                Text("この状況で測定する")
+                    .font(.system(size: 15, weight: .medium))
+            }
+            .foregroundStyle(.black)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(
+                RoundedRectangle(cornerRadius: 26)
+                    .fill(accent)
+                    .shadow(color: accent.opacity(0.35), radius: 12, y: 4)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("context_primary_start_button")
+    }
+
+    private var inputRow: some View {
+        HStack(spacing: 10) {
+            micButton
+            HStack(spacing: 6) {
+                TextField("メッセージを入力", text: $mokorin.draft, axis: .vertical)
+                    .lineLimit(1...3)
+                    .focused($isInputFocused)
+                    .font(.system(size: 15))
+                    .foregroundStyle(Color.white)
+                    .submitLabel(.send)
+                    .onSubmit { mokorin.send() }
+                    .onChange(of: mokorin.draft) { _, v in
+                        if v.count > ContextAssistLimits.maxUserChars { mokorin.draft = String(v.prefix(ContextAssistLimits.maxUserChars)) }
+                    }
+                    .disabled(voice.isListening)
+                    .accessibilityLabel("もこりんへの返答")
+                    .accessibilityIdentifier("mokorin_input_field")
+                Button {
+                    mokorin.send()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundStyle(mokorin.canSend ? accent : Color.white.opacity(0.18))
+                }
+                .buttonStyle(.plain)
+                .disabled(!mokorin.canSend)
+                .accessibilityLabel("送信")
+                .accessibilityIdentifier("mokorin_send_button")
+            }
+            .padding(.leading, 14)
+            .padding(.trailing, 6)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(Color.white.opacity(0.06)))
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+        }
+    }
+
+    private var micButton: some View {
+        let listening = voice.isListening
+        let busy = voice.state == .processing || voice.state == .preparing || mokorin.isSending
+        let icon: String = {
+            switch voice.state {
+            case .listening: return "stop.fill"
+            case .speaking:  return "mic.fill"
+            default:         return "mic.fill"
+            }
+        }()
+        return Button {
+            Task { await voice.micTapped() }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(listening ? Color.red.opacity(0.85) : accent.opacity(0.18))
+                    .overlay(Circle().strokeBorder(listening ? Color.clear : accent.opacity(0.6), lineWidth: 1))
+                if busy && !listening {
+                    ProgressView().tint(accent)
+                } else {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(listening ? Color.white : accent)
+                }
+            }
+            .frame(width: 48, height: 48)
+        }
+        .buttonStyle(.plain)
+        .disabled(busy && !listening)
+        .accessibilityLabel(listening ? "録音を終えて送る" : (voice.state == .speaking ? "読み上げを止めて話す" : "声で答える"))
+        .accessibilityHint("押すと録音を始めます。話し終えると自動で送信します")
+        .accessibilityIdentifier("mokorin_mic_button")
+    }
+
+    private var footerRow: some View {
+        HStack(spacing: 16) {
+            Button(isInAppEdit ? "変更しない" : "あとで選ぶ") {
+                voice.cancelAll()
+                if let onComplete {
+                    // メインアプリ内：現在のコンテキストを変更せずに閉じる
+                    print("[Navigation] context edit cancelled (in-app)")
+                    onComplete()
+                    return
+                }
+                flowState.measurementContext = .default
+                flowState.authStatus = .mainApp
+                print("[Navigation] context skipped -> mainApp")
+            }
+            .accessibilityIdentifier("context_skip_button")
+            Button("選択を編集") { isEditing = true }
+                .accessibilityIdentifier("mokorin_edit_button")
+            Button("履歴") { isHistoryPresented = true }
+                .accessibilityIdentifier("mokorin_history_button")
+            Spacer()
+            if mokorin.isServerConfigured && !mokorin.isTextConsented {
+                Button("外部AIを使う") { mokorin.setTextConsent(true) }
+                    .accessibilityHint("入力した文章だけをサーバー経由で OpenAI へ送ります。計測データは送りません")
+                    .accessibilityIdentifier("mokorin_consent_accept")
+            }
+            Button {
+                voice.speaksReplies.toggle()
+                if !voice.speaksReplies { voice.stopSpeaking() }
+            } label: {
+                Image(systemName: voice.speaksReplies ? "speaker.wave.2" : "speaker.slash")
+            }
+            .accessibilityLabel(voice.speaksReplies ? "読み上げをオフにする" : "読み上げをオンにする")
+            .accessibilityIdentifier("mokorin_speaker_toggle")
+        }
+        .font(.system(size: 12))
+        .foregroundStyle(Color.white.opacity(0.45))
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 音声
+
+    private func connectVoice() {
+        voice.onUtterance = { text in await mokorin.submit(text) }
+        voice.onSpeakingChanged = { speaking in mokorin.setSpeaking(speaking) }
+    }
+
+    /// 直前の利用者の発言のあとに、もこりんが話した内容をまとめて読み上げる（ON のとき・1回だけ）
+    private func speakPendingReply() {
+        guard voice.speaksReplies, !mokorin.isSending else { return }
+        guard let lastUserIndex = mokorin.messages.lastIndex(where: { $0.speaker == .user }) else { return }
+        let replies = mokorin.messages[(lastUserIndex + 1)...].filter { $0.speaker == .mokorin }
+        guard let last = replies.last, last.id != lastSpokenMessageID else { return }
+        lastSpokenMessageID = last.id
+        voice.speakReply(replies.map(\.text).joined(separator: "\n"))
+    }
+
+    // MARK: - 選択を編集（既存の場面・身体状態の一覧）
+
+    private var editSheet: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 24) {
-                        header
-                            .padding(.top, 54)
-                        mokorinSection
-                        confirmationCard
                         sceneSection
                         bodySection
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 24)
-                }
-                .scrollDismissesKeyboard(.interactively)
-                .onChange(of: mokorin.messages.count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(conversationBottomID, anchor: .bottom) }
+                    .padding(20)
                 }
             }
-            #if DEBUG
-            .task { await runMokorinDebugHooks() }
-            #endif
-            // CTAをスクロールエリアの外（画面下部固定）に配置
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                actionButtonsPanel
+            .navigationTitle("場面と身体状態")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完了") {
+                        mokorin.finishManualEdit()
+                        isEditing = false
+                    }
+                    .accessibilityIdentifier("mokorin_edit_done")
+                }
             }
         }
+        .preferredColorScheme(.dark)
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 6) {
-                Rectangle()
-                    .fill(Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.6))
-                    .frame(width: 14, height: 1)
-                Text("CONTEXT CALIBRATION")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.7))
-                    .tracking(1.5)
-                Rectangle()
-                    .fill(Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.6))
-                    .frame(width: 14, height: 1)
+    private var historySheet: some View {
+        NavigationStack {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 10) {
+                        ForEach(mokorin.messages) { message in
+                            MokorinBubble(message: message, accent: accent)
+                        }
+                        if mokorin.messages.count > 1 {
+                            Button("会話をやり直す") {
+                                mokorin.restart()
+                                isHistoryPresented = false
+                            }
+                            .font(.system(size: 13))
+                            .foregroundStyle(accent)
+                            .padding(.top, 8)
+                            .accessibilityIdentifier("mokorin_restart")
+                        }
+                    }
+                    .padding(16)
+                }
             }
-            Text("今の状況を教えてください")
-                .font(.system(size: 20, weight: .light))
-                .foregroundStyle(Color.white)
-            Text("より正確なゆらぎを読み取るために使います")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(Color.white.opacity(0.42))
+            .navigationTitle("もこりんとの会話")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("閉じる") { isHistoryPresented = false } }
+            }
         }
+        .preferredColorScheme(.dark)
     }
 
-    // MARK: - Scene Section
+    // MARK: - Scene Section（編集シート）
 
     private var sceneSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -126,7 +531,7 @@ struct ContextCalibrationView: View {
     private func sceneCard(_ scene: ContextScene) -> some View {
         let selected = selectedScene == scene
         return Button {
-            mokorin.selectScene(scene)
+            mokorin.editScene(scene)
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: scene.icon)
@@ -174,29 +579,14 @@ struct ContextCalibrationView: View {
                 }
             }
 
-            // 会話の「身体状態」の段階では、選び終えたらもこりんに伝える
-            if mokorin.step == .condition {
-                Button {
-                    mokorin.confirmConditions()
-                } label: {
-                    Text("身体状態はこれで決定")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(accent)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                        .background(RoundedRectangle(cornerRadius: 10).strokeBorder(accent.opacity(0.5), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("mokorin_confirm_conditions")
-            }
         }
     }
 
     private func conditionRow(_ cond: BodyCondition) -> some View {
         let selected = selectedConditions.contains(cond)
         return Button {
-            // 「特になし」の排他を含む選択規則は MokorinContextViewModel.toggleCondition（従来と同じ規則）
-            mokorin.toggleCondition(cond)
+            // 「特になし」の排他を含む選択規則は MokorinContextViewModel.editCondition（従来と同じ規則）
+            mokorin.editCondition(cond)
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: cond.icon)
@@ -237,193 +627,6 @@ struct ContextCalibrationView: View {
         .accessibilityIdentifier("context_body_\(cond.rawValue)")
     }
 
-    // MARK: - Action Buttons Panel (safeAreaInset底部固定)
-
-    private var actionButtonsPanel: some View {
-        VStack(spacing: 0) {
-            // スクロールコンテンツとの視覚的セパレーター
-            LinearGradient(
-                colors: [Color.clear,
-                         Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.10)],
-                startPoint: .leading, endPoint: .trailing
-            )
-            .frame(height: 0.7)
-
-            VStack(spacing: 10) {
-                mokorinInputRow
-
-                // 測定する内容を、ボタンの直前に常に表示する（小さい画面で確認エリアが隠れても分かるように）
-                Text("場面：\(selectedScene.displayName)　身体状態：\(BodyCondition.allCases.filter { selectedConditions.contains($0) }.map(\.displayName).joined(separator: " / "))")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.white.opacity(mokorin.step == .review ? 0.85 : 0.45))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("mokorin_summary_line")
-
-                Button {
-                    applyAndProceed()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle")
-                            .font(.system(size: 15))
-                        Text("この状況で測定する")
-                            .font(.system(size: 15, weight: .medium))
-                    }
-                    .foregroundStyle(.black)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 52)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Color(red: 0.35, green: 0.75, blue: 0.95))
-                            .shadow(color: Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.35),
-                                    radius: 12, y: 4)
-                    )
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("context_primary_start_button")
-
-                Button {
-                    if let onComplete {
-                        // メインアプリ内：現在のコンテキストを変更せずに閉じる
-                        print("[Navigation] context edit cancelled (in-app)")
-                        onComplete()
-                        return
-                    }
-                    flowState.measurementContext = .default
-                    flowState.authStatus = .mainApp
-                    print("[Navigation] context skipped -> mainApp")
-                } label: {
-                    Text(isInAppEdit ? "変更しない" : "あとで選ぶ")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Color.white.opacity(0.40))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("context_skip_button")
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 32)
-        }
-        .background(
-            ZStack {
-                // 入力欄を追加して高くなったため、後ろのボタンが透けないよう不透明度を上げている（旧 0.90）
-                Color.black.opacity(0.97)
-                LinearGradient(
-                    colors: [Color(red: 0.02, green: 0.04, blue: 0.12).opacity(0.0),
-                             Color(red: 0.02, green: 0.04, blue: 0.12).opacity(0.80)],
-                    startPoint: .top, endPoint: .bottom
-                )
-            }
-            .ignoresSafeArea(edges: .bottom)
-        )
-    }
-
-    // MARK: - もこりんとの会話
-
-    private var mokorinSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 8) {
-                // 友達が作成したもこりん（WKWebView）。表情・動作は会話に合わせて MokorinContextViewModel が決める
-                MokorinAvatarView(size: 84, pose: mokorin.pose)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("もこりん")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Color.white.opacity(0.9))
-                    Text(mokorin.usesRemoteAI ? "外部AI（サーバー経由）で会話中" : "端末内の定型文で案内中")
-                        .font(.system(size: 10, weight: .light))
-                        .foregroundStyle(Color.white.opacity(0.4))
-                }
-                Spacer()
-                if mokorin.messages.count > 1 {
-                    Button("やり直す") { mokorin.restart() }
-                        .font(.system(size: 11))
-                        .foregroundStyle(accent.opacity(0.8))
-                        .accessibilityIdentifier("mokorin_restart")
-                }
-            }
-
-            ForEach(mokorin.messages) { message in
-                MokorinBubble(message: message, accent: accent)
-            }
-            if mokorin.isSending {
-                HStack(spacing: 6) {
-                    ProgressView().tint(accent)
-                    Text("もこりんが考え中…").font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.5))
-                }
-                .accessibilityElement(children: .combine)
-            }
-            if let notice = mokorin.notice {
-                Label(notice, systemImage: "exclamationmark.triangle")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Color.orange.opacity(0.85))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if mokorin.isServerConfigured && !mokorin.isTextConsented {
-                consentRow
-            }
-            Color.clear.frame(height: 1).id(conversationBottomID)
-        }
-    }
-
-    private var consentRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("もこりんとの会話に外部AI（OpenAI）を使うと、入力した文章だけをサーバー経由で送ります。心拍などの計測データは送りません。")
-                .font(.system(size: 10, weight: .light))
-                .foregroundStyle(Color.white.opacity(0.5))
-                .fixedSize(horizontal: false, vertical: true)
-            Button("外部AIを使う（同意する）") { mokorin.setTextConsent(true) }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(accent)
-                .accessibilityIdentifier("mokorin_consent_accept")
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
-    }
-
-    /// 選択結果の確認エリア（ここに表示された内容で測定する）
-    private var confirmationCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionLabel("確認", hint: mokorin.step == .review ? "この内容で測定できます" : "会話やボタンで選ぶと更新されます")
-            confirmationRow(title: "場面",
-                            value: mokorin.hasSceneAnswer ? selectedScene.displayName : "\(selectedScene.displayName)（未回答・初期値）",
-                            suggested: mokorin.suggestedScene != nil)
-            confirmationRow(title: "身体状態",
-                            value: BodyCondition.allCases.filter { selectedConditions.contains($0) }.map(\.displayName).joined(separator: " / ")
-                                + (mokorin.hasConditionAnswer ? "" : "（未回答・初期値）"),
-                            suggested: !mokorin.suggestedConditions.isEmpty)
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.white.opacity(mokorin.step == .review ? 0.09 : 0.05))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(accent.opacity(mokorin.step == .review ? 0.5 : 0.15), lineWidth: 1))
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("mokorin_confirmation_card")
-    }
-
-    private func confirmationRow(title: String, value: String, suggested: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.white.opacity(0.45))
-                .frame(width: 60, alignment: .leading)
-            Text(value)
-                .font(.system(size: 14))
-                .foregroundStyle(Color.white.opacity(0.92))
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-            if suggested {
-                Text("もこりんの提案・変更できます")
-                    .font(.system(size: 9))
-                    .foregroundStyle(accent.opacity(0.85))
-            }
-        }
-    }
-
     private func suggestionBadge(onSelected: Bool) -> some View {
         Text("提案")
             .font(.system(size: 9, weight: .semibold))
@@ -434,44 +637,16 @@ struct ContextCalibrationView: View {
             .accessibilityLabel("もこりんの提案")
     }
 
-    /// 自由入力欄（キーボード表示中も safeAreaInset で入力欄と送信ボタンが上に移動する）
-    private var mokorinInputRow: some View {
-        HStack(spacing: 8) {
-            TextField("もこりんに状況を伝える", text: $mokorin.draft, axis: .vertical)
-                .lineLimit(1...3)
-                .focused($isInputFocused)
-                .font(.system(size: 14))
-                .foregroundStyle(Color.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(RoundedRectangle(cornerRadius: 16).fill(Color.white.opacity(0.08)))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-                .onChange(of: mokorin.draft) { _, v in
-                    if v.count > ContextAssistLimits.maxUserChars { mokorin.draft = String(v.prefix(ContextAssistLimits.maxUserChars)) }
-                }
-                .submitLabel(.send)
-                .onSubmit { mokorin.send() }
-                .accessibilityLabel("もこりんへの返答")
-                .accessibilityIdentifier("mokorin_input_field")
-            Button {
-                mokorin.send()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundStyle(mokorin.canSend ? accent : Color.white.opacity(0.2))
-            }
-            .buttonStyle(.plain)
-            .disabled(!mokorin.canSend)
-            .accessibilityLabel("送信")
-            .accessibilityIdentifier("mokorin_send_button")
-        }
-    }
-
     #if DEBUG
     /// シミュレーター検証用（DEBUG のみ）: MW_CHAT_TEST_CONSENT=1|0、MW_MOKORIN_AUTOPLAY="文1||文2"（画面表示後に順番に送信）、
-    /// MW_MOKORIN_AUTO_CONFIRM=1（送信後に applyAndProceed() を呼ぶ）
+    /// MW_MOKORIN_AUTO_CONFIRM=1（送信後に applyAndProceed() を呼ぶ）、MW_MOKORIN_AUTO_MIC=1（マイクボタンを1回押す）
     private func runMokorinDebugHooks() async {
         let env = ProcessInfo.processInfo.environment
+        if env["MW_MOKORIN_AUTO_MIC"] == "1" {
+            // マイクボタンを1回押したのと同じ（権限の確認表示・録音開始の検証用）
+            try? await Task.sleep(for: .seconds(1.5))
+            await voice.micTapped()
+        }
         if env["MW_CHAT_TEST_CONSENT"] == "1" { mokorin.setTextConsent(true) }
         if env["MW_CHAT_TEST_CONSENT"] == "0" { mokorin.setTextConsent(false) }
         guard let script = env["MW_MOKORIN_AUTOPLAY"], mokorin.messages.count == 1 else { return }

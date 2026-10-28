@@ -12,7 +12,22 @@ import Foundation
 
 /// 会話の段階（アプリ側の進行）
 nonisolated enum ContextAssistStepCode: String, Codable, Equatable, Sendable {
-    case scene, condition, review
+    case tension, scene, condition, review
+}
+
+/// 利用者の主観的な緊張（自己申告）。心拍・HRV から計算する緊張スコアとは別物で、
+/// StressScoreCalculator・MeasurementContext・保存データには入れない（会話の進行と表情にだけ使う）
+nonisolated enum SubjectiveTension: String, Codable, Equatable, Sendable, CaseIterable {
+    case calm, slight, high
+
+    /// 選択肢の表示
+    var replyLabel: String {
+        switch self {
+        case .slight: return "少し緊張してる"
+        case .high:   return "かなり緊張してる"
+        case .calm:   return "今は落ち着いてる"
+        }
+    }
 }
 
 /// 画面で現在選ばれている内容
@@ -21,11 +36,14 @@ nonisolated struct ContextAssistCurrentDTO: Codable, Equatable, Sendable {
     var scene: String?
     /// BodyCondition.rawValue
     var conditions: [String]
+    /// 主観的な緊張（SubjectiveTension.rawValue、未回答は null）
+    var tension: String? = nil
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(scene, forKey: .scene)
         try c.encode(conditions, forKey: .conditions)
+        try c.encode(tension, forKey: .tension)
     }
 }
 
@@ -55,6 +73,8 @@ nonisolated struct ContextAssistResultDTO: Codable, Equatable, Sendable {
     var conditionCandidates: [String]
     var needsClarification: Bool
     var clarificationQuestion: String?
+    /// 利用者が述べた主観的な緊張（calm / slight / high）。古いサーバーでは無い。不正な値は無視
+    var tensionCandidate: String? = nil
     /// もこりんの表情（happy / calm / sad / sleepy）。古いサーバーでは無い。不正な値は無視して calm
     var emotion: String? = nil
     /// もこりんの動作（wave / jump / nod）。不正な値は無視して nod
@@ -66,7 +86,11 @@ nonisolated struct ContextAssistResultDTO: Codable, Equatable, Sendable {
         case conditionCandidates   = "condition_candidates"
         case needsClarification    = "needs_clarification"
         case clarificationQuestion = "clarification_question"
+        case tensionCandidate      = "tension_candidate"
     }
+
+    /// 主観的な緊張の候補（不正・欠落は nil。候補の採否には影響させない）
+    var typedTension: SubjectiveTension? { tensionCandidate.flatMap(SubjectiveTension.init(rawValue:)) }
 
     /// 表情・動作は見た目だけのため、不正・欠落は既定値にする（候補の採否には影響させない。原本 app.py と同じ既定値）
     var typedExpression: (emotion: MokorinEmotion, action: MokorinAction) {

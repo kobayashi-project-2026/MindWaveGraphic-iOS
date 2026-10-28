@@ -45,6 +45,8 @@ enum InsightClientError: Error, Equatable {
     case httpStatus(Int, errorCode: String?)
     case invalidResponse(String)
     case containsMockData
+    /// 実機で 127.0.0.1 / localhost を指定している（その iPhone 自身を指すため Mac のサーバーへ届かない）
+    case loopbackOnDevice
 
     /// ログ用の短いコード（ユーザーデータは含めない）
     var logCode: String {
@@ -54,6 +56,7 @@ enum InsightClientError: Error, Equatable {
         case .httpStatus(let s, let code): return "http_\(s)_\(code ?? "unknown")"
         case .invalidResponse:             return "invalid_response"
         case .containsMockData:            return "contains_mock_data"
+        case .loopbackOnDevice:            return "loopback_on_device"
         }
     }
 }
@@ -115,6 +118,7 @@ struct RemoteInsightProvider: InsightProvider {
 
     /// 送信して検証済みのレスポンスを返す
     func send(_ body: InsightRequestDTO) async throws -> InsightResponseDTO {
+        if ServerConnectionDiagnostics.isLoopbackUnreachable(configuration.baseURL) { throw InsightClientError.loopbackOnDevice }
         var request = URLRequest(url: configuration.baseURL.appendingPathComponent("v1/insights"))
         request.httpMethod = "POST"
         request.timeoutInterval = configuration.timeout
@@ -164,5 +168,31 @@ struct RemoteInsightProvider: InsightProvider {
             shouldShowOnHome: false, shouldShowInSession: false,
             shouldShowInResult: true, shouldShowInHistory: true
         )
+    }
+}
+
+// MARK: - 接続先の診断
+
+/// 開発用サーバーへの接続経路の診断。
+/// 127.0.0.1 / localhost は「その端末自身」を指す。シミュレーターでは Mac 自身なのでローカルサーバーに届くが、
+/// 実機の iPhone では iPhone 自身を指すため Mac のサーバーには届かない（接続失敗を AI の応答として扱わないよう、理由を明示する）。
+/// セキュリティ設定（ATS・http の許可範囲）はここでは変更しない。
+nonisolated enum ServerConnectionDiagnostics {
+    static var isSimulator: Bool {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    static func isLoopback(_ url: URL) -> Bool {
+        let host = url.host?.lowercased() ?? ""
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
+    /// 実機でループバックアドレスを指定しているか（届かないことが確定している）
+    static func isLoopbackUnreachable(_ url: URL, isSimulator: Bool = isSimulator) -> Bool {
+        isLoopback(url) && !isSimulator
     }
 }
