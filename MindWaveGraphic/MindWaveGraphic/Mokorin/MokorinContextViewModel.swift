@@ -22,7 +22,7 @@ import Combine
 @MainActor
 final class MokorinContextViewModel: ObservableObject {
 
-    enum Step: Equatable {
+    nonisolated enum Step: Equatable, Sendable {
         case scene, condition, review
 
         var code: ContextAssistStepCode {
