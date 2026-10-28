@@ -30,6 +30,14 @@ const env: Env = {
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? fileVars.OPENAI_BASE_URL,
   OPENAI_TIMEOUT_MS: process.env.OPENAI_TIMEOUT_MS ?? fileVars.OPENAI_TIMEOUT_MS,
   CLIENT_TOKENS: process.env.CLIENT_TOKENS ?? fileVars.CLIENT_TOKENS,
+  OPENAI_REASONING_EFFORT: process.env.OPENAI_REASONING_EFFORT ?? fileVars.OPENAI_REASONING_EFFORT,
+  OPENAI_CHAT_MODEL: process.env.OPENAI_CHAT_MODEL ?? fileVars.OPENAI_CHAT_MODEL,
+  CHAT_MAX_OUTPUT_TOKENS: process.env.CHAT_MAX_OUTPUT_TOKENS ?? fileVars.CHAT_MAX_OUTPUT_TOKENS,
+  CHAT_MAX_MESSAGES: process.env.CHAT_MAX_MESSAGES ?? fileVars.CHAT_MAX_MESSAGES,
+  CHAT_MAX_USER_CHARS: process.env.CHAT_MAX_USER_CHARS ?? fileVars.CHAT_MAX_USER_CHARS,
+  CHAT_MAX_TOTAL_CHARS: process.env.CHAT_MAX_TOTAL_CHARS ?? fileVars.CHAT_MAX_TOTAL_CHARS,
+  CHAT_ALLOW_MEASUREMENT_CONTEXT: process.env.CHAT_ALLOW_MEASUREMENT_CONTEXT ?? fileVars.CHAT_ALLOW_MEASUREMENT_CONTEXT,
+  RATE_LIMIT_PER_MINUTE: process.env.RATE_LIMIT_PER_MINUTE ?? fileVars.RATE_LIMIT_PER_MINUTE,
 };
 
 if (useStub) {
@@ -37,12 +45,17 @@ if (useStub) {
   env.OPENAI_API_KEY = "stub-key-not-a-real-secret";
   console.warn("[dev-server] STUB MODE: OpenAI へは送信しません（STUB_OPENAI_MODE=%s）", process.env.STUB_OPENAI_MODE ?? "ok");
 }
+if (!useStub && env.OPENAI_API_KEY) {
+  console.warn("[dev-server] REAL MODE: OpenAI API へ実際に送信します（API 利用料が発生します）。モデル=%s", env.OPENAI_CHAT_MODEL || env.OPENAI_MODEL || "gpt-6-luna");
+}
 if (!env.CLIENT_TOKENS) {
   console.warn("[dev-server] CLIENT_TOKENS が未設定のため /v1/insights は全て 401 になります");
 }
 
 const handler = createHandler({
   fetchImpl: useStub ? createStubFetch((process.env.STUB_OPENAI_MODE as StubMode) ?? "ok") : undefined,
+  // スタブ時は provider を "openai-stub" にし、アプリ側で「実際のAIではない」と表示させる
+  providerName: useStub ? "openai-stub" : "openai",
 });
 
 const port = Number(process.env.PORT ?? 8787);

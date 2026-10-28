@@ -1,11 +1,24 @@
-# Cloudflare Workers 設定（デプロイ手順は docs/OPENAI_SETUP.md）
+# Cloudflare Workers 設定（デプロイ手順は docs/OPENAI_SETUP.md / docs/OPENAI_CHAT_SETUP.md）
 # 秘密情報（OPENAI_API_KEY / CLIENT_TOKENS）はここに書かず、`wrangler secret put` で登録する。
 name = "mindwave-insight-server"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
 
 [vars]
-# 使用モデル（Structured Outputs 対応モデルを指定する）
-OPENAI_MODEL = "gpt-4o-mini"
+# 使用モデル（Structured Outputs 対応モデル）。gpt-4o-mini は 2027-01-14 提供終了予定のため後継を指定
+OPENAI_MODEL = "gpt-6-luna"
+# 会話（/v1/chat）用モデル。空なら OPENAI_MODEL を使う
+OPENAI_CHAT_MODEL = ""
+# 推論の深さ（none / low / medium …）。費用と待ち時間を抑えるため low。非推論モデルを使う場合は空にする
+OPENAI_REASONING_EFFORT = "low"
 # OpenAI 呼び出しのタイムアウト（ミリ秒）。iOS 側タイムアウト(20秒)より短くする
 OPENAI_TIMEOUT_MS = "15000"
+# 会話の出力トークン上限（推論トークンを含む）・履歴の上限
+CHAT_MAX_OUTPUT_TOKENS = "600"
+CHAT_MAX_MESSAGES = "12"
+CHAT_MAX_USER_CHARS = "500"
+CHAT_MAX_TOTAL_CHARS = "8000"
+# 計測データの要約を会話に含めるか。本物の利用者認証を導入するまで "false" のままにする
+CHAT_ALLOW_MEASUREMENT_CONTEXT = "false"
+# クライアントトークンあたりの 1 分間の上限（インスタンス単位の簡易制限。本番前に全体共有の制限が必要）
+RATE_LIMIT_PER_MINUTE = "20"

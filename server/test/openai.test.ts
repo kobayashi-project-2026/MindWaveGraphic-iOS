@@ -66,3 +66,7 @@ test("本文の受信が止まった場合もタイムアウト → upstream_tim
     return true;
   });
 });
+test("HTTP 429 → upstream_rate_limited / HTTP 401 → upstream_auth_error", async () => {
+  await expectCode("http_429", "upstream_rate_limited");
+  await expectCode("http_401", "upstream_auth_error");
+});

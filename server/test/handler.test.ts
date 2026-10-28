@@ -97,3 +97,9 @@ test("404 / 405", async () => {
   assert.equal((await handler(new Request("https://example.test/v1/other"), ENV)).status, 404);
   assert.equal((await handler(new Request("https://example.test/v1/insights"), ENV)).status, 405);
 });
+
+test("429: OpenAI のレート制限は 429 で返す（単発インサイト）", async () => {
+  const res = await setup("http_429").handler(post(validRequest()), ENV);
+  assert.equal(res.status, 429);
+  assert.equal((await res.json() as { error: string }).error, "upstream_rate_limited");
+});

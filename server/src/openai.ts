@@ -17,6 +17,8 @@ export interface OpenAIConfig {
   /** 既定 https://api.openai.com/v1（ローカルのスタブへ向ける場合のみ変更） */
   baseUrl: string;
   timeoutMs: number;
+  /** 推論の深さ（"none" / "low" など）。未設定ならパラメーター自体を送らない（非推論モデル向け） */
+  reasoningEffort?: string;
   fetchImpl: typeof fetch;
 }
 
@@ -24,6 +26,8 @@ export type UpstreamErrorCode =
   | "upstream_error"
   | "upstream_timeout"
   | "upstream_refusal"
+  | "upstream_rate_limited"
+  | "upstream_auth_error"
   | "invalid_upstream_response";
 
 export class UpstreamError extends Error {
@@ -80,8 +84,8 @@ export function buildUserInput(req: InsightRequest): string {
 }
 
 /** Responses API のリクエスト本文（APIキーは含めない） */
-export function buildResponsesRequest(req: InsightRequest, model: string): Record<string, unknown> {
-  return {
+export function buildResponsesRequest(req: InsightRequest, model: string, reasoningEffort?: string): Record<string, unknown> {
+  const body: Record<string, unknown> = {
     model,
     instructions: INSTRUCTIONS,
     input: [{ role: "user", content: buildUserInput(req) }],
@@ -97,6 +101,8 @@ export function buildResponsesRequest(req: InsightRequest, model: string): Recor
     // 入出力を OpenAI 側に保存しない
     store: false,
   };
+  if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
+  return body;
 }
 
 /** Responses API の応答から出力テキストを取り出す。拒否・未完了はエラー */
@@ -143,7 +149,7 @@ export async function generateInsight(
           "Content-Type": "application/json",
           Authorization: `Bearer ${cfg.apiKey}`,
         },
-        body: JSON.stringify(buildResponsesRequest(req, cfg.model)),
+        body: JSON.stringify(buildResponsesRequest(req, cfg.model, cfg.reasoningEffort)),
         signal: controller.signal,
       });
     } catch {
@@ -155,6 +161,8 @@ export async function generateInsight(
 
     if (!response.ok) {
       // 応答本文には入力の一部が含まれうるため読まない・ログに出さない
+      if (response.status === 429) throw new UpstreamError("upstream_rate_limited", `openai status=${response.status}`, response.status);
+      if (response.status === 401 || response.status === 403) throw new UpstreamError("upstream_auth_error", `openai status=${response.status}`, response.status);
       throw new UpstreamError("upstream_error", `openai status=${response.status}`, response.status);
     }
 

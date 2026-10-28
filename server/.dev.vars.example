@@ -1,7 +1,15 @@
 # ローカル開発用の環境変数の例。`.dev.vars` にコピーして値を入れる（.dev.vars は Git に入れない）
-# OpenAI の APIキー（実通信する場合のみ。--stub-openai では不要）
+# OpenAI の APIキー（実通信する場合のみ。--stub-openai では不要・使われない）
 OPENAI_API_KEY=
-# iOS アプリが Authorization: Bearer で送るトークン（カンマ区切りで複数可。十分に長いランダム文字列を使う）
+# iOS アプリが Authorization: Bearer で送るトークン（カンマ区切りで複数可。16文字以上のランダム文字列）
 CLIENT_TOKENS=
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-6-luna
+OPENAI_CHAT_MODEL=
+OPENAI_REASONING_EFFORT=low
 OPENAI_TIMEOUT_MS=15000
+CHAT_MAX_OUTPUT_TOKENS=600
+CHAT_MAX_MESSAGES=12
+CHAT_MAX_USER_CHARS=500
+CHAT_MAX_TOTAL_CHARS=8000
+CHAT_ALLOW_MEASUREMENT_CONTEXT=false
+RATE_LIMIT_PER_MINUTE=20
