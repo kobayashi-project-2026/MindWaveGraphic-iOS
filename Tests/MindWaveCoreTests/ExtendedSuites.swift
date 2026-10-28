@@ -6,4 +6,5 @@ import Foundation
 func runExtendedSuites() async {
     PipelineTests.run()
     await InsightTests.run()
+    await ChatTests.run()
 }
