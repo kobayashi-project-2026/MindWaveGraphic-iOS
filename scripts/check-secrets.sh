@@ -19,6 +19,7 @@ while IFS= read -r f; do
   [ -f "$f" ] || continue
   case "$f" in
     *.dev.vars|*/.dev.vars) report "$f" "ローカル専用の秘密情報ファイル"; continue ;;
+    *DevServer.local.xcconfig) report "$f" "開発用サーバーの接続先・トークン（scripts/dev-device-setup.sh が作るローカル専用ファイル）"; continue ;;
     *.xcscheme)
       if grep -qE 'key = "MW_INSIGHT_CLIENT_TOKEN"' "$f" && grep -A2 -E 'key = "MW_INSIGHT_CLIENT_TOKEN"' "$f" | grep -qE 'value = "[^"]+"'; then
         report "$f" "スキームにクライアントトークンの値"

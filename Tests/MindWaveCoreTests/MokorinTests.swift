@@ -609,6 +609,32 @@ enum MokorinTests {
             T.expect(RemoteInsightConfiguration.load(defaults: d, environment: env) != nil, "DEBUG: LAN http ok")
             T.expect(RemoteInsightConfiguration.load(defaults: d, environment: ["MW_INSIGHT_BASE_URL": "http://8.8.8.8:8787", "MW_INSIGHT_CLIENT_TOKEN": "t"]) == nil, "global http ng")
         }
+        T.test("開発用サーバーの設定（DevServer.local.xcconfig → Info.plist）: ホーム画面から起動しても接続先が残る。実機ではスキームの 127.0.0.1 より LAN を優先") {
+            let d = T.freshDefaults("dev-info")
+            let info: [String: Any] = ["MWDevServerHost": "192.168.11.31", "MWDevServerPort": "8788", "MWDevClientToken": "tok-lan"]
+            let fromInfo = RemoteInsightConfiguration.load(defaults: d, environment: [:], info: info, isSimulator: false)
+            T.expectEqual(fromInfo?.baseURL.absoluteString, "http://192.168.11.31:8788")
+            T.expectEqual(fromInfo?.clientToken, "tok-lan")
+            let loopEnv = ["MW_INSIGHT_BASE_URL": "http://127.0.0.1:8787", "MW_INSIGHT_CLIENT_TOKEN": "tok-sim"]
+            let device = RemoteInsightConfiguration.load(defaults: d, environment: loopEnv, info: info, isSimulator: false)
+            T.expectEqual(device?.baseURL.absoluteString, "http://192.168.11.31:8788", "実機: LAN を優先")
+            T.expectEqual(device?.clientToken, "tok-lan")
+            let sim = RemoteInsightConfiguration.load(defaults: d, environment: loopEnv, info: info, isSimulator: true)
+            T.expectEqual(sim?.baseURL.absoluteString, "http://127.0.0.1:8787", "シミュレーター: スキームを優先")
+            let unset: [String: Any] = ["MWDevServerHost": "", "MWDevClientToken": "$(MW_DEV_CLIENT_TOKEN)"]
+            T.expect(RemoteInsightConfiguration.load(defaults: d, environment: [:], info: unset, isSimulator: false) == nil, "未設定なら接続しない")
+        }
+        await T.test("吹き出し: AI の返答に定型の質問を添えても、AI の返答を隠さず1つにまとめて表示") {
+            let client = FakeContextClient.returning(reply: "面接前なんだね。", scene: "interview")
+            let vm = remoteVM(client: client)
+            vm.tap(.tension(.high))
+            await vm.submit("これから面接")
+            let turn = vm.currentTurn
+            T.expect(turn?.text.hasPrefix("面接前なんだね。") == true, "AI の返答が先頭")
+            T.expect(turn?.text.contains("？") == true, "次の質問も同じ吹き出し")
+            T.expectEqual(turn?.origin, .openAI(model: "test-model"))
+            T.expect(turn?.hasFixedFollowUp == true, "定型文が含まれることを表示")
+        }
         T.test("読み上げ中の口の動き: setSpeaking の呼び出し文") {
             T.expectEqual(MokorinWebScript.setSpeaking(true), "setSpeaking(true)")
             T.expectEqual(MokorinWebScript.setSpeaking(false), "setSpeaking(false)")

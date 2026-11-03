@@ -57,14 +57,25 @@ DEV_LAN_ACCESS=1 HOST=192.168.x.x npm run dev
 
 `DEV_LAN_ACCESS=1` がない、またはプライベート IP 以外では起動しない。起動時に「LAN MODE: http（暗号化なし）」の警告と、iPhone 側に設定する `MW_INSIGHT_BASE_URL` を表示する。
 
-### iPhone 実機での手順
+### iPhone 実機での手順（2026-11-04 更新: コマンド 1 つで準備）
 
-1. Mac と iPhone を**同じ信頼できる Wi-Fi**（自宅など）につなぐ。大学などの Wi-Fi は端末間通信が遮断されていることが多い
-2. Mac で `cd server && npm run dev:lan:stub`（まず無料の STUB で確認）。表示された `http://<MacのIP>:8787` を控える
-3. Xcode → Edit Scheme → Run → Environment Variables に `MW_INSIGHT_BASE_URL=http://<MacのIP>:8787` と `MW_INSIGHT_CLIENT_TOKEN`（`.dev.vars` の CLIENT_TOKENS と同じ値）を設定し、**Debug** で iPhone にインストール
-4. 初回の接続時に「ローカルネットワーク上のデバイスの検出と接続」の許可を求められるので「許可」。拒否した場合は 設定 → プライバシーとセキュリティ → ローカルネットワーク で変更できる
-5. 状況選択でもこりんに話しかけ、「外部AIを使う」に同意。返答の下に「スタブ」/「OpenAI（…）」の表示が出れば接続成功。つながらない場合は「もう一度送る」「AIなしで続ける」が出る
-6. 終わったら Mac のサーバーを Ctrl+C で止める
+```bash
+scripts/dev-device-setup.sh          # STUB（無料・AI なし。返答は定型の文で「スタブ応答」と表示）
+scripts/dev-device-setup.sh --real   # 実通信（自然な会話。1 往復 約 $0.0002 の利用料）
+scripts/dev-device-setup.sh --check  # 確認だけ
+scripts/dev-device-setup.sh --stop   # 終わったら必ず止める
+```
+
+このスクリプトは、トークンの有無の確認（値は表示しない）→ Mac の LAN アドレスの取得 → ポート 8788 の競合確認 → LAN サーバーの起動（そのプライベート IP だけで待ち受け）→ 誤ったトークンが 401 になることの確認 → `MindWaveGraphic/DevServer.local.xcconfig`（Git 管理外・権限 600）への接続先とトークンの書き込み、を行う。127.0.0.1:8787 の STUB には触れない。Xcode スキームは変更しない。
+
+1. Mac と iPhone を**同じ信頼できる Wi-Fi**につなぐ（大学などの Wi-Fi は端末間通信が遮断されていることが多い）
+2. `scripts/dev-device-setup.sh`（または `--real`）を実行
+3. Xcode で実機を選び **Debug** で Run。接続先はビルドに入るので、ホーム画面から起動し直しても使える。初回の「ローカルネットワーク」の許可は「許可」
+4. もこりんの画面で「AIと話す」を押す（入力・話した文章だけをサーバー経由で送る同意）
+5. マイクを押して話す。返答の下に「スタブ応答」/「OpenAI（…）」と出れば接続成功。つながらないときは理由と「もう一度送る」「AIなしで続ける」が出る
+6. 終わったら `scripts/dev-device-setup.sh --stop`
+
+補足: Xcode スキームの環境変数 `MW_INSIGHT_BASE_URL` は引き続き優先されるが、実機で 127.0.0.1 / localhost を指している場合は無視し、上の LAN の設定を使う（127.0.0.1 は iPhone 自身を指すため）。シミュレーターではスキームの設定を優先する。トークンは Debug ビルドの Info.plist にだけ入る（Release には入らない）。
 
 ### 注意（必ず守る）
 
