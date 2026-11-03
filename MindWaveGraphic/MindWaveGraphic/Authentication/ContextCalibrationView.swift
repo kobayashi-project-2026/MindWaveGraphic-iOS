@@ -163,10 +163,11 @@ struct ContextCalibrationView: View {
     private var conversationArea: some View {
         VStack(spacing: 10) {
             voiceStatus
-            if let message = mokorin.latestMokorinMessage {
-                mokorinBubble(message)
+            if let turn = mokorin.currentTurn {
+                mokorinBubble(turn)
             }
             userEcho
+            aiConsentPrompt
             quickReplies
             if let notice = voice.problem ?? mokorin.notice {
                 Text(notice)
@@ -178,14 +179,35 @@ struct ContextCalibrationView: View {
         }
     }
 
-    private func mokorinBubble(_ message: MokorinContextViewModel.Message) -> some View {
+    /// AI と話すための同意（サーバーが設定済みで未同意のときだけ）。小さなリンクにせず、会話のすぐ下に出す
+    @ViewBuilder
+    private var aiConsentPrompt: some View {
+        if mokorin.isServerConfigured && !mokorin.isTextConsented && mokorin.failedText == nil {
+            HStack(spacing: 10) {
+                Text("AIと話すと、自由な言葉で答えられます。送るのは入力・話した文章だけで、計測データは送りません。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.white.opacity(0.6))
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("AIと話す") { mokorin.setTextConsent(true) }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.black)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Capsule().fill(accent))
+                    .buttonStyle(.plain)
+                    .accessibilityHint("入力した文章だけをサーバー経由で OpenAI へ送ります。計測データは送りません")
+                    .accessibilityIdentifier("mokorin_consent_accept")
+            }
+        }
+    }
+
+    private func mokorinBubble(_ message: MokorinContextViewModel.Turn) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(message.text)
                 .font(.system(size: 16))
                 .foregroundStyle(Color.white.opacity(0.95))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text(originLabel(message.origin))
+            Text(originLabel(message.origin) + (message.hasFixedFollowUp ? "・質問の一部は端末内の定型文" : ""))
                 .font(.system(size: 9))
                 .foregroundStyle(isStub(message.origin) ? Color.orange.opacity(0.9) : Color.white.opacity(0.3))
         }
@@ -435,11 +457,6 @@ struct ContextCalibrationView: View {
             }
             .accessibilityIdentifier("context_skip_button")
             Spacer()
-            if mokorin.isServerConfigured && !mokorin.isTextConsented {
-                Button("外部AIを使う") { mokorin.setTextConsent(true) }
-                    .accessibilityHint("入力した文章だけをサーバー経由で OpenAI へ送ります。計測データは送りません")
-                    .accessibilityIdentifier("mokorin_consent_accept")
-            }
             Button {
                 voice.speaksReplies.toggle()
                 if !voice.speaksReplies { voice.stopSpeaking() }
@@ -676,7 +693,7 @@ struct ContextCalibrationView: View {
             // 実際の読み上げ（AVSpeechSynthesizer）と口の動き・状態表示の確認用
             try? await Task.sleep(for: .seconds(2))
             voice.speaksReplies = true
-            if let text = mokorin.latestMokorinMessage?.text { voice.speakReply(text) }
+            if let text = mokorin.currentTurn?.text { voice.speakReply(text) }
         }
         if env["MW_MOKORIN_AUTO_MIC"] == "1" {
             // マイクボタンを1回押したのと同じ（権限の確認表示・録音開始の検証用）

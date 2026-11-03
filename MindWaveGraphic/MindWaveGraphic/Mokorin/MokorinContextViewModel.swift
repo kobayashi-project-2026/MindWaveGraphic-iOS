@@ -141,6 +141,28 @@ final class MokorinContextViewModel: ObservableObject {
 
     /// 最新のもこりんの発言（画面中央の吹き出し）
     var latestMokorinMessage: Message? { messages.last { $0.speaker == .mokorin } }
+
+    /// 画面中央に出す「もこりんの今回の発言」。直前の利用者の発言のあとの返答をまとめる
+    /// （AI の返答に端末内の定型の質問を添えた場合も、AI の返答が隠れないように1つの吹き出しにする）
+    struct Turn: Equatable {
+        let id: UUID
+        let text: String
+        /// 最初の発言の出どころ（AI の返答なら openAI / stub）
+        let origin: Origin
+        /// AI の返答のあとに端末内の定型文を添えたか
+        let hasFixedFollowUp: Bool
+    }
+
+    var currentTurn: Turn? {
+        let start = (messages.lastIndex { $0.speaker == .user }).map { $0 + 1 } ?? 0
+        var replies = messages[start...].filter { $0.speaker == .mokorin }
+        if replies.isEmpty, let last = latestMokorinMessage { replies = [last] }
+        guard let first = replies.first, let last = replies.last else { return nil }
+        return Turn(id: last.id,
+                    text: replies.map(\.text).joined(separator: "\n"),
+                    origin: first.origin,
+                    hasFixedFollowUp: first.origin != .fixed && replies.dropFirst().contains { $0.origin == .fixed })
+    }
     /// 最新の利用者の発言（音声認識の結果の確認用）
     var latestUserMessage: Message? { messages.last { $0.speaker == .user } }
 

@@ -88,7 +88,8 @@ test("200（スタブ）: 面接の文章から scene=interview、階段の文�
   const b1 = await r1.json() as any;
   assert.equal(b1.provider, "openai-stub");
   assert.equal(b1.result.scene_candidate, "interview");
-  assert.ok(String(b1.result.reply).startsWith(STUB_CHAT_PREFIX));
+  assert.ok(!String(b1.result.reply).includes("キーワード判定"), "機械的な文を返さない");
+  assert.ok(String(b1.result.reply).includes("？"), "次の質問を含む自然な返答");
   const r2 = await handler(post(request([...FIRST, { role: "assistant", content: "面接前なんだね。" }, { role: "user", content: "さっき階段を上ってきました" }],
     { step: "condition", current: { scene: "interview", conditions: [] } })), ENV);
   const b2 = await r2.json() as any;
@@ -211,4 +212,22 @@ test("実通信の結果を反映: 返答に質問があるときは clarificati
 test("訂正の指示: 最新の発言を優先し、取り消された身体状態を入れないようモデルに伝える", () => {
   const body = buildContextResponsesRequest(request(FIRST), { model: "m", maxOutputTokens: 100 });
   assert.ok(String(body.instructions).includes("最新の発言を優先"));
+});
+
+test("スタブの返答: 3往復が自然な文で進み、訂正（やっぱり〜）は最新の発言を優先", async () => {
+  const { stubContextResult } = await import("../scripts/stub-openai.ts");
+  const turn = (text: string, note = "現在の段階: tension") =>
+    stubContextResult({ input: [{ role: "developer", content: note }, { role: "user", content: text }] }) as any;
+  const a = turn("かなり緊張してる");
+  assert.equal(a.tension_candidate, "high");
+  assert.match(a.reply, /予定/);
+  const b = turn("これから就活の面接なんだ", "現在の段階: scene");
+  assert.equal(b.scene_candidate, "interview");
+  assert.match(b.reply, /座ってる？/);
+  const c = turn("さっき階段を上ってきた", "現在の段階: condition。画面で選択中の場面: 面接・発表。");
+  assert.deepEqual(c.condition_candidates, ["stairs"]);
+  assert.match(c.reply, /測定してみようか？$/);
+  assert.equal(turn("やっぱり面接じゃなくて試合だった", "現在の段階: condition").scene_candidate, "sports");
+  assert.equal(turn("特に予定はない", "現在の段階: scene").scene_candidate, "calm");
+  for (const r of [a, b, c]) assert.equal(r.clarification_question, null, "質問を二重にしない");
 });
