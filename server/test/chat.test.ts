@@ -214,3 +214,11 @@ test("実通信の結果を反映: Markdown の強調・見出し記号を取り
 function CHAT_INSTRUCTIONS_TEXT(): string {
   return buildChatResponsesRequest(chatRequest(TURN1), { model: "m", maxOutputTokens: 10 }).instructions as string;
 }
+
+test("Markdown 除去: 箇条書きの * は「・」、3行以上の空行は1つに、文章の内容は変えない・切り捨てない", () => {
+  const raw = "準備です。\n\n\n\n* 要点を3つに絞る\n* 最初の一文を練習する\n\n大丈夫です。";
+  assert.equal(sanitizeChatText(raw), "準備です。\n\n・要点を3つに絞る\n・最初の一文を練習する\n\n大丈夫です。");
+  const long = "あ".repeat(1200);
+  assert.equal(sanitizeChatText(long).length, 1200, "長文を切り捨てない");
+  assert.equal(sanitizeChatText("掛け算 2*3 と *強調* はそのまま"), "掛け算 2*3 と *強調* はそのまま");
+});

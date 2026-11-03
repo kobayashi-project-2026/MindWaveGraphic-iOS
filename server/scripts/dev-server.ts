@@ -10,6 +10,7 @@ import { createServer } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { createHandler, type Env } from "../src/index.ts";
 import { createStubFetch, type StubMode } from "./stub-openai.ts";
+import { resolveListenHost } from "./dev-host.ts";
 
 function loadDevVars(): Record<string, string> {
   const path = new URL("../.dev.vars", import.meta.url);
@@ -61,13 +62,22 @@ const handler = createHandler({
 });
 
 const port = Number(process.env.PORT ?? 8787);
+// 待ち受けアドレス（既定 127.0.0.1。LAN は DEV_LAN_ACCESS=1 と HOST=<プライベート IP> の明示時のみ）
+const listen = resolveListenHost(process.env);
+if ("error" in listen) {
+  console.error(`[dev-server] ${listen.error}`);
+  process.exit(1);
+}
+if (listen.lan) {
+  console.warn("[dev-server] LAN MODE: 同じネットワークの機器から http（暗号化なし）で接続できます。信頼できる Wi-Fi でのみ使い、終わったら停止してください。CLIENT_TOKENS は定期的に変更してください");
+}
 createServer(async (req, res) => {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
   const body = Buffer.concat(chunks);
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) if (typeof v === "string") headers.set(k, v);
-  const request = new Request(`http://127.0.0.1:${port}${req.url ?? "/"}`, {
+  const request = new Request(`http://${listen.host}:${port}${req.url ?? "/"}`, {
     method: req.method,
     headers,
     body: req.method === "GET" || req.method === "HEAD" ? undefined : body,
@@ -75,6 +85,6 @@ createServer(async (req, res) => {
   const response = await handler(request, env);
   res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
   res.end(Buffer.from(await response.arrayBuffer()));
-}).listen(port, "127.0.0.1", () => {
-  console.log(`[dev-server] listening on http://127.0.0.1:${port} (stub=${useStub})`);
+}).listen(port, listen.host, () => {
+  console.log(`[dev-server] listening on http://${listen.host}:${port} (stub=${useStub}${listen.lan ? ", lan=true" : ""})`);
 });

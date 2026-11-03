@@ -283,7 +283,9 @@ export function sanitizeChatText(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/__(.+?)__/g, "$1")
     .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\* /gm, "・")
     .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
