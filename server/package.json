@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "dev": "node scripts/dev-server.ts",
     "dev:stub": "node scripts/dev-server.ts --stub-openai",
+    "dev:lan": "DEV_LAN_ACCESS=1 HOST=auto node scripts/dev-server.ts",
+    "dev:lan:stub": "DEV_LAN_ACCESS=1 HOST=auto node scripts/dev-server.ts --stub-openai",
     "deploy": "npx wrangler@4 deploy"
   },
   "devDependencies": {

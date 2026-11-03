@@ -33,7 +33,14 @@ nonisolated struct RemoteInsightConfiguration: Equatable {
               let token, !token.isEmpty else { return nil }
         // 本番通信は HTTPS のみ。ローカル開発サーバー（localhost / 127.0.0.1）だけ HTTP を許可する
         let isLocalHost = url.host == "localhost" || url.host == "127.0.0.1"
-        guard scheme == "https" || (scheme == "http" && isLocalHost) else { return nil }
+        // Debug ビルドに限り、同じ Wi-Fi の開発用サーバー（プライベート IP・.local）への HTTP を許可する
+        // （ATS 側も Debug 専用の DebugInfo.plist でだけ許可している。Release では常に false）
+        #if DEBUG
+        let isDevLAN = ServerConnectionDiagnostics.isPrivateLANHost(url)
+        #else
+        let isDevLAN = false
+        #endif
+        guard scheme == "https" || (scheme == "http" && (isLocalHost || isDevLAN)) else { return nil }
         return RemoteInsightConfiguration(baseURL: url, clientToken: token)
     }
 }
@@ -189,6 +196,15 @@ nonisolated enum ServerConnectionDiagnostics {
     static func isLoopback(_ url: URL) -> Bool {
         let host = url.host?.lowercased() ?? ""
         return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
+    /// 同じ Wi-Fi の開発用サーバーのアドレスか（プライベート IPv4: 10/8・172.16/12・192.168/16、または .local）
+    static func isPrivateLANHost(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        if host.hasSuffix(".local") { return true }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
+        return parts[0] == 10 || (parts[0] == 192 && parts[1] == 168) || (parts[0] == 172 && (16...31).contains(parts[1]))
     }
 
     /// 実機でループバックアドレスを指定しているか（届かないことが確定している）

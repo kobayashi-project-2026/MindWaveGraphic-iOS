@@ -70,6 +70,7 @@ if ("error" in listen) {
 }
 if (listen.lan) {
   console.warn("[dev-server] LAN MODE: 同じネットワークの機器から http（暗号化なし）で接続できます。信頼できる Wi-Fi でのみ使い、終わったら停止してください。CLIENT_TOKENS は定期的に変更してください");
+  console.warn(`[dev-server] iPhone（Debug ビルド）の Xcode スキームに MW_INSIGHT_BASE_URL=http://${listen.host}:${process.env.PORT ?? 8787} を設定してください`);
 }
 createServer(async (req, res) => {
   const chunks: Buffer[] = [];
