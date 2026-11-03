@@ -8,7 +8,8 @@
 // 2026-10-28: もこりんとの会話で状況を整理できるようにした（Mokorin/、docs/MOKORIN_CONTEXT_INTEGRATION.md）。
 // 2026-10-28 改訂: もこりん中心の音声対話型 UI に変更（docs/MOKORIN_VOICE_UI.md）。
 // - 画面中央に大きなもこりん、その下に最新の会話と選択肢、下部にマイク・文字入力。確定したら測定ボタン
-// - 場面・身体状態の一覧（既存のボタン UI）は「選択を編集」のシートにまとめた（機能は削除していない）
+// - 場面・身体状態の一覧（既存のボタン UI）はシートにまとめ、必要なときだけ「一覧から選ぶ」で開く（機能は削除していない）
+// 2026-11-04 改訂: 常設の「選択を編集」「履歴」・説明文・要約行を削除。訂正は会話で、履歴は吹き出しの長押しから
 // - 会話・選択の状態は MokorinContextViewModel、音声は MokorinVoiceController が持つ（この View は表示と既存の確定処理だけ）
 // - 既存の「特になし」の排他・applyAndProceed()・「あとで選ぶ」「変更しない」はそのまま
 // - 測定は利用者が「この状況で測定する」を押したときだけ始まる
@@ -97,17 +98,12 @@ struct ContextCalibrationView: View {
     // MARK: - Header（必要最低限）
 
     private var header: some View {
-        VStack(spacing: 6) {
-            Text("今の状況を教えてください")
-                .font(.system(size: 20, weight: .medium))
-                .foregroundStyle(Color.white)
-            if !isInputFocused {
-                Text("もこりんと話しながら、いっしょに整理します。")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Color.white.opacity(0.45))
-            }
-        }
-        .multilineTextAlignment(.center)
+        // 操作の説明は置かず、もこりんの問いかけそのものを案内にする
+        Text("今の状況を教えてください")
+            .font(.system(size: 17, weight: .medium))
+            .foregroundStyle(Color.white.opacity(0.85))
+            .multilineTextAlignment(.center)
+            .accessibilityAddTraits(.isHeader)
     }
 
     // MARK: - 中央のもこりん
@@ -119,7 +115,7 @@ struct ContextCalibrationView: View {
 
     private func characterStage(size: CGFloat) -> some View {
         // もこりん本体の大きさだけでレイアウトし、光の演出は背景に置く（画面幅より広い光で全体が押し広げられないように）
-        MokorinAvatarView(size: size, pose: mokorin.pose)
+        MokorinAvatarView(size: size, pose: displayedPose)
             .frame(maxWidth: .infinity)
             .frame(height: size * 1.05)
             .background {
@@ -140,6 +136,28 @@ struct ContextCalibrationView: View {
             .allowsHitTesting(false)
     }
 
+    /// もこりんの状態（Idle / Listening / Thinking / Speaking / Error）を1つにまとめる
+    private enum Activity { case idle, listening, thinking, speaking, error }
+
+    private var activity: Activity {
+        if voice.isListening || voice.state == .preparing { return .listening }
+        if mokorin.isSending || voice.state == .processing { return .thinking }
+        if voice.state == .speaking { return .speaking }
+        if mokorin.failedText != nil || voice.problem != nil { return .error }
+        return .idle
+    }
+
+    /// 表情・動作（会話の内容）に、聞き取り中・考え中の見た目を重ねる。読み上げ中の口は pose.speaking
+    private var displayedPose: MokorinPose {
+        var p = mokorin.pose
+        switch activity {
+        case .listening: p.activity = .listening
+        case .thinking:  p.activity = .thinking
+        default:         p.activity = .idle
+        }
+        return p
+    }
+
     // MARK: - 会話（最新の発言・選択肢）
 
     private var conversationArea: some View {
@@ -150,10 +168,10 @@ struct ContextCalibrationView: View {
             }
             userEcho
             quickReplies
-            if let notice = mokorin.notice ?? voice.problem {
-                Label(notice, systemImage: "exclamationmark.circle")
+            if let notice = voice.problem ?? mokorin.notice {
+                Text(notice)
                     .font(.system(size: 11))
-                    .foregroundStyle(Color.orange.opacity(0.9))
+                    .foregroundStyle(Color.orange.opacity(0.8))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("mokorin_notice")
             }
@@ -179,8 +197,17 @@ struct ContextCalibrationView: View {
                 .overlay(RoundedRectangle(cornerRadius: 22)
                     .strokeBorder(isStub(message.origin) ? Color.orange.opacity(0.5) : Color.white.opacity(0.12), lineWidth: 1))
         )
+        // 会話の履歴・やり直しは常設ボタンにせず、吹き出しの長押し（VoiceOver ではアクション）から
+        .contextMenu {
+            if mokorin.messages.count > 1 {
+                Button("これまでの会話を見る", systemImage: "text.bubble") { isHistoryPresented = true }
+                Button("最初からやり直す", systemImage: "arrow.counterclockwise") { voice.cancelAll(); mokorin.restart() }
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("もこりん（\(originLabel(message.origin))）：\(message.text)")
+        .accessibilityAction(named: "これまでの会話を見る") { isHistoryPresented = true }
+        .accessibilityAction(named: "最初からやり直す") { voice.cancelAll(); mokorin.restart() }
         .accessibilityIdentifier("mokorin_latest_message")
         .animation(.easeInOut(duration: 0.2), value: message.id)
     }
@@ -221,19 +248,14 @@ struct ContextCalibrationView: View {
         }
     }
 
+    /// 状態の表示は1行だけ（待機中は表示しない。エラーは下の小さな文で伝える）
     @ViewBuilder
     private var voiceStatus: some View {
-        switch voice.state {
-        case .listening:
-            statusPill("聞いています。話し終えたら少し待つか、もう一度マイクを押してね", icon: "waveform", color: .red)
-        case .processing:
-            statusPill("もこりんが考え中…", icon: "ellipsis", color: accent)
-        case .speaking:
-            statusPill("もこりんが話しています", icon: "speaker.wave.2.fill", color: accent)
-        case .preparing:
-            statusPill("マイクを準備しています", icon: "mic", color: accent)
-        case .idle:
-            if mokorin.isSending { statusPill("もこりんが考え中…", icon: "ellipsis", color: accent) }
+        switch activity {
+        case .listening: statusPill("聞いています", icon: "waveform", color: .red)
+        case .thinking:  statusPill("考え中…", icon: "ellipsis", color: accent)
+        case .speaking:  statusPill("話しています（マイクで止められます）", icon: "speaker.wave.2.fill", color: accent)
+        case .idle, .error: EmptyView()
         }
     }
 
@@ -255,9 +277,9 @@ struct ContextCalibrationView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 8)], spacing: 8) {
                 ForEach(replies, id: \.self) { reply in
                     let selected = mokorin.isSelected(reply)
-                    let isConfirm = reply == .confirmConditions
+                    let isConfirm = reply == .confirmConditions || reply == .retry
                     Button {
-                        mokorin.tap(reply)
+                        if reply == .showList { isEditing = true } else { mokorin.tap(reply) }
                     } label: {
                         Text(reply.label)
                             .font(.system(size: 13, weight: isConfirm ? .semibold : .regular))
@@ -284,14 +306,8 @@ struct ContextCalibrationView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 10) {
-            if mokorin.step == .review {
-                // 測定する内容（ここに表示された内容で測定する。変更は「選択を編集」）
-                Text("場面：\(selectedScene.displayName)　身体状態：\(BodyCondition.allCases.filter { selectedConditions.contains($0) }.map(\.displayName).joined(separator: " / "))")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.white.opacity(0.8))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityIdentifier("mokorin_summary_line")
+            if mokorin.step == .review && mokorin.failedText == nil {
+                // 測定する内容は、もこりんの確認の発言に含まれる（同じ内容を別の場所に重ねて表示しない）
                 measureButton
             }
             inputRow
@@ -365,36 +381,41 @@ struct ContextCalibrationView: View {
     }
 
     private var micButton: some View {
+        // マイクが主要操作。状態に応じて 録音開始 / 録音を終えて送る / 送信の取り消し / 読み上げを止めて話す
         let listening = voice.isListening
-        let busy = voice.state == .processing || voice.state == .preparing || mokorin.isSending
+        let thinking = activity == .thinking
         let icon: String = {
-            switch voice.state {
-            case .listening: return "stop.fill"
-            case .speaking:  return "mic.fill"
-            default:         return "mic.fill"
-            }
+            if listening { return "stop.fill" }
+            if thinking { return "xmark" }
+            return "mic.fill"
         }()
         return Button {
-            Task { await voice.micTapped() }
+            if thinking {
+                mokorin.cancelPending()
+                voice.cancelAll()
+            } else {
+                Task { await voice.micTapped() }
+            }
         } label: {
             ZStack {
                 Circle()
                     .fill(listening ? Color.red.opacity(0.85) : accent.opacity(0.18))
                     .overlay(Circle().strokeBorder(listening ? Color.clear : accent.opacity(0.6), lineWidth: 1))
-                if busy && !listening {
-                    ProgressView().tint(accent)
+                if thinking {
+                    ProgressView().tint(accent).scaleEffect(1.3)
+                    Image(systemName: icon).font(.system(size: 10, weight: .bold)).foregroundStyle(accent)
                 } else {
                     Image(systemName: icon)
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(listening ? Color.white : accent)
                 }
             }
-            .frame(width: 48, height: 48)
+            .frame(width: 56, height: 56)
         }
         .buttonStyle(.plain)
-        .disabled(busy && !listening)
-        .accessibilityLabel(listening ? "録音を終えて送る" : (voice.state == .speaking ? "読み上げを止めて話す" : "声で答える"))
-        .accessibilityHint("押すと録音を始めます。話し終えると自動で送信します")
+        .disabled(voice.state == .preparing)
+        .accessibilityLabel(listening ? "録音を終えて送る" : thinking ? "送信を取り消す" : (voice.state == .speaking ? "読み上げを止めて話す" : "声で答える"))
+        .accessibilityHint(thinking ? "もこりんへの送信を取り消します" : "押すと録音を始めます。話し終えると自動で送信します")
         .accessibilityIdentifier("mokorin_mic_button")
     }
 
@@ -413,10 +434,6 @@ struct ContextCalibrationView: View {
                 print("[Navigation] context skipped -> mainApp")
             }
             .accessibilityIdentifier("context_skip_button")
-            Button("選択を編集") { isEditing = true }
-                .accessibilityIdentifier("mokorin_edit_button")
-            Button("履歴") { isHistoryPresented = true }
-                .accessibilityIdentifier("mokorin_history_button")
             Spacer()
             if mokorin.isServerConfigured && !mokorin.isTextConsented {
                 Button("外部AIを使う") { mokorin.setTextConsent(true) }

@@ -193,7 +193,7 @@ final class MokorinVoiceController: ObservableObject {
 
 // MARK: - 実装: 音声認識（Speech）
 
-/// SFSpeechRecognizer（日本語）＋ AVAudioEngine。話し終えて約1.5秒無音なら自動で終了する。
+/// SFSpeechRecognizer（日本語）＋ AVAudioEngine。話し終えて約1.8秒無音なら自動で終了する。
 /// 録音を始めて8秒間何も聞き取れなければ終了する（押したまま話さなかった場合に録音を続けないため）。最長30秒
 /// 音声・認識のコールバックは別スレッドで届くため nonisolated とし、状態の更新はメインスレッドで行う
 nonisolated final class SpeechRecognizerInput: NSObject, MokorinSpeechInput, @unchecked Sendable {
@@ -207,7 +207,8 @@ nonisolated final class SpeechRecognizerInput: NSObject, MokorinSpeechInput, @un
     private var finished = false
     private var onFinal: ((String) -> Void)?
 
-    static let silenceSeconds: TimeInterval = 1.5
+    /// 話し終えたと判断する無音の長さ（日本語の言いよどみで途中送信しないよう 1.8 秒）
+    static let silenceSeconds: TimeInterval = 1.8
     static let noSpeechSeconds: TimeInterval = 8
     static let maxSeconds: TimeInterval = 30
 

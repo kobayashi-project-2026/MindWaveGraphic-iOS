@@ -7,6 +7,7 @@
 // - setAction() の許可値・クラスの付け外し・2.5 秒後の解除は原本と同じ
 // - 表示サイズに合わせた縮小（fit）と、アプリ（WKWebView）への準備完了通知を追加
 // - 2026-10-28: 読み上げ中の口の動き setSpeaking() を追加
+// - 2026-11-04: 会話の状態 setActivity()（聞き取り中・考え中）を追加
 // - 未知の表情・動作は無視する（原本と同じ）
 
 (function () {
@@ -77,6 +78,15 @@
     return true;
   }
 
+  /** 会話の状態（idle / listening / thinking）。表情（setEmotion）・動作（setAction）とは別のクラスで表す */
+  const ACTIVITIES = ["idle", "listening", "thinking"];
+  function setActivity(activity) {
+    if (!ACTIVITIES.includes(activity)) return false;
+    character.classList.remove("activity-listening", "activity-thinking");
+    if (activity !== "idle") character.classList.add(`activity-${activity}`);
+    return true;
+  }
+
   /** 原本の固定セリフ（端末内の定型文として使う場合のみ） */
   function getDefaultLine(emotion) {
     return defaultLines[emotion] || "";
@@ -104,6 +114,7 @@
   window.setAction = setAction;
   window.setDialogue = setDialogue;
   window.setSpeaking = setSpeaking;
+  window.setActivity = setActivity;
   window.getDefaultLine = getDefaultLine;
   window.mokorinState = state;
 

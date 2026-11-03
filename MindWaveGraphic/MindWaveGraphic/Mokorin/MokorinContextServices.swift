@@ -56,8 +56,25 @@ nonisolated enum MokorinKeywordInterpreter {
         (.none,      ["特にない", "特になし", "座って", "何もしていない"]),
     ]
 
+    /// 訂正を表す言い回し（「面接じゃなくて試合」「面接って言ったけど、実際は発表」など）
+    private static let correctionMarkers = ["じゃなくて", "ではなくて", "ではなく", "じゃなく", "って言ったけど", "と言ったけど",
+                                            "っていうか", "というか", "間違えた", "訂正", "実際は", "本当は"]
+
+    /// 文章から場面・身体状態を読み取る。訂正の言い回しがあれば、その後ろの内容（最新の発言）を優先する
     static func interpret(_ text: String) -> (scene: ContextScene?, conditions: Set<BodyCondition>) {
-        var scene = sceneWords.first { _, words in words.contains { text.contains($0) } }?.0
+        if let range = correctionMarkers.compactMap({ text.range(of: $0, options: .backwards) }).max(by: { $0.upperBound < $1.upperBound }) {
+            let corrected = interpretRaw(String(text[range.upperBound...]))
+            if corrected.scene != nil || !corrected.conditions.isEmpty { return corrected }
+        }
+        return interpretRaw(text)
+    }
+
+    private static func interpretRaw(_ text: String) -> (scene: ContextScene?, conditions: Set<BodyCondition>) {
+        // 複数の場面の言葉があるときは、最後に出てきたものを採る（後から言い直したことを優先）
+        var scene = sceneWords.compactMap { scene, words -> (ContextScene, String.Index)? in
+            let positions = words.compactMap { text.range(of: $0, options: .backwards)?.lowerBound }
+            return positions.max().map { (scene, $0) }
+        }.max(by: { $0.1 < $1.1 })?.0
         // 「予定は特にない」は安静として扱う（場面の段階での答え）
         if scene == nil, ["予定はない", "予定は特にない", "特に予定", "何もない"].contains(where: { text.contains($0) }) { scene = .calm }
         var conditions = Set(conditionWords.filter { _, words in words.contains { text.contains($0) } }.map(\.0))
@@ -185,9 +202,18 @@ nonisolated enum MokorinQuickReply: Hashable, Sendable {
     case noPlan
     case condition(BodyCondition)
     case confirmConditions
+    /// 場面・身体状態の一覧（編集シート）を開く。必要なときだけ表示する
+    case showList
+    /// 外部AIに接続できなかった発言を送り直す
+    case retry
+    /// 外部AIを使わずに、端末内の判定で会話を続ける
+    case continueWithoutAI
 
     var label: String {
         switch self {
+        case .showList:          return "一覧から選ぶ"
+        case .retry:             return "もう一度送る"
+        case .continueWithoutAI: return "AIなしで続ける"
         case .tension(let t): return t.replyLabel
         case .noPlan:         return "特に予定はない"
         case .scene(let s):

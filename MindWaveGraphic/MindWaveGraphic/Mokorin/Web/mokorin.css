@@ -280,9 +280,22 @@ html, body {
   to { transform: scaleY(1.7); }
 }
 
+/* 会話の状態（setActivity）: 聞き取り中は少し傾いて耳を傾ける、考え中はゆっくり浮かび目線が上がる */
+#character.activity-listening { animation: lean 1.6s ease-in-out infinite; }
+#character.activity-listening .body { box-shadow: inset -10px -12px 18px rgba(214, 186, 156, 0.55),
+                                                  inset 6px 8px 14px rgba(255, 255, 255, 0.6),
+                                                  0 18px 30px rgba(0, 0, 0, 0.35),
+                                                  0 0 46px rgba(120, 180, 255, 0.35); }
+#character.activity-thinking { animation: float 4.5s ease-in-out infinite; }
+#character.activity-thinking .eyes { transform: translateY(-3px); transition: transform .4s ease; }
+@keyframes lean {
+  0%, 100% { transform: rotate(-3deg) translateY(0); }
+  50% { transform: rotate(-3deg) translateY(-4px); }
+}
+
 /* 視差効果を減らす設定: 常時動くアニメーション（浮遊・呼吸・まばたき・口）を止める。
    動作 wave/jump/nod は利用者の操作に応じた短時間のものなので維持する */
 @media (prefers-reduced-motion: reduce) {
-  #character { animation: none; }
+  #character, #character.activity-listening, #character.activity-thinking { animation: none; }
   .body, .eyes span, #character.speaking .mouth { animation: none; }
 }

@@ -207,3 +207,8 @@ test("実通信の結果を反映: 返答に質問があるときは clarificati
   const notAsked = validateContextResult({ ...base, reply: "そっか、かなり緊張してるんだね。", clarification_question: "どんな予定の前かな？" });
   assert.ok(notAsked.ok && notAsked.value.clarification_question === "どんな予定の前かな？");
 });
+
+test("訂正の指示: 最新の発言を優先し、取り消された身体状態を入れないようモデルに伝える", () => {
+  const body = buildContextResponsesRequest(request(FIRST), { model: "m", maxOutputTokens: 100 });
+  assert.ok(String(body.instructions).includes("最新の発言を優先"));
+});

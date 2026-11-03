@@ -188,16 +188,48 @@ enum MokorinTests {
             T.expectEqual(vm.measurementContext.scene, .calm)
             T.expectEqual(vm.measurementContext.conditions, [.none])
         }
-        await T.test("身体状態の選択肢: 複数選べて「これで決定」が出る。最初の選択で既定の「特になし」は外れる") {
+        await T.test("身体状態の選択肢: 1回のタップで答えて確認へ。複数の状態は話す・一覧で選ぶ（既定の「特になし」は外れる）") {
             let vm = localVM()
             vm.tap(.tension(.slight)); vm.tap(.scene(.sports))
-            T.expect(!vm.quickReplies.contains(.confirmConditions), "no confirm yet")
-            vm.tap(.condition(.running)); vm.tap(.condition(.caffeine))
-            T.expectEqual(vm.selectedConditions, [.running, .caffeine])
-            T.expect(vm.isSelected(.condition(.running)) && !vm.isSelected(.condition(.stairs)), "selected state")
-            T.expect(vm.quickReplies.contains(.confirmConditions), "confirm chip")
-            vm.tap(.confirmConditions)
+            T.expectEqual(vm.step, .condition)
+            vm.tap(.condition(.stairs))
+            T.expectEqual(vm.selectedConditions, [.stairs])
             T.expectEqual(vm.step, .review)
+            let vm2 = localVM(name: "multi")
+            vm2.tap(.tension(.slight)); vm2.tap(.scene(.sports))
+            await vm2.submit("走ってきたし、コーヒーも飲んだ")
+            T.expectEqual(vm2.selectedConditions, [.running, .caffeine])
+            T.expectEqual(vm2.step, .review)
+        }
+        await T.test("選択肢は最大3つ。一覧は外部AIなし・はっきりしない答えのあとだけ。確認段階では出さない") {
+            let vm = localVM()
+            T.expect(vm.quickReplies.count <= 3, "tension")
+            vm.tap(.tension(.high))
+            T.expect(vm.quickReplies.count <= 3 && vm.quickReplies.contains(.showList), "local → 一覧あり")
+            vm.tap(.noPlan)
+            T.expect(vm.quickReplies.count <= 3, "condition")
+            vm.tap(.condition(.none))
+            T.expectEqual(vm.quickReplies, [])
+            let unclear = FakeContextClient.returning(reply: "そっか。何か予定があるの？", scene: nil)
+            let r = remoteVM(client: unclear)
+            r.tap(.tension(.slight))
+            T.expectEqual(r.step, .scene)
+            T.expect(!r.quickReplies.contains(.showList) && r.quickReplies.count == 3, "AI ありで最初は一覧を出さない")
+            await r.submit("うーん")
+            T.expect(r.quickReplies.contains(.showList) && r.quickReplies.count == 3, "はっきりしないと一覧を案内")
+        }
+        await T.test("会話での訂正: 最新の発言を優先（面接じゃなくて試合 / 面接って言ったけど実際はゼミの発表 / 階段じゃなくて走ってきた）") {
+            let i = MokorinKeywordInterpreter.self
+            T.expectEqual(i.interpret("面接じゃなくて試合だった").scene, .sports)
+            T.expectEqual(i.interpret("試合って言ったけど、実際はゼミの発表だった").scene, .interview)
+            let c = i.interpret("階段じゃなくて走ってきた")
+            T.expectEqual(c.conditions, [.running])
+            let vm = localVM()
+            await vm.submit("かなり緊張してる")
+            await vm.submit("これから面接なんだ")
+            T.expectEqual(vm.selectedScene, .interview)
+            await vm.submit("面接って言ったけど、実際は試合だった")
+            T.expectEqual(vm.selectedScene, .sports, "最新の発言を優先")
         }
         await T.test("緊張の答えが2回はっきりしなくても先へ進む（同じ質問を繰り返さない）") {
             let vm = localVM()
@@ -250,7 +282,7 @@ enum MokorinTests {
             await vm.submit("わからない")
             T.expectEqual(vm.step, .scene, "曖昧なら同じ段階で尋ねる")
             T.expect(!vm.hasSceneAnswer, "推測で確定しない")
-            T.expect(vm.quickReplies.contains(.scene(.other)) && vm.quickReplies.contains(.noPlan), "選択肢で先へ進める")
+            T.expect(vm.quickReplies.contains(.showList) && vm.quickReplies.contains(.noPlan), "選択肢・一覧で先へ進める")
             vm.tap(.scene(.other))
             vm.tap(.condition(.none))
             T.expectEqual(vm.step, .review)
@@ -331,13 +363,19 @@ enum MokorinTests {
             T.expectEqual(vm.messages.last?.origin, .fixed)
             T.expect(vm.messages.last?.text.contains("移動してきたところ") == true, "next question")
         }
-        await T.test("未知の候補・通信失敗: 採用せず、理由を表示して端末内の判定で続ける（手動でも測定できる）") {
+        await T.test("未知の候補・通信失敗: 採用せず、黙って切り替えない。「もう一度送る」「AIなしで続ける」を出す（定型文を AI として見せない）") {
             let bad = FakeContextClient.returning(reply: "ok", scene: "office_party")
             let vm = remoteVM(client: bad)
             await vm.submit("面接の前です")
-            T.expect(vm.notice?.contains("外部AIに接続できなかった") == true, "notice")
+            T.expectEqual(vm.failedText, "面接の前です")
+            T.expect(vm.notice?.contains("うまくつながらなかった") == true, "notice")
+            T.expectEqual(vm.quickReplies, [.retry, .continueWithoutAI])
+            T.expect(!vm.hasSceneAnswer, "未知の候補は採用しない")
+            T.expectEqual(vm.messages.last?.speaker, .user, "定型文を勝手に返さない")
+            vm.continueWithoutAI()
+            T.expect(vm.failedText == nil && vm.notice == nil, "cleared")
             T.expectEqual(vm.selectedScene, .interview, "端末内の判定で続行")
-            T.expectEqual(vm.messages.last?.origin, .fixed)
+            T.expectEqual(vm.messages.last?.origin, .fixed, "端末内の定型文と表示")
             let down = FakeContextClient { _ in throw InsightClientError.transport(code: -1004) }
             let vm2 = remoteVM(client: down)
             await vm2.submit("少し緊張しています")
@@ -345,6 +383,37 @@ enum MokorinTests {
             vm2.selectScene(.important); vm2.toggleCondition(.none); vm2.confirmConditions()
             T.expectEqual(vm2.step, .review)
             T.expectEqual(vm2.measurementContext.scene, .important)
+        }
+        await T.test("通信失敗 → もう一度送る: 利用者の操作でだけ再送し、成功したら会話を続ける（自動再送しない）") {
+            let calls = Counter()
+            let flaky = FakeContextClient { req in
+                let n = calls.increment()
+                if n == 1 { throw InsightClientError.transport(code: -1001) }
+                return try await FakeContextClient.returning(reply: "面接なんだね。今は座ってる？", scene: "interview").send(req)
+            }
+            let vm = remoteVM(client: flaky)
+            await vm.submit("これから面接")
+            T.expectEqual(calls.value, 1, "自動再送しない")
+            T.expect(vm.failedText != nil, "failed")
+            await vm.retryFailed()
+            T.expectEqual(calls.value, 2)
+            T.expect(vm.failedText == nil, "recovered")
+            T.expectEqual(vm.selectedScene, .interview)
+            T.expectEqual(vm.messages.filter { $0.speaker == .user }.count, 1, "発言は二重にならない")
+        }
+        await T.test("送信の取り消し: 送った発言を外し、後から届いた応答は捨てる") {
+            let slow = FakeContextClient.returning(reply: "面接なんだね。今は座ってる？", scene: "interview", delay: .milliseconds(300))
+            let vm = remoteVM(client: slow)
+            let before = vm.messages.count
+            let task = Task { await vm.submit("これから面接") }
+            try? await Task.sleep(for: .milliseconds(50))
+            T.expect(vm.isSending, "sending")
+            vm.cancelPending()
+            T.expect(!vm.isSending, "cancelled")
+            await task.value
+            T.expectEqual(vm.messages.count, before, "応答を反映しない")
+            T.expect(!vm.hasSceneAnswer, "候補も反映しない")
+            T.expectEqual(vm.notice, "送信を取り消したよ。")
         }
         await T.test("同意なし: 会話本文を外部へ送らない（クライアントを呼ばない）") {
             let client = FakeContextClient.returning(reply: "x", scene: "interview")
@@ -527,6 +596,19 @@ enum MokorinTests {
             T.expect(!ServerConnectionDiagnostics.isLoopbackUnreachable(URL(string: "https://insight.example.com")!, isSimulator: false), "remote https")
             T.expect(InsightClientError.loopbackOnDevice.chatUserMessage.contains("iPhone 自身"), "clear message")
         }
+        T.test("同じ Wi-Fi の開発用サーバー: プライベート IP・.local だけを LAN と判定。Debug でだけ http を許可（グローバル IP の http は不可）") {
+            let lan = ServerConnectionDiagnostics.isPrivateLANHost
+            for ok in ["http://192.168.1.20:8787", "http://10.0.0.5:8787", "http://172.20.3.4:8787", "http://my-mac.local:8787"] {
+                T.expect(lan(URL(string: ok)!), ok)
+            }
+            for ng in ["http://172.32.0.1:8787", "http://8.8.8.8:8787", "http://example.com", "http://192.168.1:8787"] {
+                T.expect(!lan(URL(string: ng)!), ng)
+            }
+            let d = T.freshDefaults("lan-config")
+            let env = ["MW_INSIGHT_BASE_URL": "http://192.168.1.20:8787", "MW_INSIGHT_CLIENT_TOKEN": "t"]
+            T.expect(RemoteInsightConfiguration.load(defaults: d, environment: env) != nil, "DEBUG: LAN http ok")
+            T.expect(RemoteInsightConfiguration.load(defaults: d, environment: ["MW_INSIGHT_BASE_URL": "http://8.8.8.8:8787", "MW_INSIGHT_CLIENT_TOKEN": "t"]) == nil, "global http ng")
+        }
         T.test("読み上げ中の口の動き: setSpeaking の呼び出し文") {
             T.expectEqual(MokorinWebScript.setSpeaking(true), "setSpeaking(true)")
             T.expectEqual(MokorinWebScript.setSpeaking(false), "setSpeaking(false)")
@@ -592,4 +674,12 @@ nonisolated final class FakeSpeechOutput: MokorinSpeechOutput, @unchecked Sendab
     init() { FakeSpeechOutput.lastStopTime = nil }
     func speak(_ text: String) { spoken.append(text); isSpeaking = true }
     func stop() { stopCount += 1; isSpeaking = false; FakeSpeechOutput.lastStopTime = Date() }
+}
+
+/// テスト用の呼び出し回数（Sendable）
+nonisolated final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    var value: Int { lock.lock(); defer { lock.unlock() }; return n }
+    func increment() -> Int { lock.lock(); defer { lock.unlock() }; n += 1; return n }
 }

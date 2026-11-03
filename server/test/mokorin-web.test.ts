@@ -115,6 +115,20 @@ test("統合先: setSpeaking は読み上げ中の口の動き（speaking クラ
   assert.equal(api.mokorinState().speaking, false);
 });
 
+test("統合先: setActivity は聞き取り中・考え中のクラスを切り替え、idle で外す。未知の値は無視し、表情に触れない", () => {
+  const { api, elements } = run(INTEGRATED);
+  const ch = elements.character.classList;
+  assert.equal(api.setActivity("listening"), true);
+  assert.ok(ch.contains("activity-listening"));
+  api.setActivity("thinking");
+  assert.ok(ch.contains("activity-thinking") && !ch.contains("activity-listening"), "同時に付かない");
+  assert.equal(api.setActivity("dance"), false);
+  assert.ok(ch.contains("activity-thinking"), "未知の値では変えない");
+  api.setActivity("idle");
+  assert.ok(!ch.contains("activity-thinking") && !ch.contains("activity-listening"));
+  assert.ok(ch.contains("calm"), "表情はそのまま");
+});
+
 test("統合先の HTML: 原本のキャラクター要素とクラスを保持し、手足（.feet）を追加。CSS に原本の表情・動作の定義が残る", () => {
   const html = readFileSync(new URL("../../MindWaveGraphic/MindWaveGraphic/Mokorin/Web/mokorin.html", import.meta.url), "utf8");
   for (const part of ['class="mocorin calm"', 'class="sprout"', 'class="body"', 'class="cheek left"', 'class="cheek right"', 'class="eyes"', 'class="mouth"', 'class="feet"']) {

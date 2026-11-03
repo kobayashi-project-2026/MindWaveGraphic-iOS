@@ -22,6 +22,11 @@ nonisolated enum MokorinAction: String, CaseIterable, Codable, Sendable {
     case wave, jump, nod
 }
 
+/// 会話の状態（表情・動作とは別。聞き取り中・考え中の見た目）
+nonisolated enum MokorinActivity: String, Equatable, Sendable {
+    case idle, listening, thinking
+}
+
 /// SwiftUI から渡すもこりんの状態。actionID を増やすと同じ動作をもう一度再生する
 nonisolated struct MokorinPose: Equatable, Sendable {
     var emotion: MokorinEmotion = .calm
@@ -31,6 +36,8 @@ nonisolated struct MokorinPose: Equatable, Sendable {
     var dialogue: String? = nil
     /// 読み上げ中（口をやさしく動かす）
     var speaking: Bool = false
+    /// 聞き取り中・考え中
+    var activity: MokorinActivity = .idle
 
     /// 表情を変え、動作を1回再生した新しい状態
     func with(_ emotion: MokorinEmotion, _ action: MokorinAction?) -> MokorinPose {
@@ -59,6 +66,7 @@ nonisolated enum MokorinWebScript {
 
     static let showDialogue = "document.body.classList.add('show-dialogue')"
     static func setSpeaking(_ on: Bool) -> String { "setSpeaking(\(on ? "true" : "false"))" }
+    static func setActivity(_ a: MokorinActivity) -> String { "setActivity('\(a.rawValue)')" }
 }
 
 struct MokorinWebView: UIViewRepresentable {
@@ -126,6 +134,7 @@ struct MokorinWebView: UIViewRepresentable {
             if let action = pose.action, applied?.actionID != pose.actionID { scripts.append(MokorinWebScript.setAction(action)) }
             if showsDialogue, applied?.dialogue != pose.dialogue { scripts.append(MokorinWebScript.setDialogue(pose.dialogue ?? "")) }
             if applied?.speaking != pose.speaking { scripts.append(MokorinWebScript.setSpeaking(pose.speaking)) }
+            if applied?.activity != pose.activity { scripts.append(MokorinWebScript.setActivity(pose.activity)) }
             applied = pose
             guard !scripts.isEmpty else { return }
             webView.evaluateJavaScript(scripts.joined(separator: ";")) { _, error in

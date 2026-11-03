@@ -18,7 +18,9 @@
 // - AI・端末内判定の結果は「提案」として選択に反映し、画面で確認・変更できる。測定はこのクラスからは開始しない
 // - すでに答えた内容は聞き直さない（1つの発言に複数の情報があれば、まとめて先へ進む）
 // - 主観的な緊張は会話の進行と表情にだけ使い、MeasurementContext・計算・保存データには入れない
-// - 外部AIは「文章送信の同意（ChatTextConsentStore）」かつサーバー設定がある場合だけ使う。失敗したら端末内の判定で続ける
+// - 外部AIは「文章送信の同意（ChatTextConsentStore）」かつサーバー設定がある場合だけ使う。
+//   失敗したら黙って端末内の判定に切り替えず、「もう一度送る」「AIなしで続ける」を選んでもらう（2026-11-04 改訂）
+// - 選択肢は必要なときだけ最大3つ。訂正は会話で（「面接じゃなくて試合だった」）。一覧は必要なときだけ
 // - 心拍・HRV などの計測データは送らない（送る項目自体がない）
 // - ログには件数・段階・結果の種類だけを出す（会話本文は出さない）
 
@@ -82,6 +84,10 @@ final class MokorinContextViewModel: ObservableObject {
     @Published private(set) var conversationId = UUID()
     /// もこりんの表情・動作（MokorinWebView へ渡す）。外部AIの応答があればその値、なければ固定の規則
     @Published private(set) var pose = MokorinPose()
+    /// 外部AIに届かなかった発言（再送・AIなしで続ける の対象）。nil = 失敗なし
+    @Published private(set) var failedText: String? = nil
+    /// 今の段階で、はっきりしない答えが続いた回数（一覧を案内する目安）
+    @Published private(set) var unclearCountInStep = 0
 
     private let initialContext: MeasurementContext
     private let isInAppEdit: Bool
@@ -92,6 +98,8 @@ final class MokorinContextViewModel: ObservableObject {
     private var conditionsTouched = false
     /// 緊張の段階で、はっきりしない答えに聞き直した回数（何度も同じことを聞かないため）
     private var tensionRetries = 0
+    /// 送信中の要求の識別子（取り消し・やり直しの後に届いた応答を破棄するため）
+    private var activeRequestID: UUID? = nil
 
     /// - Parameters:
     ///   - initialContext: メインアプリ内からの再設定では現在の状況、初回は既定値
@@ -136,18 +144,18 @@ final class MokorinContextViewModel: ObservableObject {
     /// 最新の利用者の発言（音声認識の結果の確認用）
     var latestUserMessage: Message? { messages.last { $0.speaker == .user } }
 
-    /// 段階に応じた選択肢
+    /// 段階に応じた選択肢。会話の補助として最大3つだけ（それ以外は話す・入力する）。
+    /// 一覧は、外部AIを使わないとき・はっきりしない答えが続いたときだけ案内する
     var quickReplies: [MokorinQuickReply] {
+        if failedText != nil { return [.retry, .continueWithoutAI] }
+        let offerList = !usesRemoteAI || unclearCountInStep >= 1
         switch step {
         case .tension:
             return [.tension(.slight), .tension(.high), .tension(.calm)]
         case .scene:
-            return [.scene(.interview), .scene(.sports), .scene(.important), .scene(.work), .noPlan, .scene(.other)]
+            return [.scene(.interview), .noPlan] + (offerList ? [.showList] : [.scene(.work)])
         case .condition:
-            var replies: [MokorinQuickReply] = [.condition(.none), .condition(.stairs), .condition(.running),
-                                                .condition(.caffeine), .condition(.sleepLack), .condition(.afterMeal), .condition(.smoking)]
-            if conditionsTouched && !selectedConditions.contains(.none) { replies.append(.confirmConditions) }
-            return replies
+            return [.condition(.none), .condition(.stairs)] + (offerList ? [.showList] : [.condition(.running)])
         case .review:
             return []
         }
@@ -164,6 +172,19 @@ final class MokorinContextViewModel: ObservableObject {
     /// 選択肢をタップしたとき
     func tap(_ reply: MokorinQuickReply) {
         guard !isSending else { return }
+        switch reply {
+        case .retry:
+            Task { await retryFailed() }
+            return
+        case .continueWithoutAI:
+            continueWithoutAI()
+            return
+        case .showList:
+            return   // 一覧（編集シート）は画面側で開く
+        default:
+            break
+        }
+        failedText = nil
         switch reply {
         case .tension(let t):
             appendUser(t.replyLabel)
@@ -188,9 +209,18 @@ final class MokorinContextViewModel: ObservableObject {
             appendUser(reply.label)
             advance(userText: reply.label)
         case .condition(let c):
-            toggleCondition(c)
+            // 会話の選択肢は1回のタップで答える（複数の状態は話す・入力する、または一覧で選ぶ）
+            selectedConditions = [c]
+            suggestedConditions = []
+            conditionsTouched = true
+            hasConditionAnswer = true
+            hasTensionAnswer = true
+            appendUser(reply.label)
+            advance(userText: reply.label)
         case .confirmConditions:
             confirmConditions()
+        case .retry, .continueWithoutAI, .showList:
+            break
         }
     }
 
@@ -264,6 +294,8 @@ final class MokorinContextViewModel: ObservableObject {
 
     /// 編集画面（場面・身体状態の一覧）で選び終えたとき。内容を回答済みにして確認へ進む
     func finishManualEdit() {
+        failedText = nil
+        unclearCountInStep = 0
         hasTensionAnswer = true
         hasSceneAnswer = true
         hasConditionAnswer = true
@@ -291,6 +323,7 @@ final class MokorinContextViewModel: ObservableObject {
         guard !isSending, !text.isEmpty else { return }
         draft = ""
         isSending = true
+        failedText = nil
         Task { await perform(text) }
     }
 
@@ -299,7 +332,34 @@ final class MokorinContextViewModel: ObservableObject {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isSending, !text.isEmpty else { return }
         isSending = true
+        failedText = nil
         await perform(text)
+    }
+
+    /// 外部AIに届かなかった発言を送り直す（利用者の操作でだけ。自動では再送しない）
+    func retryFailed() async {
+        guard !isSending, let text = failedText else { return }
+        failedText = nil
+        isSending = true
+        await requestReply(for: text)
+    }
+
+    /// 外部AIを使わずに、届かなかった発言を端末内の判定で処理して会話を続ける
+    func continueWithoutAI() {
+        guard !isSending, let text = failedText else { return }
+        failedText = nil
+        notice = nil
+        replyLocally(to: text, previous: step)
+    }
+
+    /// 送信中の要求を取り消す（届いた応答は破棄し、送った発言も会話から外す）
+    func cancelPending() {
+        guard isSending else { return }
+        activeRequestID = nil
+        isSending = false
+        if let last = messages.last, last.speaker == .user { messages.removeLast() }
+        notice = "送信を取り消したよ。"
+        MindWaveDebugLogger.log(.insight, "mokorin request cancelled")
     }
 
     /// 会話をやり直す（選択も最初の状態に戻す）
@@ -318,6 +378,9 @@ final class MokorinContextViewModel: ObservableObject {
         subjectiveTension = nil
         conditionsTouched = false
         tensionRetries = 0
+        failedText = nil
+        unclearCountInStep = 0
+        activeRequestID = nil
         conversationId = UUID()
         start()
         MindWaveDebugLogger.log(.insight, "mokorin restart")
@@ -365,60 +428,86 @@ final class MokorinContextViewModel: ObservableObject {
         let text = String(rawText.prefix(ContextAssistLimits.maxUserChars))
         appendUser(text)
         notice = nil
-        let conversation = conversationId
-        let previous = step
-
-        if usesRemoteAI, let configuration = configurationProvider() {
-            let request = makeRequest()
-            do {
-                let response = try await clientFactory(configuration).send(request)
-                guard conversation == conversationId else { return }   // やり直し後に届いた応答は破棄
-                let candidates = try response.result.typedCandidates()
-                let changed = applyCandidates(scene: candidates.scene, conditions: candidates.conditions)
-                handleTensionAnswer(tension: response.result.typedTension, otherInfo: changed)
-                step = computeStep()
-                let origin: Origin = response.isStub ? .stub(model: response.model) : .openAI(model: response.model)
-                var reply = response.result.reply
-                if response.result.needsClarification, let q = response.result.clarificationQuestion, !reply.contains(q) {
-                    reply += "\n" + q
-                }
-                appendMokorin(reply, origin: origin)
-                // 外部AIが選んだ表情・動作（不正な値は calm / nod）。返答文は固定文で上書きしない
-                let expression = response.result.typedExpression
-                setPose(expression.emotion, expression.action)
-                // 返答に次の質問・確認が含まれない場合は、段階に合わせた定型の質問を添える（会話が止まらないように）
-                let asksSomething = reply.contains("？") || reply.contains("?")
-                switch step {
-                case .review where !reply.contains("測定"):
-                    appendMokorin(MokorinScript.summary(scene: selectedScene, conditions: selectedConditions), origin: .fixed)
-                case .tension where !asksSomething:
-                    appendMokorin(MokorinScript.askTensionAgain, origin: .fixed)
-                case .scene where !asksSomething:
-                    appendMokorin(MokorinScript.askScene(after: subjectiveTension), origin: .fixed)
-                case .condition where !asksSomething:
-                    appendMokorin(MokorinScript.askCondition(scene: selectedScene), origin: .fixed)
-                default:
-                    break
-                }
-                MindWaveDebugLogger.log(.insight, "mokorin remote provider=\(response.provider) step=\(step) scene=\(candidates.scene != nil) conditions=\(candidates.conditions.count) tension=\(response.result.typedTension != nil)")
-                isSending = false
-                return
-            } catch {
-                guard conversation == conversationId else { return }
-                let clientError = error as? InsightClientError
-                notice = "外部AIに接続できなかったため、端末内の判定で続けます（\(clientError?.chatUserMessage ?? "不明なエラー")）"
-                MindWaveDebugLogger.log(.insight, "mokorin remote failed -> local reason=\(clientError?.logCode ?? "unknown_error")")
-            }
+        if usesRemoteAI {
+            await requestReply(for: text)
+        } else {
+            // 外部AIを使わない設定（未同意・サーバー未設定）: 端末内の定型文で応答（画面に「端末内の定型文」と表示）
+            replyLocally(to: text, previous: step)
+            isSending = false
         }
+    }
 
-        // 端末内の判定（外部AIを使わない・失敗した場合）
+    /// 外部AIへ送る（直前に追加した利用者の発言を含む会話履歴）
+    private func requestReply(for text: String) async {
+        guard let configuration = configurationProvider() else {
+            replyLocally(to: text, previous: step)
+            isSending = false
+            return
+        }
+        let conversation = conversationId
+        let requestID = UUID()
+        activeRequestID = requestID
+        let previous = step
+        let request = makeRequest()
+        do {
+            let response = try await clientFactory(configuration).send(request)
+            // やり直し・取り消しの後に届いた応答は破棄する
+            guard conversation == conversationId, activeRequestID == requestID else { return }
+            // 候補の検証（未知の値は throw → 下の catch で失敗として扱う）を済ませてから要求を完了にする
+            let candidates = try response.result.typedCandidates()
+            activeRequestID = nil
+            let changed = applyCandidates(scene: candidates.scene, conditions: candidates.conditions)
+            handleTensionAnswer(tension: response.result.typedTension, otherInfo: changed)
+            step = computeStep()
+            unclearCountInStep = (step == previous && !changed && response.result.typedTension == nil) ? unclearCountInStep + 1 : 0
+            let origin: Origin = response.isStub ? .stub(model: response.model) : .openAI(model: response.model)
+            var reply = response.result.reply
+            if response.result.needsClarification, let q = response.result.clarificationQuestion, !reply.contains(q) {
+                reply += "\n" + q
+            }
+            appendMokorin(reply, origin: origin)
+            // 外部AIが選んだ表情・動作（不正な値は calm / nod）。返答文は固定文で上書きしない
+            let expression = response.result.typedExpression
+            setPose(expression.emotion, expression.action)
+            // 返答に次の質問・確認が含まれない場合は、段階に合わせた定型の質問を添える（会話が止まらないように）
+            let asksSomething = reply.contains("？") || reply.contains("?")
+            switch step {
+            case .review where !reply.contains("測定"):
+                appendMokorin(MokorinScript.summary(scene: selectedScene, conditions: selectedConditions), origin: .fixed)
+            case .tension where !asksSomething:
+                appendMokorin(MokorinScript.askTensionAgain, origin: .fixed)
+            case .scene where !asksSomething:
+                appendMokorin(MokorinScript.askScene(after: subjectiveTension), origin: .fixed)
+            case .condition where !asksSomething:
+                appendMokorin(MokorinScript.askCondition(scene: selectedScene), origin: .fixed)
+            default:
+                break
+            }
+            MindWaveDebugLogger.log(.insight, "mokorin remote provider=\(response.provider) step=\(step) scene=\(candidates.scene != nil) conditions=\(candidates.conditions.count) tension=\(response.result.typedTension != nil)")
+            isSending = false
+        } catch {
+            guard conversation == conversationId, activeRequestID == requestID else { return }
+            activeRequestID = nil
+            let clientError = error as? InsightClientError
+            // 黙って端末内の判定に切り替えず、利用者に「もう一度送る」か「AIなしで続ける」を選んでもらう
+            failedText = text
+            notice = "うまくつながらなかったよ（\(clientError?.chatUserMessage ?? "不明なエラー")）"
+            setPose(.sad, .nod)
+            MindWaveDebugLogger.log(.insight, "mokorin remote failed reason=\(clientError?.logCode ?? "unknown_error")")
+            isSending = false
+        }
+    }
+
+    /// 端末内の判定で応答する（外部AIを使わないとき・利用者が「AIなしで続ける」を選んだとき）
+    private func replyLocally(to text: String, previous: Step) {
         let local = MokorinKeywordInterpreter.interpret(text)
         let tension = MokorinKeywordInterpreter.interpretTension(text)
         let changed = applyCandidates(scene: local.scene, conditions: local.conditions)
         handleTensionAnswer(tension: tension, otherInfo: changed)
+        let unclear = !changed && !(previous == .tension && hasTensionAnswer)
         advance(userText: text, clarifyIfUnchanged: !changed, tensionJustAnswered: previous == .tension && hasTensionAnswer)
+        unclearCountInStep = (unclear && step == previous) ? unclearCountInStep + 1 : 0
         MindWaveDebugLogger.log(.insight, "mokorin local step=\(step) scene=\(local.scene != nil) conditions=\(local.conditions.count) tension=\(tension != nil)")
-        isSending = false
     }
 
     /// 候補を「提案」として選択に反映する（利用者は画面で変更できる）。何か反映したら true
