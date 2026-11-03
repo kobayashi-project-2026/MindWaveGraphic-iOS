@@ -71,6 +71,7 @@ struct MokorinBrief: Equatable {
     /// 最初の吹き出し（ひとこと＋主な事実＋不足）
     var firstMessage: String {
         var lines: [String] = [opening]
+        if usesDemoData, let demo = cautions.first { lines.append(demo) }
         lines.append(contentsOf: facts.prefix(3))
         lines.append(contentsOf: missing.prefix(1))
         return lines.joined(separator: "\n")
@@ -184,11 +185,13 @@ enum MokorinResultExplainer {
         cautions.append("これは医療的な診断ではないし、気持ちを決めつけるものでもないよ。")
 
         let (comparison, comparable) = compare(input, history: history)
-        let topic = memory.map { MokorinTopic.detect(text: $0.situationNote, scene: $0.scene) } ?? MokorinTopic.from(guideScene: input.scene)
+        let conversationTopic = memory.map { MokorinTopic.detect(text: $0.situationNote, scene: $0.scene) }
+        let fromConversation = conversationTopic != nil && conversationTopic != .unknown
         let advice = MokorinAdviceEngine.advise(MokorinAdviceInput(
-            topic: topic == .unknown ? MokorinTopic.from(guideScene: input.scene) : topic,
+            topic: fromConversation ? conversationTopic! : MokorinTopic.from(guideScene: input.scene),
             conditions: memory?.conditions ?? [], tension: memory?.tension,
-            mentionedFatigue: memory?.mentionedFatigue ?? false, recentUserText: recentUserText))
+            mentionedFatigue: memory?.mentionedFatigue ?? false, recentUserText: recentUserText,
+            selectedSceneLabel: fromConversation ? nil : input.scene.displayName))
 
         return MokorinBrief(purpose: purpose,
                             opening: purpose == .result ? "今回の測定結果を一緒に見てみよう。" : "この記録を一緒に振り返ってみよう。",

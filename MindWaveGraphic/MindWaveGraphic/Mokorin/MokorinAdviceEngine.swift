@@ -135,6 +135,8 @@ nonisolated struct MokorinAdviceInput: Equatable, Sendable {
     var mentionedFatigue: Bool = false
     /// 本人の最近の発言（深刻な症状の確認に使う。保存しない）
     var recentUserText: String = ""
+    /// 話題が会話ではなく画面で選んだ場面から来たとき、その場面名（根拠を「選んでいたから」と正しく書くため）
+    var selectedSceneLabel: String? = nil
 }
 
 nonisolated enum MokorinAdviceEngine {
@@ -163,8 +165,13 @@ nonisolated enum MokorinAdviceEngine {
                                        basis: input.conditions.contains(.sleepLack) ? "睡眠不足と話していたから" : "疲れていると話していたから",
                                        followUp: "少し休めた？"))
         }
-        // 2) 場面に合った準備
-        if let scene = sceneAdvice(input.topic, tension: input.tension) { items.append(scene) }
+        // 2) 場面に合った準備（会話ではなく画面で選んだ場面なら、根拠をそのとおりに書く）
+        if var scene = sceneAdvice(input.topic, tension: input.tension) {
+            if let label = input.selectedSceneLabel {
+                scene = MokorinAdvice(id: scene.id, text: scene.text, basis: "場面に「\(label)」を選んでいたから", followUp: scene.followUp)
+            }
+            items.append(scene)
+        }
         // 3) 測定の条件に関わる身体状態（計測値の見方の注意。行動の押しつけはしない）
         if input.conditions.contains(.running) || input.conditions.contains(.stairs) {
             items.append(MokorinAdvice(id: "settle_before_measure",

@@ -101,6 +101,17 @@ struct MainTabView: View {
         .onAppear {
             viewModel.measurementContext = flowState.measurementContext
             #if DEBUG
+            // シミュレーター検証用: MW_SEED_DEMO_RECORD=1 で、記録が 0 件のときだけデモ（Mock）の記録を 1 件追加する
+            // （もこりんの振り返りの画面確認用。デモと表示され、比較には使われない）
+            if ProcessInfo.processInfo.environment["MW_SEED_DEMO_RECORD"] == "1", historyStore.records.isEmpty {
+                let date = Date().addingTimeInterval(-3600)
+                func demo(_ hr: Double, _ score: Double) -> GuideSnapshot {
+                    GuideSnapshot(timestamp: date, score: score, confidence: 0.8, state: score > 69 ? .overTense : .optimalTension,
+                                  heartRate: hr, hrv: nil, isMockData: true, heartRateSampleDate: date, hrvSampleDate: nil)
+                }
+                historyStore.add(GuideSessionRecord(id: UUID(), startedAt: date, scene: .sports, exercise: .box, durationSeconds: 60,
+                                                    before: demo(98, 74), after: demo(88, 58), hrvUpdated: false))
+            }
             // シミュレーター検証用（INITIAL_TAB と同様）: INITIAL_SCREEN=<AppScreen の case 名> で起動直後に遷移する
             if let name = ProcessInfo.processInfo.environment["INITIAL_SCREEN"],
                let screen = AppScreen.allCases.first(where: { "\($0)" == name }) {

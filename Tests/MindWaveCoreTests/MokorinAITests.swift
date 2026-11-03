@@ -86,6 +86,15 @@ enum MokorinAITests {
             T.expect(b.cautions.first?.contains("デモ用のデータ") == true, "demo first")
             T.expect(!b.hasComparableHistory, "no compare")
         }
+        T.test("提案の根拠: 会話がないときは「話していた」と書かず、画面で選んだ場面を根拠にする。デモは最初の吹き出しで伝える") {
+            let b = MokorinResultExplainer.explain(input(mock: true), history: [], memory: nil)
+            T.expectEqual(b.advice.items.first?.basis, "場面に「面接・プレゼン前」を選んでいたから")
+            T.expect(b.firstMessage.contains("デモ用のデータ"), "demo in first message")
+            let talked = MokorinResultExplainer.explain(input(), history: [],
+                memory: MokorinSessionMemory(tension: .high, scene: .interview, conditions: [.none], situationNote: "ゼミの発表"))
+            T.expectEqual(talked.advice.items.first?.id, "presentation_opening")
+            T.expectEqual(talked.advice.items.first?.basis, "発表の前と話していたから")
+        }
         T.test("信頼度が低いときは参考程度と伝える") {
             let b = MokorinResultExplainer.explain(input(confidence: 0.3), history: [], memory: nil)
             T.expect(b.cautions.contains { $0.contains("信頼度が低め（30%）") }, "low confidence")
