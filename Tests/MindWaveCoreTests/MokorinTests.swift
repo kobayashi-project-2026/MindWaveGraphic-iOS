@@ -278,7 +278,7 @@ enum MokorinTests {
             T.expectEqual(vm.subjectiveTension, .slight)
             T.expectEqual(vm.step, .scene)
             T.expect(!vm.hasSceneAnswer && vm.suggestedScene == nil, "場面は確定しない")
-            T.expectEqual(vm.messages.last?.text, "そっか。何か予定があるの？")
+            T.expectEqual(vm.messages.last?.text, MokorinScript.askSceneUnknownReason, "理由がわからなくても受け止める")
             await vm.submit("わからない")
             T.expectEqual(vm.step, .scene, "曖昧なら同じ段階で尋ねる")
             T.expect(!vm.hasSceneAnswer, "推測で確定しない")
@@ -361,7 +361,7 @@ enum MokorinTests {
             await vm.submit("試合の前です")
             T.expectEqual(vm.messages[vm.messages.count - 2].origin, .stub(model: "test-model"))
             T.expectEqual(vm.messages.last?.origin, .fixed)
-            T.expect(vm.messages.last?.text.contains("移動してきたところ") == true, "next question")
+            T.expect(vm.messages.last?.text.contains("ウォーミングアップ") == true, "試合に合わせた次の質問")
         }
         await T.test("未知の候補・通信失敗: 採用せず、黙って切り替えない。「もう一度送る」「AIなしで続ける」を出す（定型文を AI として見せない）") {
             let bad = FakeContextClient.returning(reply: "ok", scene: "office_party")

@@ -21,6 +21,9 @@ export const SUBJECTIVE_TENSIONS = ["calm", "slight", "high"] as const;
 /** もこりんの表情・動作（友達の原本 app.py / script.js と同じ許可値。third_party/mokorin_friend_source） */
 export const MOKORIN_EMOTIONS = ["happy", "calm", "sad", "sleepy"] as const;
 export const MOKORIN_ACTIONS = ["wave", "jump", "nod"] as const;
+/** 利用者の発言の意図（会話の進め方の補助。測定の判断には使わない）
+ *  answer=質問への答え / question=もこりんへの質問・雑談 / decline_measurement=今は測定したくない / ready=測定を始めたい */
+export const USER_INTENTS = ["answer", "question", "decline_measurement", "ready"] as const;
 
 export type ContextScene = (typeof CONTEXT_SCENES)[number];
 export type BodyCondition = (typeof BODY_CONDITIONS)[number];
@@ -32,6 +35,7 @@ export const CONTEXT_LIMITS = {
   maxTotalChars: 4000,
   maxReplyChars: 160,
   maxQuestionChars: 120,
+  maxSituationNoteChars: 40,
   maxOutputTokens: 500,
 } as const;
 
@@ -59,6 +63,10 @@ export interface ContextAssistResult {
   emotion: (typeof MOKORIN_EMOTIONS)[number];
   /** もこりんの動作。不正な値は nod（原本 app.py の既定と同じ） */
   action: (typeof MOKORIN_ACTIONS)[number];
+  /** 利用者が述べた予定の短い要約（既存の場面に分類しきれない内容: 試験・初対面など）。推測しない。不明は null。2026-11-05 追加（古いアプリは無視する） */
+  situation_note: string | null;
+  /** 利用者の発言の意図。不正・欠落は answer。2026-11-05 追加 */
+  user_intent: (typeof USER_INTENTS)[number];
 }
 
 export interface ContextAssistResponse {
@@ -153,13 +161,23 @@ export const CONTEXT_INSTRUCTIONS = [
   "- 緊張度や心拍などの数値を推測しない。医療的な診断・病名・治療の話をしない。",
   "- reply は利用者への返答そのもの（共感＋次の質問または確認）にする。質問は reply に1つだけ含め、clarification_question にはその同じ質問文を入れる（別の質問を足さない）。",
   "- emotion はもこりんの表情（happy / calm / sad / sleepy）、action は動作（wave / jump / nod）。返答の雰囲気に合わせる（あいさつは wave、共感・確認は nod、つらそうな相談は sad、睡眠不足は sleepy など）。",
+  "会話の質（必ず守る）:",
+  "- 直前までの会話を踏まえて返す。同じ質問・同じ言い回しを繰り返さない。一度に尋ねるのは1つだけ。",
+  "- 場面と身体状態がわかったら、それ以上質問せずにまとめて測定を提案する。必要のない質問（場所・原因など）を毎回しない。",
+  "- 場面の候補にない予定も受け止める。例: 試験・テスト→work（作業 / 集中）、初対面の人と会う→important または other、大学の発表→interview。分類しきれない内容は situation_note に利用者の言葉に近い短い要約（40文字以内）で入れ、scene_candidate は最も近い既存の候補か null。推測で補わない。",
+  "- 状況に合わせて言い回しを変える。例: 面接なら「どんな面接？」ではなく身体状態へ進む、試合なら「ウォーミングアップは終わった？」、疲れていると言われたら「無理しないでね」と気づかう、理由がわからない緊張は「理由がわからなくても大丈夫だよ」と受け止める、緊張していない人には軽く進める。複数の不安を話されたら、一番気になることを1つだけ確かめる。",
+  "- 利用者がもこりんへの質問や雑談をしたら（user_intent=question）、短く答えてから、未確認の項目があればやさしく話を戻す。知らないこと・わからないことは知らないと答える。",
+  "- 利用者が「今は測りたくない」「やめておく」など測定を望まないときは user_intent=decline_measurement にし、尊重して「大丈夫だよ」と伝える。説得しない。",
+  "- 利用者が「もう測りたい」「始めて」と言ったら user_intent=ready。未確認の項目は聞かずにまとめる。それ以外の普通の答えは answer。",
+  "- 深刻な体の症状（胸の痛み・息苦しさなど）を話されたら、無理をせず近くの人や医療機関に相談するよう短く伝える。診断はしない。",
+  "- 長い説明を求められたときだけ詳しく話す（それでも160文字以内）。",
 ].join("\n");
 
 /** OpenAI Structured Outputs（strict）に渡す JSON Schema */
 export const CONTEXT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action"],
+  required: ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action", "situation_note", "user_intent"],
   properties: {
     reply: { type: "string", description: "もこりんの返答（120文字程度まで）" },
     scene_candidate: { type: ["string", "null"], enum: [...CONTEXT_SCENES, null], description: "明言された場面。なければ null" },
@@ -169,6 +187,8 @@ export const CONTEXT_JSON_SCHEMA = {
     tension_candidate: { type: ["string", "null"], enum: [...SUBJECTIVE_TENSIONS, null], description: "利用者が述べた主観的な緊張。なければ null" },
     emotion: { type: "string", enum: [...MOKORIN_EMOTIONS], description: "もこりんの表情" },
     action: { type: "string", enum: [...MOKORIN_ACTIONS], description: "もこりんの動作" },
+    situation_note: { type: ["string", "null"], description: "利用者が述べた予定の短い要約（40文字以内）。推測しない。なければ null" },
+    user_intent: { type: "string", enum: [...USER_INTENTS], description: "利用者の発言の意図" },
   },
 } as const;
 
@@ -204,7 +224,7 @@ const PROHIBITED = ["と診断", "診断結果", "病気", "治療", "処方", "
 export function validateContextResult(v: unknown): Validation<ContextAssistResult> {
   const fail = (message: string): Validation<ContextAssistResult> => ({ ok: false, message });
   if (!isObject(v)) return fail("result がオブジェクトではない");
-  const extra = extraKeys(v, ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action"], "result");
+  const extra = extraKeys(v, ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action", "situation_note", "user_intent"], "result");
   if (extra) return fail(extra);
   if (typeof v.reply !== "string" || v.reply.trim().length === 0) return fail("reply が空");
   if (chars(v.reply) > CONTEXT_LIMITS.maxReplyChars) return fail("reply が長すぎる");
@@ -233,6 +253,10 @@ export function validateContextResult(v: unknown): Validation<ContextAssistResul
       // 表情・動作は見た目だけのため、不正・欠落なら原本 app.py と同じ既定値（calm / nod）にする（候補の採否には影響させない）
       emotion: isOneOf(v.emotion, MOKORIN_EMOTIONS) ? v.emotion : "calm",
       action: isOneOf(v.action, MOKORIN_ACTIONS) ? v.action : "nod",
+      // 補助情報のため、不正・長すぎる値は採用せず null / answer にする（候補の採否には影響させない）
+      situation_note: typeof v.situation_note === "string" && v.situation_note.trim().length > 0
+        && chars(v.situation_note.trim()) <= CONTEXT_LIMITS.maxSituationNoteChars ? v.situation_note.trim() : null,
+      user_intent: isOneOf(v.user_intent, USER_INTENTS) ? v.user_intent : "answer",
     },
   };
 }

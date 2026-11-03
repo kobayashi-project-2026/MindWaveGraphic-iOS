@@ -43,6 +43,9 @@ final class AppFlowState: ObservableObject {
     /// 測定コンテキスト（場面・身体状態）。contextCalibrationで選択、mainAppで参照。
     @Published var measurementContext: MeasurementContext = .default
 
+    /// 測定前の会話でもこりんが理解した内容（結果の説明・提案で使う）。メモリのみ。保存・外部送信しない
+    @Published var mokorinMemory: MokorinSessionMemory? = nil
+
     // ── メモリ上の一時入力（永続化・ログ出力 禁止） ──
 
     /// 入力中のメールアドレス（メモリ上のみ。送信・保存しない）
@@ -61,6 +64,7 @@ final class AppFlowState: ObservableObject {
     func returnToSplash() {
         isGuestUser         = false
         measurementContext  = .default
+        mokorinMemory       = nil
         inputEmail          = ""
         inputPassword       = ""
         inputUsername       = ""

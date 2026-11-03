@@ -17,6 +17,8 @@ import Combine
 struct GuideFlowView: View {
     @EnvironmentObject var viewModel:    MindWaveViewModel
     @EnvironmentObject var historyStore: GuideHistoryStore
+    /// 測定前の会話の内容（もこりんの結果の説明・提案に使う。メモリのみ）
+    @EnvironmentObject var flowState:    AppFlowState
     @Binding var selectedTab: Int
     @Environment(\.dismiss)              private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -56,6 +58,8 @@ struct GuideFlowView: View {
     @State private var showAbandonAlert                        = false
     @State private var hrvUpdatedDuringSession                 = false
     @State private var showFeedbackView                        = false
+    /// もこりんと結果を見る（利用者が求めたときだけ開く）
+    @State private var showMokorinCompanion                    = false
 
     // Session
     @State private var sessionElapsed:    Int  = 0
@@ -226,9 +230,18 @@ struct GuideFlowView: View {
                     heartRate: hr, exercise: .breathing478, scene: .interview
                 )
                 step = .result
+                // MW_COMPANION=result: 結果の表示後に「もこりんと結果を見る」を開く
+                if ProcessInfo.processInfo.environment["MW_COMPANION"] == "result" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { showMokorinCompanion = true }
+                }
             }
         }
         #endif
+        .sheet(isPresented: $showMokorinCompanion) {
+            if let model = makeMokorinCompanion() {
+                MokorinCompanionView(title: "もこりんと結果を見る", model: model) { showMokorinCompanion = false }
+            }
+        }
         .sheet(isPresented: $showFeedbackView) {
             if let before = beforeSnapshot,
                let scene  = selectedScene,
@@ -1276,6 +1289,12 @@ struct GuideFlowView: View {
                 .font(.system(size: 13, weight: .light))
                 .foregroundStyle(.white.opacity(0.48))
                 .multilineTextAlignment(.center)
+            // もこりんの案内（計測を妨げないよう、動き・音声なしの1行だけ）
+            Text("もこりん：今、測定しているよ。いつもどおりにしていてね。")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("mokorin_measuring_hint")
 
             VStack(spacing: 8) {
                 let newSamples    = viewModel.watchMessageCount - remeasurementStartCount
@@ -1347,6 +1366,23 @@ struct GuideFlowView: View {
                 } else if let feedback = aiFeedbackResult {
                     // フォールバック: 旧カード（insight未生成時のみ）
                     AIFeedbackCardView(result: feedback)
+                }
+
+                // ── もこりんと結果を見る（説明・比較・次にできること。求めたときだけ）
+                if beforeSnapshot != nil {
+                    Button { showMokorinCompanion = true } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bubble.left.and.text.bubble.right")
+                            Text("もこりんと結果を見る")
+                        }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color.cyan.opacity(0.9))
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        .background(Capsule().strokeBorder(Color.cyan.opacity(0.45), lineWidth: 0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("もこりんが今回の結果を説明し、次にできることを一緒に考えます")
+                    .accessibilityIdentifier("mokorin_result_button")
                 }
 
                 // ── 呼吸後の体感入力
@@ -1598,6 +1634,28 @@ struct GuideFlowView: View {
             guard !Task.isCancelled, outcome.usedRemote else { return }
             latestAIInsight        = outcome.insight
             insightProviderVersion = outcome.providerVersion
+        }
+    }
+
+    /// もこりんの結果の説明（端末内）と、自由な質問用の会話（POST /v1/chat・同意時のみ・測定値は既存の方針でしか送らない）
+    private func makeMokorinCompanion() -> MokorinCompanionViewModel? {
+        guard let before = beforeSnapshot else { return nil }
+        let input = MokorinResultInput(startedAt: before.timestamp, scene: selectedScene ?? .other,
+                                       exerciseTitle: (selectedExercise ?? .breathing478).title,
+                                       durationSeconds: sessionDurationSeconds, before: before, after: afterSnapshot,
+                                       selfReportBefore: selfReportBefore, selfReportAfter: selfReportAfter)
+        let history = historyStore.records
+        let memory = flowState.mokorinMemory
+        let flowState = self.flowState, viewModel = self.viewModel
+        let chat = ChatViewModel(
+            sceneProvider: { flowState.measurementContext.scene },
+            measurementProvider: {
+                ChatBiometricPolicy.measurementContext(from: viewModel.lastAnalysisResult, now: Date(),
+                                                       consented: InsightConsentStore().isConsented)
+            },
+            biometricConsentProvider: { InsightConsentStore().isConsented })
+        return MokorinCompanionViewModel(chat: chat) { recent in
+            MokorinResultExplainer.explain(input, history: history, memory: memory, purpose: .result, recentUserText: recent)
         }
     }
 

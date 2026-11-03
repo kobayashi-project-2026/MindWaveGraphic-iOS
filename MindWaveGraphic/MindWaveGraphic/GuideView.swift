@@ -11,6 +11,7 @@ import SwiftUI
 struct GuideView: View {
     @EnvironmentObject var viewModel: MindWaveViewModel
     @EnvironmentObject var historyStore: GuideHistoryStore
+    @EnvironmentObject var flowState: AppFlowState
     // AI相談は共通の画面遷移管理（AppNavigationManager のモーダル）で開く
     @EnvironmentObject var navManager: AppNavigationManager
     @Binding var selectedTab: Int
@@ -70,6 +71,7 @@ struct GuideView: View {
             GuideFlowView(selectedTab: $selectedTab, initialScene: selectedScene)
                 .environmentObject(viewModel)
                 .environmentObject(historyStore)
+                .environmentObject(flowState)
         }
         .sheet(isPresented: $showOtherSheet) {
             OtherSceneSelectorView(

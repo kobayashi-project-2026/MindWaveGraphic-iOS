@@ -231,3 +231,26 @@ test("スタブの返答: 3往復が自然な文で進み、訂正（やっぱ�
   assert.equal(turn("特に予定はない", "現在の段階: scene").scene_candidate, "calm");
   for (const r of [a, b, c]) assert.equal(r.clarification_question, null, "質問を二重にしない");
 });
+
+test("2026-11-05 追加の補助項目: situation_note・user_intent。欠落・不正・長すぎる値は null / answer にして候補は採用する（古い出力とも互換）", () => {
+  const base = { reply: "試験の前なんだね。今は座ってる？", scene_candidate: "work", condition_candidates: [], needs_clarification: false,
+    clarification_question: null, tension_candidate: null, emotion: "calm", action: "nod" };
+  const old = validateContextResult(base);
+  assert.ok(old.ok && old.value.situation_note === null && old.value.user_intent === "answer", "古い出力（項目なし）");
+  const ok = validateContextResult({ ...base, situation_note: "明日の英語の試験", user_intent: "answer" });
+  assert.ok(ok.ok && ok.value.situation_note === "明日の英語の試験" && ok.value.scene_candidate === "work");
+  const bad = validateContextResult({ ...base, situation_note: "あ".repeat(41), user_intent: "dance" });
+  assert.ok(bad.ok && bad.value.situation_note === null && bad.value.user_intent === "answer", "不正値は採用しない");
+  const schema = CONTEXT_JSON_SCHEMA as any;
+  assert.ok(schema.required.includes("situation_note") && schema.required.includes("user_intent"), "strict: 全項目 required");
+  assert.ok(String(buildContextResponsesRequest(request(FIRST), { model: "m", maxOutputTokens: 100 }).instructions).includes("同じ質問・同じ言い回しを繰り返さない"));
+});
+
+test("スタブ: 測定を望まない・質問・場面にない予定（試験）を区別する", async () => {
+  const { stubContextResult } = await import("../scripts/stub-openai.ts");
+  const turn = (text: string) => stubContextResult({ input: [{ role: "developer", content: "現在の段階: scene" }, { role: "user", content: text }] }) as any;
+  assert.equal(turn("今日は測りたくない").user_intent, "decline_measurement");
+  assert.equal(turn("もこりんって何歳？").user_intent, "question");
+  const exam = turn("明日、英語の試験がある");
+  assert.equal(exam.situation_note, "明日、英語の試験がある");
+});

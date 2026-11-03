@@ -17,6 +17,13 @@ nonisolated enum ContextAssistStepCode: String, Codable, Equatable, Sendable {
 
 /// 利用者の主観的な緊張（自己申告）。心拍・HRV から計算する緊張スコアとは別物で、
 /// StressScoreCalculator・MeasurementContext・保存データには入れない（会話の進行と表情にだけ使う）
+/// 利用者の発言の意図（会話の進め方の補助。測定値や候補の採否には使わない）
+nonisolated enum MokorinUserIntent: String, Codable, Equatable, Sendable {
+    case answer, question
+    case declineMeasurement = "decline_measurement"
+    case ready
+}
+
 nonisolated enum SubjectiveTension: String, Codable, Equatable, Sendable, CaseIterable {
     case calm, slight, high
 
@@ -79,15 +86,24 @@ nonisolated struct ContextAssistResultDTO: Codable, Equatable, Sendable {
     var emotion: String? = nil
     /// もこりんの動作（wave / jump / nod）。不正な値は無視して nod
     var action: String? = nil
+    /// 利用者が述べた予定の短い要約（2026-11-05 追加。古いサーバーでは無い）
+    var situationNote: String? = nil
+    /// 利用者の発言の意図（2026-11-05 追加。古いサーバーでは無い。不正な値は answer 扱い）
+    var userIntent: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case reply, emotion, action
+        case situationNote         = "situation_note"
+        case userIntent            = "user_intent"
         case sceneCandidate        = "scene_candidate"
         case conditionCandidates   = "condition_candidates"
         case needsClarification    = "needs_clarification"
         case clarificationQuestion = "clarification_question"
         case tensionCandidate      = "tension_candidate"
     }
+
+    /// 発言の意図（不正・欠落は answer）
+    var typedIntent: MokorinUserIntent { userIntent.flatMap(MokorinUserIntent.init(rawValue:)) ?? .answer }
 
     /// 主観的な緊張の候補（不正・欠落は nil。候補の採否には影響させない）
     var typedTension: SubjectiveTension? { tensionCandidate.flatMap(SubjectiveTension.init(rawValue:)) }

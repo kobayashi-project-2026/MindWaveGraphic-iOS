@@ -8,4 +8,5 @@ func runExtendedSuites() async {
     await InsightTests.run()
     await ChatTests.run()
     await MokorinTests.run()
+    await MokorinAITests.run()
 }

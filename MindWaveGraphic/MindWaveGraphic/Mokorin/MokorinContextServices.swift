@@ -39,10 +39,10 @@ struct RemoteContextAssistClient: ContextAssistClient {
 nonisolated enum MokorinKeywordInterpreter {
 
     private static let sceneWords: [(ContextScene, [String])] = [
-        (.interview, ["面接", "面談", "発表", "プレゼン", "スピーチ"]),
+        (.interview, ["面接", "面談", "発表", "プレゼン", "スピーチ", "ゼミ"]),
         (.sports,    ["試合", "大会", "競技", "レース"]),
-        (.important, ["大切な", "大事な", "デート", "約束"]),
-        (.work,      ["作業", "仕事", "勉強", "集中"]),
+        (.important, ["大切な", "大事な", "デート", "約束", "初対面", "初めて会う", "はじめて会う"]),
+        (.work,      ["作業", "仕事", "勉強", "集中", "試験", "テスト", "受験", "会議"]),
         (.calm,      ["安静", "リラックス", "のんびり"]),
     ]
 
@@ -80,6 +80,15 @@ nonisolated enum MokorinKeywordInterpreter {
         var conditions = Set(conditionWords.filter { _, words in words.contains { text.contains($0) } }.map(\.0))
         if conditions.contains(.none) && conditions.count > 1 { conditions.remove(.none) }
         return (scene, conditions)
+    }
+
+    /// 発言の意図（端末内の判定）。サーバーの user_intent と同じ分類
+    static func interpretIntent(_ text: String) -> MokorinUserIntent {
+        if ["測りたくない", "測定しない", "測定したくない", "やめておく", "今日はいい", "測らなくていい"].contains(where: text.contains) { return .declineMeasurement }
+        if ["もう測りたい", "測定を始めて", "早く測りたい", "すぐ測りたい", "測定したい"].contains(where: text.contains) { return .ready }
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.hasSuffix("？") || t.hasSuffix("?") { return .question }
+        return .answer
     }
 
     /// 主観的な緊張（自己申告）を読み取る。はっきりした言葉がなければ nil
@@ -120,13 +129,37 @@ nonisolated enum MokorinScript {
     static let askScene = "何か予定があるのかな？面接や試合、作業など、近いものを教えてね。"
 
     static func askCondition(scene: ContextScene) -> String {
-        "\(sceneLead(scene))今は落ち着いて座ってる？それとも移動してきたところ？"
+        askCondition(topic: MokorinTopic.detect(text: nil, scene: scene), fatigue: false)
+    }
+
+    /// 話題に合わせて身体状態を尋ねる（試合ならウォーミングアップ、疲れていると話したら気づかう）
+    static func askCondition(topic: MokorinTopic, fatigue: Bool) -> String {
+        let care = fatigue ? "疲れているんだね。無理しないでね。" : ""
+        let question = topic == .sports ? "ウォーミングアップで体を動かしたあと？それとも座って落ち着いてる？"
+                                        : "今は落ち着いて座ってる？それとも移動してきたところ？"
+        return care + topic.lead + question
+    }
+
+    /// 緊張の理由がわからないと話したとき
+    static let askSceneUnknownReason = "理由がわからなくても大丈夫だよ。これから何か予定はある？"
+
+    /// 測定を望まないとき（説得しない）
+    static let declineAck = "わかった、今は測らなくても大丈夫だよ。気が向いたら、また声をかけてね。"
+
+    /// 外部AIを使わないときに質問・雑談をされた場合
+    static func cannotAnswerLocally(canEnableAI: Bool) -> String {
+        canEnableAI ? "ごめんね、今は質問にうまく答えられないんだ。「AIと話す」を押すと、自由な言葉で話せるよ。"
+                    : "ごめんね、今は質問にうまく答えられないんだ。"
     }
 
     static let askConditionAgain = "からだの状態を教えてね。走ってきた・階段を上った・コーヒーを飲んだなど。特になければ「座って落ち着いてる」を選んでね。"
 
     static func summary(scene: ContextScene, conditions: Set<BodyCondition>) -> String {
-        "教えてくれてありがとう。\(sceneShort(scene))で、\(conditionPhrase(conditions))なんだね。この状況で測定してみようか？"
+        summary(topic: MokorinTopic.detect(text: nil, scene: scene), conditions: conditions)
+    }
+
+    static func summary(topic: MokorinTopic, conditions: Set<BodyCondition>) -> String {
+        "教えてくれてありがとう。\(topic.shortLabel)で、\(conditionPhrase(conditions))なんだね。この状況で測定してみようか？"
     }
 
     private static func sceneLead(_ scene: ContextScene) -> String {
@@ -208,12 +241,18 @@ nonisolated enum MokorinQuickReply: Hashable, Sendable {
     case retry
     /// 外部AIを使わずに、端末内の判定で会話を続ける
     case continueWithoutAI
+    /// 測定を望まないとき: 測定しないで会話を終える（「あとで選ぶ」と同じ処理）
+    case skipMeasurement
+    /// 測定を望まないと言ったあとで、やっぱり会話を続ける
+    case keepTalking
 
     var label: String {
         switch self {
         case .showList:          return "一覧から選ぶ"
         case .retry:             return "もう一度送る"
         case .continueWithoutAI: return "AIなしで続ける"
+        case .skipMeasurement:   return "測定しないで終える"
+        case .keepTalking:       return "やっぱり続ける"
         case .tension(let t): return t.replyLabel
         case .noPlan:         return "特に予定はない"
         case .scene(let s):

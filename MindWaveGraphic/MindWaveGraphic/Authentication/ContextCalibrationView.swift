@@ -301,7 +301,11 @@ struct ContextCalibrationView: View {
                     let selected = mokorin.isSelected(reply)
                     let isConfirm = reply == .confirmConditions || reply == .retry
                     Button {
-                        if reply == .showList { isEditing = true } else { mokorin.tap(reply) }
+                        switch reply {
+                        case .showList:        isEditing = true
+                        case .skipMeasurement: skipCalibration()
+                        default:               mokorin.tap(reply)
+                        }
                     } label: {
                         Text(reply.label)
                             .font(.system(size: 13, weight: isConfirm ? .semibold : .regular))
@@ -443,18 +447,7 @@ struct ContextCalibrationView: View {
 
     private var footerRow: some View {
         HStack(spacing: 16) {
-            Button(isInAppEdit ? "変更しない" : "あとで選ぶ") {
-                voice.cancelAll()
-                if let onComplete {
-                    // メインアプリ内：現在のコンテキストを変更せずに閉じる
-                    print("[Navigation] context edit cancelled (in-app)")
-                    onComplete()
-                    return
-                }
-                flowState.measurementContext = .default
-                flowState.authStatus = .mainApp
-                print("[Navigation] context skipped -> mainApp")
-            }
+            Button(isInAppEdit ? "変更しない" : "あとで選ぶ") { skipCalibration() }
             .accessibilityIdentifier("context_skip_button")
             Spacer()
             Button {
@@ -731,10 +724,27 @@ struct ContextCalibrationView: View {
         }
     }
 
+    /// 状況を変えずに閉じる（「あとで選ぶ」「変更しない」「測定しないで終える」）
+    private func skipCalibration() {
+        voice.cancelAll()
+        if let onComplete {
+            // メインアプリ内：現在のコンテキストを変更せずに閉じる
+            print("[Navigation] context edit cancelled (in-app)")
+            onComplete()
+            return
+        }
+        flowState.measurementContext = .default
+        flowState.mokorinMemory = nil
+        flowState.authStatus = .mainApp
+        print("[Navigation] context skipped -> mainApp")
+    }
+
     private func applyAndProceed() {
         // 利用者が確認した選択（もこりんの提案を含む）を既存の MeasurementContext として保存する
         let ctx = mokorin.measurementContext
         flowState.measurementContext = ctx
+        // 会話で理解した内容（本人の言葉の要約・主観的な緊張など）は、結果の説明・提案のためにメモリにだけ置く
+        flowState.mokorinMemory = mokorin.sessionMemory
         if let onComplete {
             // メインアプリ内：authStatus は mainApp のまま。MainTabView が onChange で ViewModel へ反映する
             print("[Navigation] context updated in-app: scene=\(selectedScene.rawValue)")

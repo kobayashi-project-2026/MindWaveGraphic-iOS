@@ -170,6 +170,15 @@ final class ChatViewModel: ObservableObject {
         await requestReply(for: messages[index].id)
     }
 
+    /// 端末内で作った発言（もこりんの結果の説明・選択肢で選んだ言葉）を追加する。
+    /// 測定値を含みうるため、外部AIへ送る履歴には含めない（origin = .local）
+    func appendLocalExchange(userText: String?, reply: String, reason: String) {
+        if let userText {
+            messages.append(Message(id: UUID(), role: .user, text: userText, origin: .local(reason: reason), status: .sent))
+        }
+        messages.append(Message(id: UUID(), role: .assistant, text: reply, origin: .local(reason: reason), status: .sent))
+    }
+
     /// 会話を消去し、新しい会話として始める
     func reset() {
         messages = []

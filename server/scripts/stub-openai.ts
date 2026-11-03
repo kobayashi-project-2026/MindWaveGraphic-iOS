@@ -80,6 +80,10 @@ export function stubContextResult(body: Record<string, unknown>): Record<string,
   } else if (tension) {
     reply = tension === "high" ? "かなり緊張してるんだね。これから何か予定があるの？"
       : tension === "slight" ? "少し緊張してるんだね。これから何か予定があるの？" : "落ち着いているんだね。何か予定はある？";
+  } else if (/測りたくない|測定しない|やめておく|今日はいい/.test(said)) {
+    reply = "わかった、今は測らなくても大丈夫だよ。気が向いたら声をかけてね。";
+  } else if (/[？?]$/.test(said.trim())) {
+    reply = "（スタブなので質問には答えられないよ）それで、今の気持ちや予定を教えてくれる？";
   } else {
     reply = inTensionStep ? "そっか。今の気持ちは、少し緊張・かなり緊張・落ち着いてる のどれに近い？" : "もう少し教えてくれる？これから何か予定があるの？";
   }
@@ -89,6 +93,11 @@ export function stubContextResult(body: Record<string, unknown>): Record<string,
     condition_candidates: conds,
     needs_clarification: needs,
     clarification_question: null,
+    // 機械的な決め方（AI の判断ではない）: 試験・初対面など場面の候補にない予定は利用者の言葉をそのまま要約として返す
+    situation_note: /試験|テスト|初対面|はじめて会う|初めて会う|ゼミ/.test(last) ? clip(last, 40) : null,
+    user_intent: /測りたくない|測定しない|やめておく|今日はいい/.test(said) ? "decline_measurement"
+      : /測りたい|始めて|測って/.test(said) ? "ready"
+      : /[？?]$/.test(said.trim()) && scene === null && conds.length === 0 && tension === null ? "question" : "answer",
     tension_candidate: tension,
     // 機械的な決め方（AI の判断ではない）: 追加質問なら calm/nod、候補ありなら happy/nod、睡眠不足なら sleepy
     emotion: conds.includes("sleep_lack") ? "sleepy" : needs ? "calm" : "happy",
