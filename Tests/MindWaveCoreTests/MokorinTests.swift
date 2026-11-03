@@ -216,6 +216,56 @@ enum MokorinTests {
             T.expectEqual(vm.step, .review)
             T.expectEqual(vm.measurementContext.scene, .work)
         }
+        await T.test("シナリオA: かなり緊張してる → これから面接なんだ → 階段を上ってきた（high / interview / stairs）") {
+            let vm = localVM()
+            await vm.submit("かなり緊張してる")
+            await vm.submit("これから面接なんだ")
+            await vm.submit("階段を上ってきた")
+            T.expectEqual(vm.subjectiveTension, .high)
+            T.expectEqual(vm.step, .review)
+            T.expectEqual(vm.measurementContext.scene, .interview)
+            T.expectEqual(vm.measurementContext.conditions, [.stairs])
+            T.expectEqual(vm.messages.filter { $0.speaker == .user }.count, 3, "会話の順序を保持")
+            T.expect(vm.messages.last?.text.contains("この状況で測定してみようか") == true, "確認")
+        }
+        await T.test("シナリオB: 今は落ち着いてる → 特に予定はない → 座っている（calm / 安静 / 特になし）") {
+            let vm = localVM()
+            await vm.submit("今は落ち着いてる")
+            T.expectEqual(vm.subjectiveTension, .calm)
+            T.expectEqual(vm.messages.last?.text, "落ち着いているんだね。何か予定はある？")
+            await vm.submit("特に予定はない")
+            T.expectEqual(vm.step, .condition)
+            await vm.submit("座っている")
+            T.expectEqual(vm.step, .review)
+            T.expectEqual(vm.measurementContext.scene, .calm, "予定なし＝既存の「安静」")
+            T.expectEqual(vm.measurementContext.conditions, [.none])
+        }
+        await T.test("シナリオC: 緊張してるけど、理由がよくわからない → 場面を確定せず予定を尋ねる。測定不能にならない") {
+            let vm = localVM()
+            await vm.submit("緊張してるけど、理由がよくわからない")
+            T.expectEqual(vm.subjectiveTension, .slight)
+            T.expectEqual(vm.step, .scene)
+            T.expect(!vm.hasSceneAnswer && vm.suggestedScene == nil, "場面は確定しない")
+            T.expectEqual(vm.messages.last?.text, "そっか。何か予定があるの？")
+            await vm.submit("わからない")
+            T.expectEqual(vm.step, .scene, "曖昧なら同じ段階で尋ねる")
+            T.expect(!vm.hasSceneAnswer, "推測で確定しない")
+            T.expect(vm.quickReplies.contains(.scene(.other)) && vm.quickReplies.contains(.noPlan), "選択肢で先へ進める")
+            vm.tap(.scene(.other))
+            vm.tap(.condition(.none))
+            T.expectEqual(vm.step, .review)
+            T.expectEqual(vm.measurementContext.scene, .other)
+        }
+        await T.test("送信中の二重送信: 文字の連打・送信中の選択肢タップは無視（外部AI・待ち時間あり）") {
+            let client = FakeContextClient.returning(reply: "そっか。何か予定があるの？", scene: nil, delay: .milliseconds(200))
+            let vm = remoteVM(client: client)
+            vm.draft = "かなり緊張してる"; vm.send()
+            vm.draft = "もう一度"; vm.send()
+            vm.tap(.tension(.calm))
+            try await Task.sleep(for: .milliseconds(400))
+            T.expectEqual(client.requests.count, 1)
+            T.expectEqual(vm.messages.filter { $0.speaker == .user }.count, 1)
+        }
         await T.test("やり直し: 会話と選択を最初の状態に戻し、会話IDを更新") {
             let vm = localVM()
             await vm.submit("面接の前です")

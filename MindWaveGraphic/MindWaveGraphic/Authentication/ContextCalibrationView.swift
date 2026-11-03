@@ -68,7 +68,11 @@ struct ContextCalibrationView: View {
                         .padding(.top, 8)
                     Spacer(minLength: 0)
                     characterStage(size: characterSize(for: geo.size.height))
-                    conversationArea
+                    // 長い返答・小さい画面で収まらないときだけスクロールにする（収まるときは従来どおり）
+                    ViewThatFits(in: .vertical) {
+                        conversationArea
+                        ScrollView(showsIndicators: false) { conversationArea }
+                    }
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 20)
@@ -642,6 +646,21 @@ struct ContextCalibrationView: View {
     /// MW_MOKORIN_AUTO_CONFIRM=1（送信後に applyAndProceed() を呼ぶ）、MW_MOKORIN_AUTO_MIC=1（マイクボタンを1回押す）
     private func runMokorinDebugHooks() async {
         let env = ProcessInfo.processInfo.environment
+        if env["MW_MOKORIN_FOCUS_INPUT"] == "1" {
+            // 文字入力欄にフォーカスする（キーボード表示中のレイアウト確認用）
+            try? await Task.sleep(for: .seconds(1.5))
+            isInputFocused = true
+        }
+        if env["MW_MOKORIN_TEST_LONG_REPLY"] == "1" {
+            // AI の返答の上限（160 文字）に近い長い発言を表示する（レイアウト確認用。会話の状態は変えない）
+            mokorin.debugAppendMokorinMessage(String(repeating: "ゆっくり深呼吸して、肩の力を抜いてみようね。", count: 7))
+        }
+        if env["MW_MOKORIN_TEST_SPEAK"] == "1" {
+            // 実際の読み上げ（AVSpeechSynthesizer）と口の動き・状態表示の確認用
+            try? await Task.sleep(for: .seconds(2))
+            voice.speaksReplies = true
+            if let text = mokorin.latestMokorinMessage?.text { voice.speakReply(text) }
+        }
         if env["MW_MOKORIN_AUTO_MIC"] == "1" {
             // マイクボタンを1回押したのと同じ（権限の確認表示・録音開始の検証用）
             try? await Task.sleep(for: .seconds(1.5))

@@ -494,6 +494,13 @@ final class MokorinContextViewModel: ObservableObject {
         )
     }
 
+    #if DEBUG
+    /// レイアウト確認用（DEBUG のみ）: もこりんの発言を表示に追加する（段階・選択は変えない）
+    func debugAppendMokorinMessage(_ text: String) {
+        appendMokorin(text, origin: .fixed)
+    }
+    #endif
+
     private func appendUser(_ text: String) {
         messages.append(Message(speaker: .user, text: text, origin: .user))
     }

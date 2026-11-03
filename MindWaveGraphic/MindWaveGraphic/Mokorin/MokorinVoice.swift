@@ -193,7 +193,8 @@ final class MokorinVoiceController: ObservableObject {
 
 // MARK: - 実装: 音声認識（Speech）
 
-/// SFSpeechRecognizer（日本語）＋ AVAudioEngine。話し終えて約1.5秒無音なら自動で終了する。最長30秒
+/// SFSpeechRecognizer（日本語）＋ AVAudioEngine。話し終えて約1.5秒無音なら自動で終了する。
+/// 録音を始めて8秒間何も聞き取れなければ終了する（押したまま話さなかった場合に録音を続けないため）。最長30秒
 /// 音声・認識のコールバックは別スレッドで届くため nonisolated とし、状態の更新はメインスレッドで行う
 nonisolated final class SpeechRecognizerInput: NSObject, MokorinSpeechInput, @unchecked Sendable {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ja-JP"))
@@ -207,6 +208,7 @@ nonisolated final class SpeechRecognizerInput: NSObject, MokorinSpeechInput, @un
     private var onFinal: ((String) -> Void)?
 
     static let silenceSeconds: TimeInterval = 1.5
+    static let noSpeechSeconds: TimeInterval = 8
     static let maxSeconds: TimeInterval = 30
 
     func requestAvailability() async -> MokorinVoiceAvailability {
@@ -277,6 +279,8 @@ nonisolated final class SpeechRecognizerInput: NSObject, MokorinSpeechInput, @un
         }
         DispatchQueue.main.async {
             self.limitTimer = Timer.scheduledTimer(withTimeInterval: Self.maxSeconds, repeats: false) { [weak self] _ in self?.finish() }
+            // 話し始めるまでの待ち時間（話し始めると無音判定の 1.5 秒に置き換わる）
+            self.restartSilenceTimer(interval: Self.noSpeechSeconds)
         }
     }
 
@@ -291,9 +295,9 @@ nonisolated final class SpeechRecognizerInput: NSObject, MokorinSpeechInput, @un
         teardown()
     }
 
-    private func restartSilenceTimer() {
+    private func restartSilenceTimer(interval: TimeInterval = SpeechRecognizerInput.silenceSeconds) {
         silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: Self.silenceSeconds, repeats: false) { [weak self] _ in self?.finish() }
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in self?.finish() }
     }
 
     /// 録音を止めて、確定した文字を1回だけ返す
