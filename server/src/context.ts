@@ -150,7 +150,7 @@ export const CONTEXT_INSTRUCTIONS = [
   "- step が scene なら場面を、condition なら身体状態を中心に確認する。両方わかったら、内容をまとめて「この状況で測定してみようか？」と確認する。",
   "- 測定はアプリの画面で利用者が開始する。測定を開始した・結果が出たなどと言わない。",
   "- 緊張度や心拍などの数値を推測しない。医療的な診断・病名・治療の話をしない。",
-  "- reply は利用者への返答そのもの（共感＋次の質問または確認）にする。",
+  "- reply は利用者への返答そのもの（共感＋次の質問または確認）にする。質問は reply に1つだけ含め、clarification_question にはその同じ質問文を入れる（別の質問を足さない）。",
   "- emotion はもこりんの表情（happy / calm / sad / sleepy）、action は動作（wave / jump / nod）。返答の雰囲気に合わせる（あいさつは wave、共感・確認は nod、つらそうな相談は sad、睡眠不足は sleepy など）。",
 ].join("\n");
 
@@ -213,6 +213,9 @@ export function validateContextResult(v: unknown): Validation<ContextAssistResul
   if (typeof v.needs_clarification !== "boolean") return fail("needs_clarification が不正");
   const q = v.clarification_question;
   if (!(q === null || (typeof q === "string" && chars(q) <= CONTEXT_LIMITS.maxQuestionChars))) return fail("clarification_question が不正");
+  // 返答の中にすでに質問がある場合は、別の質問を重ねて表示しないよう clarification_question を外す
+  // （アプリは質問が返答に含まれないときだけ後ろに付け足すため。2026-11-04 の実通信で、言い回しの違う質問が返った）
+  const replyAsks = /[？?]/.test(v.reply);
   // 重複を除き、「特になし」と他の状態が同時に来たら「特になし」を外す
   let conds = [...new Set(v.condition_candidates as BodyCondition[])];
   if (conds.includes("none") && conds.length > 1) conds = conds.filter((c) => c !== "none");
@@ -223,7 +226,7 @@ export function validateContextResult(v: unknown): Validation<ContextAssistResul
       scene_candidate: v.scene_candidate as ContextScene | null,
       condition_candidates: conds,
       needs_clarification: v.needs_clarification,
-      clarification_question: typeof q === "string" && q.trim().length > 0 ? q.trim() : null,
+      clarification_question: typeof q === "string" && q.trim().length > 0 && !replyAsks ? q.trim() : null,
       // 主観的な緊張は補助情報のため、不正・欠落は null（候補の採否には影響させない）
       tension_candidate: isOneOf(v.tension_candidate, SUBJECTIVE_TENSIONS) ? v.tension_candidate : null,
       // 表情・動作は見た目だけのため、不正・欠落なら原本 app.py と同じ既定値（calm / nod）にする（候補の採否には影響させない）

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHandler, type Env } from "../src/index.ts";
 import {
+  sanitizeChatText,
   buildChatResponsesRequest,
   CHAT_DEFAULTS,
   type ChatRequest,
@@ -204,3 +205,12 @@ test("既定値: 出力トークン上限 600・履歴 12 件", () => {
   assert.equal(CHAT_DEFAULTS.maxOutputTokens, 600);
   assert.equal(CHAT_DEFAULTS.maxMessages, 12);
 });
+
+test("実通信の結果を反映: Markdown の強調・見出し記号を取り除いて表示用の文章にする", () => {
+  const raw = "準備のコツです。\n\n1. **伝えたいことを一文にする**  \n2. **話の流れを3点に整理する**\n## まとめ\n大丈夫です。";
+  assert.equal(sanitizeChatText(raw), "準備のコツです。\n\n1. 伝えたいことを一文にする\n2. 話の流れを3点に整理する\nまとめ\n大丈夫です。");
+  assert.ok(CHAT_INSTRUCTIONS_TEXT().includes("Markdown"));
+});
+function CHAT_INSTRUCTIONS_TEXT(): string {
+  return buildChatResponsesRequest(chatRequest(TURN1), { model: "m", maxOutputTokens: 10 }).instructions as string;
+}

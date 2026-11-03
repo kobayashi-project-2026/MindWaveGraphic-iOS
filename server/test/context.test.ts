@@ -199,3 +199,11 @@ test("実通信の準備: /v1/health は STUB / 実通信のどちらで動い�
   assert.equal(JSON.parse(body).provider_mode, "openai");
   assert.ok(!body.includes("sk-") && !body.includes(TOKEN));
 });
+
+test("実通信の結果を反映: 返答に質問があるときは clarification_question を外す（質問が二重に表示されないように）", () => {
+  const base = { scene_candidate: null, condition_candidates: [], needs_clarification: true, tension_candidate: "high", emotion: "calm", action: "nod" };
+  const asked = validateContextResult({ ...base, reply: "そっか、かなり緊張してるんだね。何か予定があるの？", clarification_question: "どんな予定の前かな？" });
+  assert.ok(asked.ok && asked.value.clarification_question === null && asked.value.needs_clarification === true);
+  const notAsked = validateContextResult({ ...base, reply: "そっか、かなり緊張してるんだね。", clarification_question: "どんな予定の前かな？" });
+  assert.ok(notAsked.ok && notAsked.value.clarification_question === "どんな予定の前かな？");
+});

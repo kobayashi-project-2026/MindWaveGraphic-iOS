@@ -186,6 +186,7 @@ export const CHAT_INSTRUCTIONS = [
   "- 呼吸法・準備の仕方・考え方の切り替えなど、すぐ試せる具体的なセルフケアを提案する。",
   "- 入力にない事実や計測値を作らない。計測情報が渡されていない場合は、心拍などの数値に触れない。",
   "- 敬体（です・ます）で、400文字程度までに簡潔にまとめる。箇条書きは必要なときだけ使う。",
+  "- アプリはそのまま文字を表示するため、Markdown の記号（** や # など）は使わない。箇条書きは「1.」「・」で書く。",
 ].join("\n");
 
 /** 場面・計測の補足（会話の先頭に developer メッセージとして添える） */
@@ -276,6 +277,16 @@ export function extractChatText(json: unknown): { text: string; truncated: boole
   return { text, truncated };
 }
 
+/** 表示用に Markdown の強調・見出し記号を取り除く（アプリはそのまま表示するため。2026-11-04 の実通信で ** が返った） */
+export function sanitizeChatText(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/[ \t]+$/gm, "")
+    .trim();
+}
+
 /** 返答の検証（長さ・医療的断定表現） */
 export function validateChatReply(text: string, maxChars: number = CHAT_DEFAULTS.maxReplyChars): Validation<string> {
   if (charCount(text) > maxChars) return { ok: false, message: `返答が ${maxChars} 文字超` };
@@ -323,8 +334,9 @@ export async function generateChatReply(
   } finally {
     clearTimeout(timer);
   }
-  const { text, truncated } = extractChatText(json);
-  const validated = validateChatReply(text);
+  const extracted = extractChatText(json);
+  const truncated = extracted.truncated;
+  const validated = validateChatReply(sanitizeChatText(extracted.text));
   if (!validated.ok) throw new UpstreamError("invalid_upstream_response", validated.message);
   const res = json as Record<string, unknown>;
   return {
