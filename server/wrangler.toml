@@ -18,6 +18,9 @@ CHAT_MAX_OUTPUT_TOKENS = "600"
 CHAT_MAX_MESSAGES = "12"
 CHAT_MAX_USER_CHARS = "500"
 CHAT_MAX_TOTAL_CHARS = "8000"
+# もこりんの状況整理（/v1/context-assist）の推論の深さと出力上限。短い分類と返答のため none
+CONTEXT_REASONING_EFFORT = "none"
+CONTEXT_MAX_OUTPUT_TOKENS = "500"
 # 計測データの要約を会話に含めるか。本物の利用者認証を導入するまで "false" のままにする
 CHAT_ALLOW_MEASUREMENT_CONTEXT = "false"
 # クライアントトークンあたりの 1 分間の上限（インスタンス単位の簡易制限。本番前に全体共有の制限が必要）

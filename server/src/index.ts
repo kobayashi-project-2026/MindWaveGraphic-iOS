@@ -35,6 +35,10 @@ export interface Env {
   OPENAI_TIMEOUT_MS?: string;
   /** 推論の深さ（none / low / medium …）。空なら送らない（非推論モデルを使う場合） */
   OPENAI_REASONING_EFFORT?: string;
+  /** 状況整理（/v1/context-assist）の推論の深さ。未設定なら、推論モデルのとき none（短い分類と返答のため。出力上限を推論で使い切らないように） */
+  CONTEXT_REASONING_EFFORT?: string;
+  /** 状況整理の出力トークン上限（推論トークンを含む） */
+  CONTEXT_MAX_OUTPUT_TOKENS?: string;
   /** 会話用モデル（未設定なら OPENAI_MODEL） */
   OPENAI_CHAT_MODEL?: string;
   /** 会話の出力トークン上限（推論トークンを含む） */
@@ -145,6 +149,8 @@ export function createHandler(deps: HandlerDeps = {}) {
         schema_version: SCHEMA_VERSION,
         openai_configured: Boolean(env.OPENAI_API_KEY),
         auth_configured: Boolean(env.CLIENT_TOKENS),
+        // "stub" = OpenAI へ送らないローカル用スタブ / "openai" = 実際の OpenAI へ送る（課金あり）
+        provider_mode: providerName === "openai-stub" ? "stub" : "openai",
       });
     }
 
@@ -197,7 +203,13 @@ export function createHandler(deps: HandlerDeps = {}) {
         const message = error.code === "upstream_rate_limited"
           ? "AI の利用が混み合っています。しばらく待ってから再度お試しください"
           : "AI の応答を取得できませんでした";
-        return finish(errorResponse(status, error.code, message, requestId), error.code, requestId, { upstream_status: error.upstreamStatus ?? null });
+        // OpenAI のエラーは分類（type / code / param）だけを記録する（メッセージ本文・入力内容は記録しない）
+        return finish(errorResponse(status, error.code, message, requestId), error.code, requestId, {
+          upstream_status: error.upstreamStatus ?? null,
+          upstream_error_type: error.detail?.type ?? null,
+          upstream_error_code: error.detail?.code ?? null,
+          upstream_error_param: error.detail?.param ?? null,
+        });
       }
       return finish(errorResponse(502, "upstream_error", "AI の応答を取得できませんでした", requestId), "unexpected_error", requestId);
     };
@@ -253,8 +265,10 @@ export function createHandler(deps: HandlerDeps = {}) {
           model: env.OPENAI_CHAT_MODEL || env.OPENAI_MODEL || DEFAULT_MODEL,
           baseUrl,
           timeoutMs,
-          maxOutputTokens: CONTEXT_LIMITS.maxOutputTokens,
-          reasoningEffort,
+          maxOutputTokens: intEnv(env.CONTEXT_MAX_OUTPUT_TOKENS, CONTEXT_LIMITS.maxOutputTokens, 16, 4000),
+          reasoningEffort: env.CONTEXT_REASONING_EFFORT !== undefined
+            ? (env.CONTEXT_REASONING_EFFORT.trim() || undefined)
+            : (reasoningEffort ? "none" : undefined),
           fetchImpl,
         });
         const responseBody: ContextAssistResponse = {

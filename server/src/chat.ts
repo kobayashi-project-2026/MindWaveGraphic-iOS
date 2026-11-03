@@ -9,7 +9,7 @@
 // iOS 側の正本: MindWaveGraphic/MindWaveGraphic/Contracts/ChatContracts.swift
 
 import { SCHEMA_VERSION, type Validation } from "./contract.ts";
-import { UpstreamError } from "./openai.ts";
+import { UpstreamError, upstreamErrorFromResponse } from "./openai.ts";
 
 /** 状況確認画面（ContextCalibrationView / ContextScene）の場面 */
 export const CHAT_SCENES = ["calm", "interview", "sports", "important", "work", "other"] as const;
@@ -313,7 +313,7 @@ export async function generateChatReply(
       if (controller.signal.aborted) throw new UpstreamError("upstream_timeout", `timeout after ${cfg.timeoutMs}ms`);
       throw new UpstreamError("upstream_error", "network error");
     }
-    if (!response.ok) throw mapUpstreamStatus(response.status);
+    if (!response.ok) throw await upstreamErrorFromResponse(response);
     try {
       json = await response.json();
     } catch {

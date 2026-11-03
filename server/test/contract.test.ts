@@ -65,3 +65,21 @@ test("Structured Outputs strict の要件: 全プロパティ required・additio
   assert.equal(INSIGHT_JSON_SCHEMA.additionalProperties, false);
   assert.deepEqual([...INSIGHT_JSON_SCHEMA.required].sort(), Object.keys(INSIGHT_JSON_SCHEMA.properties).sort());
 });
+
+test("Structured Outputs: スキーマは公式の対応キーワードだけを使う（maxLength など非対応のキーワードを含まない）", async () => {
+  const { CONTEXT_JSON_SCHEMA } = await import("../src/context.ts");
+  const allowed = new Set(["type", "properties", "required", "additionalProperties", "items", "enum", "description",
+    "anyOf", "pattern", "format", "minItems", "maxItems", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "$defs", "$ref"]);
+  const walk = (node: unknown, path: string): string[] => {
+    if (typeof node !== "object" || node === null || Array.isArray(node)) return [];
+    const bad: string[] = [];
+    for (const [k, v] of Object.entries(node)) {
+      if (path.endsWith(".properties")) { bad.push(...walk(v, `${path}.${k}`)); continue; }
+      if (!allowed.has(k)) bad.push(`${path}.${k}`);
+      if (k === "properties" || k === "items" || k === "$defs") bad.push(...walk(v, `${path}.${k}`));
+    }
+    return bad;
+  };
+  assert.deepEqual(walk(INSIGHT_JSON_SCHEMA, "insight"), []);
+  assert.deepEqual(walk(CONTEXT_JSON_SCHEMA, "context"), []);
+});

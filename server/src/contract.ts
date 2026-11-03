@@ -180,19 +180,21 @@ export function validateInsightBody(body: unknown): Validation<InsightBody> {
   return { ok: true, value: body as unknown as InsightBody };
 }
 
-/** OpenAI Structured Outputs（strict）に渡す JSON Schema */
+/** OpenAI Structured Outputs（strict）に渡す JSON Schema。
+ * 文字数の上限は description で伝え、受信後に validateInsightBody で検証する
+ * （maxLength は Structured Outputs の対応キーワード一覧にないため使わない。2026-11-04 公式資料で確認） */
 export const INSIGHT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["title", "summary", "analysis", "recommendation", "next_action", "caution", "confidence_label", "tone"],
   properties: {
-    title: { type: "string", description: "見出し（40文字以内）", maxLength: MAX_LENGTHS.title },
-    summary: { type: "string", description: "結果の要約（160文字以内）", maxLength: MAX_LENGTHS.summary },
-    analysis: { type: "string", description: "前後の変化の説明（300文字以内）", maxLength: MAX_LENGTHS.analysis },
-    recommendation: { type: "string", description: "次に試すこと（200文字以内）", maxLength: MAX_LENGTHS.recommendation },
-    next_action: { type: "string", description: "すぐできる行動（120文字以内）", maxLength: MAX_LENGTHS.next_action },
-    caution: { type: "string", description: "免責文", maxLength: MAX_LENGTHS.caution },
-    confidence_label: { type: "string", description: "確からしさの表示（例: 確からしさ: 中）", maxLength: MAX_LENGTHS.confidence_label },
+    title: { type: "string", description: "見出し（40文字以内）" },
+    summary: { type: "string", description: "結果の要約（160文字以内）" },
+    analysis: { type: "string", description: "前後の変化の説明（300文字以内）" },
+    recommendation: { type: "string", description: "次に試すこと（200文字以内）" },
+    next_action: { type: "string", description: "すぐできる行動（120文字以内）" },
+    caution: { type: "string", description: "免責文" },
+    confidence_label: { type: "string", description: "確からしさの表示（例: 確からしさ: 中）" },
     tone: { type: "string", enum: [...TONES] },
   },
 } as const;

@@ -1,0 +1,66 @@
+# OpenAI 実通信テストの計画（承認待ち）
+
+作成: 2026-11-04 / ブランチ `feature/mokorin-voice-ui-20261028`
+**この文書の手順 2 以降は OpenAI の利用料が発生する。統合責任者の明示的な許可があるまで実行しない。**
+
+## 1. 準備状況（無料で確認済み）
+
+| 項目 | 状態 | 確認方法 |
+|---|---|---|
+| `server/.dev.vars` | OPENAI_API_KEY 設定あり（`sk-` 形式・空白なし）、CLIENT_TOKENS 1 件（16 文字以上）、OPENAI_MODEL=gpt-6-luna、推論 low、タイムアウト 15 秒、相談の出力上限 600、計測データ送信 false | 値を表示せずに有無と形式だけ確認 |
+| `.dev.vars` の管理 | 権限 600、`.gitignore` 済み、追跡なし、過去のコミットにも含まれない。ソースコードにキー形式の文字列なし | git check-ignore / ls-files / log、全体検索 |
+| モデル | `gpt-6-luna`（正式な ID。日付付きの版なし）。Responses API・Structured Outputs 対応。推論 none〜max（既定 medium） | 公式モデルページ（2026-11-04） |
+| 料金 | 100 万トークンあたり 入力 $0.10 / キャッシュ入力 $0.01 / 出力 $0.50 | 同上 |
+| Structured Outputs の書き方 | 全項目 required・additionalProperties false・null は `["string","null"]`・null を含む enum は対応。**文字列の `maxLength` は対応一覧にない** | 公式ガイド「Supported schemas」 |
+| 実通信モードの設定読み込み | 実通信モードのサーバーを別ポートで一時起動し、`/v1/health` が `provider_mode: openai` を返すことを確認。リクエストは 0 件（OpenAI へは何も送っていない）。確認後すぐ停止 | `real-mode-health-check-*.log` |
+| 誤操作防止 | テスト用スクリプトは実通信モードのサーバーに対し `--allow-real` がないと何も送らず終了することを確認 | 同上 |
+| STUB での通しテスト | 起動中の STUB サーバー（8787）に本物の CLIENT_TOKENS で接続し、認証（誤トークンは 401）、状況整理 3 往復（interview / stairs / 緊張 high）、相談 2 往復（履歴の順序）が成功 | `smoke-stub-8787-*.log` |
+| サーバーテスト | 59/59、TypeScript 型チェック エラー 0 | `server-tests-*.log` |
+
+## 2. 実通信の前に行った修正（サーバーのみ。アプリの UI・音声・測定・HR/HRV は変更なし）
+
+1. 単発インサイト（`/v1/insights`）の JSON Schema から `maxLength` を削除（公式の対応キーワード一覧にないため、実通信で 400 になるおそれがあった。文字数は受信後の検証で引き続き確認）。スキーマが対応キーワードだけを使うことをテストで確認
+2. 状況整理（`/v1/context-assist`）の推論を既定 `none`・出力上限 500 に（短い分類と返答のため。`low` だと推論トークンで出力上限を使い切り、JSON が途中で切れるおそれがあった）。`CONTEXT_REASONING_EFFORT` / `CONTEXT_MAX_OUTPUT_TOKENS` で変更可能
+3. OpenAI のエラー応答から、分類（type / code / param）だけをログに記録（初回の 400 などを原因特定できるように。メッセージ本文・入力内容は記録しない）
+4. `/v1/health` に `provider_mode`（stub / openai）を追加（秘密情報なし）
+5. テスト用スクリプト `server/scripts/smoke.ts` を追加
+
+## 3. 実通信テストの内容（承認後）
+
+| # | 宛先 | 内容 | 確認すること |
+|---|---|---|---|
+| 1 | /v1/context-assist | 「かなり緊張してる」 | tension_candidate=high、場面は決めず予定を尋ねる |
+| 2 | /v1/context-assist | 「これから就活の面接なんだ」 | scene_candidate=interview、身体状態を尋ねる |
+| 3 | /v1/context-assist | 「さっき階段を上ってきた」 | condition_candidates=[stairs]、まとめと「測定してみようか」 |
+| 4 | /v1/chat | 「面接前で緊張しています」 | 自然な日本語の助言、診断・病名の断定なし |
+| 5 | /v1/chat | 「さっき言っていた呼吸法を詳しく教えて」 | 1 回目で AI が出した呼吸法を踏まえた説明（文脈の保持） |
+
+どれも OpenAI へは `store: false` で送る。心拍・HRV は送らない（項目がない）。
+
+## 4. 想定料金（gpt-6-luna）
+
+| 宛先 | 入力（目安） | 出力（目安） | 1 回あたり |
+|---|---|---|---|
+| 状況整理（推論 none） | 約 1,200〜1,600 トークン（指示・スキーマ・履歴） | 約 150〜500 | 約 $0.0002〜0.0004 |
+| 相談（推論 low） | 約 500〜1,200 | 最大 600 | 約 $0.0001〜0.0004 |
+
+**テスト 1 式（5 件）: 約 $0.0015、多めに見ても $0.003 未満（1 円未満）。** 実際の値はスクリプトが応答の usage から表示する。残高 $5 に対して影響は小さい。
+
+## 5. 手順（統合責任者の許可後に実施）
+
+1. 起動中の STUB サーバー（ポート 8787）を止める（起動したターミナルで Ctrl+C）。二重起動しないため、同じポートで実通信モードを起動する
+2. 実通信モードで起動:
+   ```bash
+   cd ~/Desktop/mind-wave-graphic/server
+   npm run dev     # 「REAL MODE: OpenAI API へ実際に送信します」と表示されることを確認
+   ```
+3. 別のターミナルでテスト（5 件だけ送る）:
+   ```bash
+   cd ~/Desktop/mind-wave-graphic/server
+   node scripts/smoke.ts --base http://127.0.0.1:8787 --allow-real
+   ```
+4. 結果を確認: 各行が `provider=openai`・`OK`、整理結果が interview / stairs、相談の 2 回目が文脈を踏まえているか。合計トークンと概算料金。OpenAI のダッシュボード（Usage）でも使用量を確認
+5. アプリでの確認（シミュレーターのみ。実機では 127.0.0.1 が iPhone 自身を指すため届かない）: Xcode の Scheme の環境変数に `MW_INSIGHT_BASE_URL=http://127.0.0.1:8787` と `MW_INSIGHT_CLIENT_TOKEN`（.dev.vars の CLIENT_TOKENS と同じ値）を設定して起動し、状況選択でもこりんに話しかける（「外部AIを使う」に同意）。返答の下に「OpenAI（gpt-6-luna…）」と表示されれば実通信
+6. 終わったら実通信モードのサーバーを止める（Ctrl+C）。必要なら `npm run dev:stub` で STUB に戻す
+
+うまくいかないとき: サーバーのログの `upstream_status` / `upstream_error_type` / `upstream_error_code` / `upstream_error_param` を確認する（401=キー、429=残高・回数、400=パラメーター）。

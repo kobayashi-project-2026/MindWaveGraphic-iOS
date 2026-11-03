@@ -10,8 +10,8 @@
 // iOS 側の正本: MindWaveGraphic/MindWaveGraphic/Contracts/ContextAssistContracts.swift
 
 import { SCHEMA_VERSION, type Validation } from "./contract.ts";
-import { CHAT_SCENES, mapUpstreamStatus, extractUsage, type ChatUsage } from "./chat.ts";
-import { UpstreamError } from "./openai.ts";
+import { CHAT_SCENES, extractUsage, type ChatUsage } from "./chat.ts";
+import { UpstreamError, upstreamErrorFromResponse } from "./openai.ts";
 
 export const CONTEXT_SCENES = CHAT_SCENES;
 export const BODY_CONDITIONS = ["running", "stairs", "smoking", "caffeine", "sleep_lack", "after_meal", "none"] as const;
@@ -32,7 +32,7 @@ export const CONTEXT_LIMITS = {
   maxTotalChars: 4000,
   maxReplyChars: 160,
   maxQuestionChars: 120,
-  maxOutputTokens: 400,
+  maxOutputTokens: 500,
 } as const;
 
 export interface ContextAssistRequest {
@@ -264,7 +264,7 @@ export async function generateContextAssist(
       if (controller.signal.aborted) throw new UpstreamError("upstream_timeout", `timeout after ${cfg.timeoutMs}ms`);
       throw new UpstreamError("upstream_error", "network error");
     }
-    if (!response.ok) throw mapUpstreamStatus(response.status);
+    if (!response.ok) throw await upstreamErrorFromResponse(response);
     try {
       json = await response.json();
     } catch {

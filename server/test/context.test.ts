@@ -167,3 +167,35 @@ test("主観的な緊張（tension 段階）: step と current.tension を受け
   assert.equal(res.status, 200);
   assert.equal(b.result.tension_candidate, "high");
 });
+
+test("実通信の準備: 状況整理は推論モデルのとき reasoning=none（設定で変更可）・出力上限 500", async () => {
+  const calls: StubCall[] = [];
+  const handler = createHandler({ fetchImpl: createStubFetch("ok", calls), log: () => {}, providerName: "openai-stub" });
+  await handler(post(request(FIRST)), { ...ENV, OPENAI_REASONING_EFFORT: "low" });
+  assert.deepEqual(calls[0]?.body.reasoning, { effort: "none" });
+  assert.equal(calls[0]?.body.max_output_tokens, 500);
+  await handler(post(request(FIRST)), { ...ENV, OPENAI_REASONING_EFFORT: "low", CONTEXT_REASONING_EFFORT: "low", CONTEXT_MAX_OUTPUT_TOKENS: "700" });
+  assert.deepEqual(calls[1]?.body.reasoning, { effort: "low" });
+  assert.equal(calls[1]?.body.max_output_tokens, 700);
+  await handler(post(request(FIRST)), { ...ENV, OPENAI_REASONING_EFFORT: "" });
+  assert.equal("reasoning" in (calls[2]?.body ?? {}), false, "非推論モデル設定では送らない");
+});
+
+test("実通信の準備: OpenAI のエラーは分類（type / code / param）だけをログに残し、本文は残さない", async () => {
+  const logs: Array<Record<string, unknown>> = [];
+  const handler = createHandler({ fetchImpl: createStubFetch("http_429"), log: (e) => logs.push(e), providerName: "openai-stub" });
+  const res = await handler(post(request(FIRST)), ENV);
+  assert.equal(res.status, 429);
+  assert.equal(logs[0]?.upstream_status, 429);
+  assert.equal(logs[0]?.upstream_error_type, "rate_limit_exceeded");
+  assert.ok(!JSON.stringify(logs).includes("stub rate limit"), "エラーメッセージ本文は記録しない");
+});
+
+test("実通信の準備: /v1/health は STUB / 実通信のどちらで動いているかを返す（秘密情報なし）", async () => {
+  const stub = await createHandler({ providerName: "openai-stub" })(new Request("https://x.test/v1/health"), ENV);
+  assert.equal((await stub.json() as any).provider_mode, "stub");
+  const real = await createHandler({})(new Request("https://x.test/v1/health"), ENV);
+  const body = await real.text();
+  assert.equal(JSON.parse(body).provider_mode, "openai");
+  assert.ok(!body.includes("sk-") && !body.includes(TOKEN));
+});

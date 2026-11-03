@@ -33,12 +33,44 @@ export type UpstreamErrorCode =
 export class UpstreamError extends Error {
   readonly code: UpstreamErrorCode;
   readonly upstreamStatus: number | undefined;
+  /** OpenAI のエラー応答の種類（type / code / param のみ。メッセージ本文は保持しない） */
+  readonly detail: UpstreamErrorDetail | undefined;
 
-  constructor(code: UpstreamErrorCode, message: string, upstreamStatus?: number) {
+  constructor(code: UpstreamErrorCode, message: string, upstreamStatus?: number, detail?: UpstreamErrorDetail) {
     super(message);
     this.code = code;
     this.upstreamStatus = upstreamStatus;
+    this.detail = detail;
   }
+}
+
+export interface UpstreamErrorDetail {
+  type: string | null;
+  code: string | null;
+  param: string | null;
+}
+
+/** OpenAI のエラー応答から、診断に必要な分類（type / code / param）だけを取り出す。
+ *  message は入力の一部を含みうるため読まない・記録しない */
+export async function readUpstreamErrorDetail(response: Response): Promise<UpstreamErrorDetail | undefined> {
+  try {
+    const body = await response.json() as { error?: Record<string, unknown> };
+    const e = body?.error;
+    if (!e || typeof e !== "object") return undefined;
+    const pick = (v: unknown) => (typeof v === "string" ? v.slice(0, 80) : null);
+    return { type: pick(e.type), code: pick(e.code), param: pick(e.param) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** HTTP 状態から UpstreamError を作る（エラー応答の分類を添える） */
+export async function upstreamErrorFromResponse(response: Response): Promise<UpstreamError> {
+  const detail = await readUpstreamErrorDetail(response);
+  const status = response.status;
+  if (status === 429) return new UpstreamError("upstream_rate_limited", `openai status=${status}`, status, detail);
+  if (status === 401 || status === 403) return new UpstreamError("upstream_auth_error", `openai status=${status}`, status, detail);
+  return new UpstreamError("upstream_error", `openai status=${status}`, status, detail);
 }
 
 const SCENE_LABELS: Record<string, string> = {
@@ -160,10 +192,8 @@ export async function generateInsight(
     }
 
     if (!response.ok) {
-      // 応答本文には入力の一部が含まれうるため読まない・ログに出さない
-      if (response.status === 429) throw new UpstreamError("upstream_rate_limited", `openai status=${response.status}`, response.status);
-      if (response.status === 401 || response.status === 403) throw new UpstreamError("upstream_auth_error", `openai status=${response.status}`, response.status);
-      throw new UpstreamError("upstream_error", `openai status=${response.status}`, response.status);
+      // エラー応答は分類（type / code / param）だけを読む。メッセージ本文は読まない・ログに出さない
+      throw await upstreamErrorFromResponse(response);
     }
 
     try {
