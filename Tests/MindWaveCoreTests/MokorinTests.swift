@@ -551,7 +551,7 @@ enum MokorinTests {
             T.expectEqual(vc.state, .idle)
         }
         await T.test("権限がない・使えない: 録音せず理由を表示（文字入力で続けられる）") {
-            let input = FakeSpeechInput(); input.availability = .denied("マイクが許可されていません")
+            let input = FakeSpeechInput(); input.availability = .unavailable(.microphoneDenied)
             let vc = MokorinVoiceController(input: input, output: FakeSpeechOutput())
             await vc.micTapped()
             T.expectEqual(input.startCount, 0)
@@ -586,7 +586,7 @@ enum MokorinTests {
             await vc.micTapped(); await vc.micTapped()
             try await Task.sleep(for: .milliseconds(30))
             T.expectEqual(received, 0)
-            T.expect(vc.problem?.contains("聞き取れなかった") == true, "retry message")
+            T.expect(vc.problem?.contains("声が聞こえなかった") == true, "retry message")
         }
         T.test("実機の接続診断: 実機で 127.0.0.1 / localhost は届かないと判定（シミュレーター・https の別ホストは対象外）") {
             let local = URL(string: "http://127.0.0.1:8787")!
@@ -672,23 +672,40 @@ enum MokorinTests {
 
 nonisolated final class FakeSpeechInput: MokorinSpeechInput, @unchecked Sendable {
     var availability: MokorinVoiceAvailability = .available
+    /// 権限確認の待ち時間（遅延の再現）
+    var availabilityDelay: Duration = .zero
     var finalText = "面接の前です"
+    var startError: Error? = nil
     var startCount = 0
+    var stopCount = 0
+    var cancelCount = 0
     var stopBeforeStart = false
     weak var output: FakeSpeechOutput?
     private var onPartial: ((String) -> Void)?
-    private var onFinal: ((String) -> Void)?
+    /// 開始ごとの終了コールバック（古い録音の遅れたコールバックの再現に使う）
+    private(set) var finishes: [(MokorinRecognitionOutcome) -> Void] = []
 
-    func requestAvailability() async -> MokorinVoiceAvailability { availability }
-    func start(onPartial: @escaping (String) -> Void, onFinal: @escaping (String) -> Void, onError: @escaping (String) -> Void) throws {
+    func requestAvailability() async -> MokorinVoiceAvailability {
+        if availabilityDelay != .zero { try? await Task.sleep(for: availabilityDelay) }
+        return availability
+    }
+    func start(onPartial: @escaping (String) -> Void, onFinish: @escaping (MokorinRecognitionOutcome) -> Void) throws {
         startCount += 1
         stopBeforeStart = FakeSpeechOutput.lastStopTime != nil
+        if let startError { throw startError }
         self.onPartial = onPartial
-        self.onFinal = onFinal
+        finishes.append(onFinish)
     }
     func partial(_ text: String) { onPartial?(text) }
-    func stop() { let f = onFinal; onFinal = nil; f?(finalText) }
-    func cancel() { onFinal = nil }
+    /// 録音を終える（finalText を確定として返す）
+    func stop() { stopCount += 1; finishes.last?(.transcript(finalText)) }
+    func cancel() { cancelCount += 1 }
+    /// n 回目（0 始まり）の録音の終了を、あとから届ける
+    func finish(_ outcome: MokorinRecognitionOutcome, session index: Int? = nil) {
+        let i = index ?? finishes.count - 1
+        guard finishes.indices.contains(i) else { return }
+        finishes[i](outcome)
+    }
 }
 
 nonisolated final class FakeSpeechOutput: MokorinSpeechOutput, @unchecked Sendable {

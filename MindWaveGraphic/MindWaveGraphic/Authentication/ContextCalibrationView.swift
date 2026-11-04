@@ -33,7 +33,7 @@ struct ContextCalibrationView: View {
     /// もこりんとの会話と、場面・身体状態の選択状態
     @StateObject private var mokorin: MokorinContextViewModel
     /// 音声入力・読み上げ（1ターンずつ）
-    @StateObject private var voice = MokorinVoiceController()
+    @StateObject private var voice = MokorinVoiceController.makeForApp()
     @FocusState private var isInputFocused: Bool
     @State private var isEditing = false
     @State private var isHistoryPresented = false
@@ -85,6 +85,13 @@ struct ContextCalibrationView: View {
         .sheet(isPresented: $isHistoryPresented) { historySheet }
         .onAppear { connectVoice() }
         .onDisappear { voice.cancelAll() }
+        // VoiceOver: 録音の開始と、音声入力の問題（原因ごとの文言）を読み上げで知らせる
+        .onChange(of: voice.isListening) { _, listening in
+            if listening { AccessibilityNotification.Announcement("聞いています。話し終えたら少し待つと送信します").post() }
+        }
+        .onChange(of: voice.problem) { _, problem in
+            if let problem { AccessibilityNotification.Announcement(problem).post() }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { voice.cancelAll() }   // 背面に回ったら録音・読み上げを止める
         }
@@ -274,6 +281,8 @@ struct ContextCalibrationView: View {
     @ViewBuilder
     private var voiceStatus: some View {
         switch activity {
+        case .listening where voice.state == .preparing:
+            statusPill("マイクを準備しています", icon: "mic", color: accent)
         case .listening: statusPill("聞いています", icon: "waveform", color: .red)
         case .thinking:  statusPill("考え中…", icon: "ellipsis", color: accent)
         case .speaking:  statusPill("話しています（マイクで止められます）", icon: "speaker.wave.2.fill", color: accent)
