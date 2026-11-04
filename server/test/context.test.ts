@@ -254,3 +254,8 @@ test("スタブ: 測定を望まない・質問・場面にない予定（試験
   const exam = turn("明日、英語の試験がある");
   assert.equal(exam.situation_note, "明日、英語の試験がある");
 });
+
+test("指示: 過去の出来事は予定（場面）として扱わない（2026-11-05 の実通信で「昨日の試験」が work になった）", () => {
+  const body = buildContextResponsesRequest(request(FIRST), { model: "m", maxOutputTokens: 100 });
+  assert.ok(String(body.instructions).includes("過去の出来事は、これからの予定ではない"));
+});

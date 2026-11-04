@@ -702,7 +702,8 @@ struct ContextCalibrationView: View {
         }
         // MW_MOKORIN_AUTO_CONFIRM=1: 利用者が「この状況で測定する」を押した場合と同じ既存処理を呼ぶ（検証用）
         if env["MW_MOKORIN_AUTO_CONFIRM"] == "1" {
-            try? await Task.sleep(for: .seconds(2))
+            // 最後の返答と「この状況で測定する」を画面で確認できるよう、少し待ってから進む
+            try? await Task.sleep(for: .seconds(6))
             applyAndProceed()
         }
     }
