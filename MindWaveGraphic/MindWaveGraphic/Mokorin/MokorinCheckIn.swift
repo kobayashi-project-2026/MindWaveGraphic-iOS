@@ -16,6 +16,24 @@ import Foundation
 nonisolated enum CheckInSlot: String, CaseIterable, Codable, Sendable {
     case sleep, activity, condition, situation, timing, emotion, tension, cause, body, support
 
+    /// 言い回しを変えた質問（同じ言い方を続けない）
+    func question(variant: Int) -> String {
+        let v: [String]
+        switch self {
+        case .condition: v = ["体の調子はどうかな？元気？それとも疲れてる？", "今の体調はどう？"]
+        case .situation: v = ["このあと、何か予定はある？", "今日はこれから、どんな場面が待ってるの？", "今はどんな場面にいるのかな？"]
+        case .timing:    v = ["それはいつ頃なの？", "その予定は、もうすぐ？それとも少し先？"]
+        case .emotion:   v = ["今はどんな気持ちに近い？", "今の気持ちに一番近いのはどれかな？"]
+        case .tension:   v = ["緊張の強さを0から100で言うと、どのくらい？", "今の緊張はどのくらい？0（全然）〜100（とても強い）で教えてね。"]
+        case .cause:     v = ["今、どんなことが一番気になってる？", "一番気がかりなのは、どんなこと？"]
+        case .body:      v = ["体に何か変化はある？ドキドキや震えなど、いくつでも教えてね。", "今、体で気になるところはある？"]
+        case .sleep:     v = ["昨日はどのくらい眠れた？", "昨夜はよく眠れた？"]
+        case .activity:  v = ["今日はどのくらい体を動かした？", "今日は運動したり、たくさん歩いたりした？"]
+        case .support:   v = ["今、どんなことをしてみたい？", "もこりんと一緒に、どんなことをしてみようか？"]
+        }
+        return v[abs(variant) % v.count]
+    }
+
     var question: String {
         switch self {
         case .sleep:     return "昨日はどのくらい眠れた？"
@@ -305,7 +323,8 @@ nonisolated struct MokorinCheckIn: Equatable, Sendable {
     /// 質問を終える前に必ず確かめる項目（推薦と試作スコアに必要）
     static let required: [CheckInSlot] = [.situation, .emotion, .tension, .support]
     /// 質問の優先順（STEP 1 → 6 の順を基本に、必要なものだけ）
-    static let priority: [CheckInSlot] = [.sleep, .condition, .situation, .timing, .emotion, .tension, .body, .cause, .activity, .support]
+    /// あいさつ「今日はどんな感じ？」は体調の質問を兼ね、次に予定 → 時期 → 気持ち → 緊張の強さ → 気がかり → 体 →（必要なら）睡眠・活動 → 希望
+    static let priority: [CheckInSlot] = [.condition, .situation, .timing, .emotion, .tension, .cause, .body, .sleep, .activity, .support]
     /// 1 回の会話で尋ねる質問の上限（くどくしない）
     static let questionBudget = 7
 

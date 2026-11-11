@@ -112,6 +112,9 @@ struct MainTabView: View {
                 historyStore.add(GuideSessionRecord(id: UUID(), startedAt: date, scene: .sports, exercise: .box, durationSeconds: 60,
                                                     before: demo(98, 74), after: demo(88, 58), hrvUpdated: false))
             }
+            #endif
+            openImprovementIfRequested()
+            #if DEBUG
             // MW_FLOW_AUTOPILOT=1: ホーム表示の数秒後に「改善」へ（レバーを動かした場合と同じ）
             if ProcessInfo.processInfo.environment["MW_FLOW_AUTOPILOT"] == "1" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) { navManager.select(.guide) }
@@ -123,6 +126,7 @@ struct MainTabView: View {
             }
             #endif
         }
+        .onChange(of: flowState.requestImprovement) { _, _ in openImprovementIfRequested() }
         .onChange(of: flowState.measurementContext) { _, newCtx in
             viewModel.measurementContext = newCtx
         }
@@ -160,6 +164,14 @@ struct MainTabView: View {
         } message: {
             Text("ライブ計測は停止します。保存済みの履歴は削除されません。")
         }
+    }
+
+    /// 会話のあと「改善方法を見る」を選んだときは、改善（方法の選択）を開く
+    private func openImprovementIfRequested() {
+        guard flowState.requestImprovement else { return }
+        flowState.requestImprovement = false
+        navManager.dismissModal()
+        navManager.select(.guide)
     }
 
     /// タイトル（認証フロー先頭）へ戻る。履歴は保持し、ライブ計測だけ停止する。

@@ -52,6 +52,9 @@ final class AppFlowState: ObservableObject {
     /// 試作スコアの基準（HR0・SDNN0）。会話で緊張の強さ（S0）を聞いたあとの最初の計測値。メモリのみ
     @Published var prototypeBaseline: PrototypeBaseline? = nil
 
+    /// 会話のあと「改善方法を見る」を選んだ（メイン画面で改善を開く）
+    @Published var requestImprovement = false
+
     // ── メモリ上の一時入力（永続化・ログ出力 禁止） ──
 
     /// 入力中のメールアドレス（メモリ上のみ。送信・保存しない）

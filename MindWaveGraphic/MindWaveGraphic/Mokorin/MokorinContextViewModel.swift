@@ -592,7 +592,7 @@ final class MokorinContextViewModel: ObservableObject {
         if let slot = askedSlot { checkIn.asked.append(slot) }
         step = stepFor(askedSlot)
         let greeting = isInAppEdit ? MokorinScript.greetingForEdit(current: initialContext) : MokorinScript.greeting
-        appendMokorin([greeting, askedSlot?.question].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
+        appendMokorin([greeting, askedSlot?.question(variant: 0)].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
         setPose(MokorinExpressionRules.greeting.0, MokorinExpressionRules.greeting.1)
     }
 
@@ -640,11 +640,20 @@ final class MokorinContextViewModel: ObservableObject {
     }
 
     /// 発言・選択のあと: 反応 → 次の質問、またはまとめ（端末内の定型文）
-    private func continueCheckIn(changed: Set<CheckInSlot>, userText: String?) {
+    private func continueCheckIn(changed: Set<CheckInSlot>, userText: String?, previous: MokorinCheckIn? = nil) {
         let wasAsked = askedSlot
-        // 尋ねた項目に答えがなかった: 1 回だけ聞き直し、2 回目はとばす（同じ質問を繰り返さない）
+        // 尋ねた項目に答えがなかった: ほかの情報を話してくれたなら聞き直さずに先へ（会話を止めない）。
+        // 何も分からなかったときだけ 1 回聞き直し、2 回目はとばす（同じ質問を繰り返さない）
+        let prev = previous ?? undoStack.last?.checkIn ?? MokorinCheckIn()
         if let slot = wasAsked, !changed.contains(slot), !checkIn.isSettled(slot) {
-            if unclearCountInStep == 0 {
+            // 前に答えた内容の訂正だけだった: 訂正を受け止めて、同じ質問をもう一度（とばさない）
+            if !changed.isEmpty && changed.allSatisfy({ prev.isKnown($0) }) {
+                let reaction = MokorinScript.composedReaction(changed: changed, checkIn: checkIn, previous: prev)
+                appendMokorin(MokorinScript.join(reaction: reaction, question: slot.question(variant: undoStack.count)), origin: .fixed)
+                setPose(.happy, .nod)
+                return
+            }
+            if changed.isEmpty && unclearCountInStep == 0 {
                 unclearCountInStep = 1
                 appendMokorin(MokorinScript.checkInClarify(slot, gotOther: !changed.isEmpty), origin: .fixed)
                 setPose(.calm, .nod)
@@ -653,19 +662,19 @@ final class MokorinContextViewModel: ObservableObject {
             checkIn.declined.insert(slot)
         }
         unclearCountInStep = 0
-        let reaction = MokorinScript.checkInReaction(changed: changed, checkIn: checkIn, turn: undoStack.count)
+        let reaction = MokorinScript.composedReaction(changed: changed, checkIn: checkIn, previous: prev)
+            ?? (changed.isEmpty ? nil : ["そっか。", "うん。", "わかった。"][undoStack.count % 3])
         askedSlot = checkIn.nextSlot()
         if let slot = askedSlot {
             checkIn.asked.append(slot)
             step = stepFor(slot)
-            appendMokorin([reaction, slot.question].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
+            appendMokorin(MokorinScript.join(reaction: reaction, question: slot.question(variant: undoStack.count)), origin: .fixed)
             setPose(checkIn.condition?.value.isTired == true ? .sleepy : .calm, .nod)
         } else {
             markReadyWithCurrentSelection()
             step = .review
-            // まとめは「教えてくれてありがとう。」で始まるため、一般的な相づちは重ねない（具体的な反応だけ添える）
-            let specific = reaction.flatMap { MokorinScript.genericAcks.contains($0) ? nil : $0 }
-            appendMokorin([specific, MokorinScript.checkInSummary(checkIn, recommendations: recommendations)].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
+            // まとめは短く（反応は重ねない。推薦の理由は改善の画面で表示する）
+            appendMokorin(MokorinScript.checkInSummary(checkIn, recommendations: recommendations), origin: .fixed)
             setPose(checkIn.needsRestFirst ? .sad : .happy, .nod)
         }
     }
@@ -808,9 +817,10 @@ final class MokorinContextViewModel: ObservableObject {
         let changed = checkIn.apply(extraction, at: Date())
         syncFromCheckIn()
         if intent == .question && changed.isEmpty {
-            // 質問・雑談には答えられないことを正直に伝え、今の質問に戻る（同じ項目のまま）
-            let again = askedSlot?.question
-            appendMokorin([MokorinScript.cannotAnswerLocally(canEnableAI: isServerConfigured && !isTextConsented), again].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
+            // 質問・雑談: 端末内で答えられるものは答え、そうでなければ正直に伝えて、今の質問に戻る（同じ項目のまま）
+            let again = askedSlot?.question(variant: undoStack.count + 1)
+            let answer = MokorinScript.localAnswer(to: text) ?? MokorinScript.cannotAnswerLocally(canEnableAI: isServerConfigured && !isTextConsented)
+            appendMokorin([answer, again].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
             setPose(.calm, .nod)
             return
         }

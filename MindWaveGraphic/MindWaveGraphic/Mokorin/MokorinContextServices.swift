@@ -84,7 +84,8 @@ nonisolated enum MokorinKeywordInterpreter {
 
     /// 発言の意図（端末内の判定）。サーバーの user_intent と同じ分類
     static func interpretIntent(_ text: String) -> MokorinUserIntent {
-        if ["測りたくない", "測定しない", "測定したくない", "やめておく", "今日はいい", "測らなくていい"].contains(where: text.contains) { return .declineMeasurement }
+        if ["測りたくない", "測定しない", "測定したくない", "やめておく", "今日はいい", "測らなくていい",
+            "終わりにしたい", "終わりたい", "もういい", "会話を終え", "やめたい", "話すのをやめ"].contains(where: text.contains) { return .declineMeasurement }
         if ["もう測りたい", "測定を始めて", "早く測りたい", "すぐ測りたい", "測定したい"].contains(where: text.contains) { return .ready }
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.hasSuffix("？") || t.hasSuffix("?") { return .question }
@@ -121,6 +122,88 @@ nonisolated enum MokorinScript {
     /// 一般的な相づち（続けて同じものを使わない）
     static let genericAcks = ["そっか。", "なるほど。", "教えてくれてありがとう。", "うんうん。"]
 
+    /// 答えへの反応（本人の言葉を受けて 1〜2 文。訂正は受け止める）。続ける質問とつなげやすい形にする
+    static func composedReaction(changed: Set<CheckInSlot>, checkIn c: MokorinCheckIn, previous: MokorinCheckIn) -> String? {
+        if changed.contains(.condition), c.condition?.value == .unwell {
+            return "体調が悪いんだね。無理をしないで、今は休むことを優先しよう。"
+        }
+        var parts: [String] = []
+        if changed.contains(.situation), let s = c.situation?.value {
+            if let old = previous.situation?.value, old != s {
+                parts.append("\(eventNoun(s, note: c.situationNote))だったんだね、了解！")
+            } else if s == .restless {
+                parts.append("予定はないけど、落ち着かないんだね。")
+            } else {
+                parts.append("\(timingPrefix(c.timing?.value, note: c.situationNote))\(eventNoun(s, note: c.situationNote))なんだね。")
+            }
+        } else if changed.contains(.timing), let t = c.timing?.value {
+            parts.append(t == .finished ? "もう終わったことなんだね。" : "\(t.label)なんだね。")
+        }
+        if changed.contains(.sleep), let v = c.sleep?.value {
+            if v.isShort { parts.append("睡眠も短かったみたいだね。") }
+            else if v == .h7to9 || v == .over9 { parts.append("よく眠れたんだね。") }
+        }
+        if changed.contains(.condition), let v = c.condition?.value {
+            switch v {
+            case .energetic: parts.append("元気なんだね、よかった！")
+            case .slightlyTired: parts.append("少し疲れてるんだね。")
+            case .veryTired, .sluggish: parts.append("かなりしんどいんだね。無理しないでね。")
+            case .unwell: break
+            }
+        }
+        if changed.contains(.emotion), let v = c.emotion?.value {
+            let t: [FeelingKind: String] = [.tense: "緊張してるんだね。", .anxious: "不安なんだね。", .rushed: "焦ってるんだね。",
+                                            .unconfident: "自信が持てないんだね。", .irritated: "イライラしてるんだね。", .unsure: "よく分からない感じなんだね。それでも大丈夫だよ。"]
+            if let line = t[v] { parts.append(line) }
+        }
+        if changed.contains(.tension), let t = c.tension?.value, !changed.contains(.emotion) {
+            parts.append(t == 0 ? "今は落ち着いてるんだね。" : "緊張は\(t)くらいなんだね。")
+        }
+        if changed.contains(.cause), let causes = c.causes?.value, let first = WorryCause.allCases.first(where: causes.contains), first != .unknown {
+            parts.append("「\(first.label)」が気になってるんだね。")
+        }
+        if changed.contains(.body), let b = c.body?.value {
+            if b.contains(.shallowBreath) { parts.append("息が苦しいなら、無理はしないでね。") }
+            else if b.contains(.heartPounding) { parts.append("胸がドキドキしてるんだね。") }
+            else if b == [.none] { parts.append("体は落ち着いてるんだね。") }
+        }
+        if changed.contains(.support), let v = c.support?.value, v != .unsure {
+            parts.append("「\(v.label)」だね。")
+        }
+        guard !parts.isEmpty else { return nil }
+        // 長くしない（最初の 2 つ）。最後が「〜みたいだね。」なら、続く質問へ「〜みたいだけど、」でつなぐ
+        return parts.prefix(2).joined()
+    }
+
+    /// 反応と質問をつなぐ（「睡眠も短かったみたいだね。」＋質問 →「睡眠も短かったみたいだけど、」＋質問）
+    static func join(reaction: String?, question: String) -> String {
+        guard let r = reaction else { return question }
+        if r.hasSuffix("みたいだね。") { return String(r.dropLast(3)) + "けど、" + question }
+        return r + question
+    }
+
+    private static func timingPrefix(_ t: EventTiming?, note: String?) -> String {
+        switch t {
+        case .soon?: return "これから"
+        case .today?: return "今日"
+        case .tomorrowOrLater?: return (note?.contains("明日") ?? false) ? "明日" : "今度の"
+        case .finished?: return "終わった"
+        default: return ""
+        }
+    }
+
+    private static func eventNoun(_ s: SituationKind, note: String?) -> String {
+        let n = note ?? ""
+        switch s {
+        case .presentation: return "発表"
+        case .interviewExam: return ["試験", "テスト", "受験"].contains(where: n.contains) ? "試験" : "面接"
+        case .communication: return "人と会う予定"
+        case .importantEvent: return ["試合", "大会"].contains(where: n.contains) ? "試合" : "大事な予定"
+        case .restless: return "予定のない日"
+        case .other: return "その予定"
+        }
+    }
+
     /// 答えへの短い反応（同じ相づちを続けない。睡眠・体調・気持ちには具体的に返す）
     static func checkInReaction(changed: Set<CheckInSlot>, checkIn c: MokorinCheckIn, turn: Int) -> String? {
         if changed.contains(.condition), let v = c.condition?.value {
@@ -155,15 +238,15 @@ nonisolated enum MokorinScript {
             return "今日は無理をしないで、休むことを優先しよう。つらさが強いときは、近くの人や医療機関に相談してね。"
         }
         var parts: [String] = []
-        if let s = c.situation?.value, s != .other { parts.append(s.label + (c.timing.map { "（\($0.value.label)）" } ?? "")) }
-        else if let note = c.situationNote { parts.append(note) }
-        if let e = c.emotion?.value, e != .unsure { parts.append(e.label) }
-        if let t = c.tension?.value { parts.append("緊張は \(t) くらい") }
-        let head = parts.isEmpty ? "教えてくれてありがとう。" : "教えてくれてありがとう。" + parts.joined(separator: "、") + "なんだね。"
-        guard let first = recommendations.first else {
-            return head + "今は特に何かをしなくても大丈夫そうだよ。この状況で測定してみようか？"
+        if let s = c.situation?.value, s != .other, s != .restless {
+            parts.append(timingPrefix(c.timing?.value, note: c.situationNote) + eventNoun(s, note: c.situationNote) + "の前")
         }
-        return head + "今なら「\(first.method.title)」がおすすめだよ（\(first.reason)）。この状況で測定してみようか？"
+        if let t = c.tension?.value { parts.append("緊張は\(t)くらい") }
+        let head = parts.isEmpty ? "ありがとう、よく分かったよ。" : "ありがとう。" + parts.joined(separator: "で、") + "なんだね。"
+        guard let first = recommendations.first else {
+            return head + "今は特に何もしなくても大丈夫そう。測定してみようか？"
+        }
+        return head + "おすすめは「\(first.method.title)」だよ。測定するか、改善方法を見てみよう。"
     }
 
     static func greetingForEdit(current: MeasurementContext) -> String {
@@ -199,7 +282,21 @@ nonisolated enum MokorinScript {
     static let askSceneUnknownReason = "理由がわからなくても大丈夫だよ。これから何か予定はある？"
 
     /// 測定を望まないとき（説得しない）
-    static let declineAck = "わかった、今は測らなくても大丈夫だよ。気が向いたら、また声をかけてね。"
+    static let declineAck = "わかった、ここまでにしよう。測らなくても大丈夫だよ。気が向いたら、また声をかけてね。"
+
+    /// AI を使わないときでも答えられる、よくある質問（答えられなければ nil）
+    static func localAnswer(to text: String) -> String? {
+        if ["方法", "どうしたら", "どうすれば", "何をすれば", "なにをすれば"].contains(where: text.contains) {
+            return "呼吸法（4-7-8・ボックス・2-1-4）や、肩や首のストレッチ、まわりに意識を向ける方法があるよ。話を聞いたら、今のあなたに合うものをおすすめするね。"
+        }
+        if text.contains("測定") || text.contains("計測") {
+            return "測定では、心拍などを見ながら今の状態をグラフィックで表すよ。準備ができたら一緒に始めよう。"
+        }
+        if text.contains("もこりん") && (text.contains("誰") || text.contains("だれ") || text.contains("何者")) {
+            return "もこりんは、緊張や気持ちの整理を手伝うキャラクターだよ。"
+        }
+        return nil
+    }
 
     /// 外部AIを使わないときに質問・雑談をされた場合
     static func cannotAnswerLocally(canEnableAI: Bool) -> String {
