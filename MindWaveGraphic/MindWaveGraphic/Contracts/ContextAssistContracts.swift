@@ -45,12 +45,23 @@ nonisolated struct ContextAssistCurrentDTO: Codable, Equatable, Sendable {
     var conditions: [String]
     /// 主観的な緊張（SubjectiveTension.rawValue、未回答は null）
     var tension: String? = nil
+    /// 会話の情報（STEP 0〜6。2026-11-11 追加。省略可能）
+    var checkIn: ContextAssistCheckInDTO? = nil
+    /// 今尋ねている項目（CheckInSlot.rawValue。省略可能）
+    var nextSlot: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case scene, conditions, tension
+        case checkIn = "check_in", nextSlot = "next_slot"
+    }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(scene, forKey: .scene)
         try c.encode(conditions, forKey: .conditions)
         try c.encode(tension, forKey: .tension)
+        try c.encodeIfPresent(checkIn, forKey: .checkIn)
+        try c.encodeIfPresent(nextSlot, forKey: .nextSlot)
     }
 }
 
@@ -90,11 +101,14 @@ nonisolated struct ContextAssistResultDTO: Codable, Equatable, Sendable {
     var situationNote: String? = nil
     /// 利用者の発言の意図（2026-11-05 追加。古いサーバーでは無い。不正な値は answer 扱い）
     var userIntent: String? = nil
+    /// 今回の発言から取り出した会話の情報（2026-11-11 追加。古いサーバーでは無い）
+    var checkIn: ContextAssistCheckInResultDTO? = nil
 
     enum CodingKeys: String, CodingKey {
         case reply, emotion, action
         case situationNote         = "situation_note"
         case userIntent            = "user_intent"
+        case checkIn               = "check_in"
         case sceneCandidate        = "scene_candidate"
         case conditionCandidates   = "condition_candidates"
         case needsClarification    = "needs_clarification"

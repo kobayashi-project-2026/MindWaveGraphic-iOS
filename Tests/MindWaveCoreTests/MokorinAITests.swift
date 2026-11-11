@@ -235,36 +235,6 @@ enum MokorinAITests {
             T.expect(!vm.declinedMeasurement, "resume")
             T.expectEqual(vm.step, .scene, "同じ段階から続ける")
         }
-        await T.test("AIなしで質問されたら、答えられないと正直に伝えて同じ質問に戻る") {
-            let vm = MokorinTests.localVM()
-            await vm.submit("もこりんって何が好き？")
-            T.expect(vm.messages.contains { $0.text.contains("質問にうまく答えられない") }, "正直に")
-            T.expectEqual(vm.step, .tension)
-        }
-        await T.test("場面の候補にない予定（試験）: 既存の場面は work、本人の言葉は要約として残し、言い回しを変える") {
-            let vm = MokorinTests.localVM()
-            await vm.submit("少し緊張してる")
-            await vm.submit("明日、英語の試験がある")
-            T.expectEqual(vm.selectedScene, .work)
-            T.expectEqual(vm.situationNote, "明日、英語の試験がある")
-            T.expectEqual(vm.topic, .exam)
-            T.expect(vm.messages.last?.text.hasPrefix("試験の前なんだね。") == true, vm.messages.last?.text ?? "")
-            T.expectEqual(vm.sessionMemory.situationNote, "明日、英語の試験がある")
-        }
-        await T.test("試合ならウォーミングアップを尋ね、疲れていると話したら気づかう。理由のわからない緊張は受け止める") {
-            let vm = MokorinTests.localVM()
-            await vm.submit("かなり緊張してる")
-            await vm.submit("これからサッカーの試合")
-            T.expect(vm.messages.last?.text.contains("ウォーミングアップ") == true, vm.messages.last?.text ?? "")
-            let tired = MokorinTests.localVM(name: "tired")
-            await tired.submit("少し緊張してる、ちょっと疲れてる")
-            await tired.submit("これから面接")
-            T.expect(tired.messages.last?.text.hasPrefix("疲れているんだね。無理しないでね。") == true, tired.messages.last?.text ?? "")
-            T.expect(tired.sessionMemory.mentionedFatigue, "memory")
-            let unknown = MokorinTests.localVM(name: "unknown")
-            await unknown.submit("緊張してるけど、理由がよくわからない")
-            T.expectEqual(unknown.messages.last?.text, MokorinScript.askSceneUnknownReason)
-        }
         await T.test("「もう測りたい」: 未確認の項目は聞かずにまとめへ（まとめで確認・変更できる）。やり直しで会話の記憶も消える") {
             let vm = MokorinTests.localVM()
             await vm.submit("少し緊張してる")

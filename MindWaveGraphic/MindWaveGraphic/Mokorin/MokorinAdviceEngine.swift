@@ -27,6 +27,8 @@ nonisolated struct MokorinSessionMemory: Equatable, Sendable {
     /// 本人が今は測定を望まなかった
     var declinedMeasurement: Bool = false
     var capturedAt: Date = Date()
+    /// 会話で集めた情報（STEP 0〜6。2026-11-11 追加）
+    var checkIn: MokorinCheckIn? = nil
 
     static let maxNoteChars = 40
 

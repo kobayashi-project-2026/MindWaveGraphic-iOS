@@ -109,7 +109,60 @@ nonisolated enum MokorinKeywordInterpreter {
 
 nonisolated enum MokorinScript {
     /// 最初の質問（主観的な緊張）
-    static let greeting = "こんにちは。今、緊張してる？"
+    /// 最初のあいさつ（緊張していると決めつけない。2026-11-11 の指定）
+    static let greeting = "こんにちは！今日もおつかれさま！今日はどんな感じ？まずは今の自分の状態を一緒に確認してみよう！"
+
+    /// 尋ねた項目に答えがなかったとき（1 回だけ）
+    static func checkInClarify(_ slot: CheckInSlot, gotOther: Bool) -> String {
+        (gotOther ? "教えてくれてありがとう。" : "ごめんね、うまく受け取れなかったかも。")
+            + "\(slot.question)\n下から選んでも、「答えない」でとばしても大丈夫だよ。"
+    }
+
+    /// 答えへの短い反応（同じ相づちを続けない。睡眠・体調・気持ちには具体的に返す）
+    static func checkInReaction(changed: Set<CheckInSlot>, checkIn c: MokorinCheckIn, turn: Int) -> String? {
+        if changed.contains(.condition), let v = c.condition?.value {
+            switch v {
+            case .unwell: return "体調が悪いんだね。無理をしないで、今は休むことを優先しよう。"
+            case .veryTired, .sluggish: return "かなりしんどいんだね。無理しないでね。"
+            case .slightlyTired: return "少し疲れているんだね。"
+            case .energetic: return "元気なんだね、よかった！"
+            }
+        }
+        if changed.contains(.sleep), let v = c.sleep?.value { return v.reaction }
+        if changed.contains(.emotion), let v = c.emotion?.value {
+            switch v {
+            case .irritated: return "イライラしているんだね。そういうときもあるよ。"
+            case .unsure: return "自分でもよく分からないんだね。それでも大丈夫だよ。"
+            case .unconfident: return "自信が持てないんだね。"
+            case .rushed: return "焦っているんだね。"
+            case .anxious: return "不安や心配があるんだね。"
+            case .tense: return "緊張しているんだね。"
+            }
+        }
+        if changed.contains(.body), c.body?.value.contains(.shallowBreath) == true {
+            return "呼吸が浅い・苦しい感じがあるんだね。苦しさが強いときは、無理をせず休んでね。"
+        }
+        if changed.isEmpty { return nil }
+        let acks = ["そっか。", "なるほど。", "教えてくれてありがとう。", "うんうん。"]
+        return acks[abs(turn) % acks.count]
+    }
+
+    /// 質問を終えたときのまとめ（推薦は理由つきで最大 2 つ。測定・改善へ進むかは本人が決める）
+    static func checkInSummary(_ c: MokorinCheckIn, recommendations: [MethodRecommendation]) -> String {
+        if c.needsRestFirst {
+            return "今日は無理をしないで、休むことを優先しよう。つらさが強いときは、近くの人や医療機関に相談してね。"
+        }
+        var parts: [String] = []
+        if let s = c.situation?.value, s != .other { parts.append(s.label + (c.timing.map { "（\($0.value.label)）" } ?? "")) }
+        else if let note = c.situationNote { parts.append(note) }
+        if let e = c.emotion?.value, e != .unsure { parts.append(e.label) }
+        if let t = c.tension?.value { parts.append("緊張は \(t) くらい") }
+        let head = parts.isEmpty ? "教えてくれてありがとう。" : "教えてくれてありがとう。" + parts.joined(separator: "、") + "なんだね。"
+        guard let first = recommendations.first else {
+            return head + "今は特に何かをしなくても大丈夫そうだよ。この状況で測定してみようか？"
+        }
+        return head + "今なら「\(first.method.title)」がおすすめだよ（\(first.reason)）。この状況で測定してみようか？"
+    }
 
     static func greetingForEdit(current: MeasurementContext) -> String {
         "今の状況を教えてね。いまは「\(current.scene.displayName)」になっているよ。今、緊張してる？"
@@ -245,6 +298,8 @@ nonisolated enum MokorinQuickReply: Hashable, Sendable {
     case skipMeasurement
     /// 測定を望まないと言ったあとで、やっぱり会話を続ける
     case keepTalking
+    /// 会話の情報（STEP 0〜6）の選択肢
+    case checkIn(CheckInOption)
 
     var label: String {
         switch self {
@@ -253,6 +308,7 @@ nonisolated enum MokorinQuickReply: Hashable, Sendable {
         case .continueWithoutAI: return "AIなしで続ける"
         case .skipMeasurement:   return "測定しないで終える"
         case .keepTalking:       return "やっぱり続ける"
+        case .checkIn(let o):    return o.label
         case .tension(let t): return t.replyLabel
         case .noPlan:         return "特に予定はない"
         case .scene(let s):
