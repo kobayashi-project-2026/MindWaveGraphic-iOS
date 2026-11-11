@@ -112,6 +112,10 @@ struct MainTabView: View {
                 historyStore.add(GuideSessionRecord(id: UUID(), startedAt: date, scene: .sports, exercise: .box, durationSeconds: 60,
                                                     before: demo(98, 74), after: demo(88, 58), hrvUpdated: false))
             }
+            // MW_FLOW_AUTOPILOT=1: ホーム表示の数秒後に「改善」へ（レバーを動かした場合と同じ）
+            if ProcessInfo.processInfo.environment["MW_FLOW_AUTOPILOT"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { navManager.select(.guide) }
+            }
             // シミュレーター検証用（INITIAL_TAB と同様）: INITIAL_SCREEN=<AppScreen の case 名> で起動直後に遷移する
             if let name = ProcessInfo.processInfo.environment["INITIAL_SCREEN"],
                let screen = AppScreen.allCases.first(where: { "\($0)" == name }) {
@@ -253,7 +257,8 @@ struct MainTabView: View {
                 .animation(.easeInOut(duration: 1.0), value: si)
 
                 // Home / 整える / 履歴 のレバー（HomeView と同一コンポーネント）
-                CockpitLeverNav(selectedTab: selectedTabBinding, accentColor: ac) { navManager.navigate(to: .dialogue) }
+                CockpitLeverNav(selectedTab: selectedTabBinding, accentColor: ac,
+                                highlightImprove: flowState.pendingImprovement != nil) { navManager.navigate(to: .dialogue) }
                     .padding(.horizontal, 12)
                     .frame(height: 44)
             }

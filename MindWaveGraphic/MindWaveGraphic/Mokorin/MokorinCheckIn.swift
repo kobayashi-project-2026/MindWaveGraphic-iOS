@@ -49,6 +49,22 @@ nonisolated enum CheckInSlot: String, CaseIterable, Codable, Sendable {
 
     /// 複数選べる項目
     var allowsMultiple: Bool { self == .cause || self == .body }
+
+    /// 会話の進み具合の表示（全体UI 5〜7 ページ「程度→予定→状況」）
+    var shortLabel: String {
+        switch self {
+        case .sleep: return "睡眠"
+        case .activity: return "活動"
+        case .condition: return "体調"
+        case .situation: return "場面"
+        case .timing: return "時期"
+        case .emotion: return "気持ち"
+        case .tension: return "緊張度"
+        case .cause: return "気がかり"
+        case .body: return "体"
+        case .support: return "希望"
+        }
+    }
 }
 
 nonisolated enum SleepAmount: String, CaseIterable, Codable, Sendable {

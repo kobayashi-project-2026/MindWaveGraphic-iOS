@@ -129,6 +129,21 @@ final class MokorinContextViewModel: ObservableObject {
     /// 一つ前の会話へ戻れるか
     var canGoBack: Bool { !undoStack.isEmpty }
 
+    /// 答えた（またはとばした）項目の順番。タップでその質問へ戻れる（全体UI 5〜7 ページ）
+    var answeredTrail: [CheckInSlot] {
+        undoStack.compactMap(\.askedSlot).reduce(into: [CheckInSlot]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+
+    /// 指定した項目を尋ねていたところまで戻る（その後の答え・推薦も取り消す）
+    func goBack(to slot: CheckInSlot) {
+        guard undoStack.contains(where: { $0.askedSlot == slot }) else { return }
+        while let last = undoStack.last {
+            let target = last.askedSlot == slot
+            goBack()
+            if target { break }
+        }
+    }
+
     /// 推薦する改善方法（会話の内容から。本人は推薦以外も選べる）
     var recommendations: [MethodRecommendation] { safetyStop ? [] : MokorinMethodAdvisor.recommend(checkIn) }
 

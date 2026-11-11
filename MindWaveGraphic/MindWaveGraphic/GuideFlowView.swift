@@ -30,11 +30,21 @@ struct GuideFlowView: View {
 
     // MARK: - custom init
 
-    init(selectedTab: Binding<Int>, initialScene: MeasurementScene? = nil) {
+    /// 途中でやめた改善から再開する（全体UI 25 ページ）
+    private let resume: PendingImprovement?
+
+    init(selectedTab: Binding<Int>, initialScene: MeasurementScene? = nil, resume: PendingImprovement? = nil) {
         _selectedTab = selectedTab
+        self.resume = resume
         if let scene = initialScene {
             _step          = State(initialValue: .exerciseSelection)
             _selectedScene = State(initialValue: scene)
+        }
+        if let r = resume {
+            _step                   = State(initialValue: .session)
+            _selectedScene          = State(initialValue: r.scene)
+            _selectedExercise       = State(initialValue: r.exercise)
+            _sessionDurationSeconds = State(initialValue: r.durationSeconds)
         }
         #if DEBUG
         if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session" {
@@ -65,6 +75,12 @@ struct GuideFlowView: View {
     /// 終了後の本人の緊張の評価（0〜100）と振り返りの答え（メモリのみ。保存しない）
     @State private var subjectiveAfter: Int?                   = nil
     @State private var reflectionAnswer: ReflectionAnswer?     = nil
+    /// 小窓から「ホームへ戻りますか？」
+    @State private var showHomeConfirm                         = false
+    /// 実施時間の「選択」（1〜10 分）
+    @State private var showDurationPicker                      = false
+    @State private var customMinutes                           = 2
+    @State private var didApplyResume                          = false
 
     // Session
     @State private var sessionElapsed:    Int  = 0
@@ -266,6 +282,7 @@ struct GuideFlowView: View {
             Button("中断する", role: .destructive) {
                 MindWaveDebugLogger.log(.flow, "flow cancelled step=\(step)")
                 dismiss()
+                Task { @MainActor in selectedTab = 0 }
             }
             Button("続ける", role: .cancel) {}
         } message: {
@@ -564,13 +581,16 @@ struct GuideFlowView: View {
 
         case .exerciseSelection:
             // ガイド選択: 「戻る」+ 「セッション開始」
-            HStack(spacing: 12) {
+            // 全体UI 15〜16 ページ: 戻る（ホームへ）・開始・AI相談。場面の選択画面は通らない
+            HStack(spacing: 10) {
                 Button {
-                    withAnimation { step = .sceneSelection }
+                    dismiss()
+                    Task { @MainActor in selectedTab = 0 }
                 } label: {
                     backLabel
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("ホームへ戻る")
 
                 Button {
                     startSession()
@@ -583,6 +603,16 @@ struct GuideFlowView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(selectedExercise == nil)
+
+                Button { showMokorinTalk = true } label: {
+                    Text("AI相談")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.cyan.opacity(0.9))
+                        .padding(.horizontal, 14).padding(.vertical, 17)
+                        .background(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.cyan.opacity(0.5), lineWidth: 0.8))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("guide_select_ai_consult")
             }
 
         default:
@@ -772,6 +802,18 @@ struct GuideFlowView: View {
         .onAppear {
             // おすすめを最初から選んでおく（本人は自由に変えられる）
             if selectedExercise == nil, let ex = recommendedExercise { selectedExercise = ex }
+            if let d = recommendedDuration?.seconds, sessionElapsed == sessionDurationSeconds {
+                sessionDurationSeconds = d
+                sessionElapsed = d
+            }
+            #if DEBUG
+            // MW_FLOW_AUTOPILOT=1: 一連の画面遷移の検証用（開始 → 数秒実施 → STOP。押した場合と同じ処理を呼ぶ）
+            if ProcessInfo.processInfo.environment["MW_FLOW_AUTOPILOT"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if step == .exerciseSelection { startSession() } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { if step == .session { sessionIsRunning = true } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { if step == .session { finishSession(early: true) } }
+            }
+            #endif
         }
         .sheet(isPresented: $showMokorinTalk) {
             ContextCalibrationView(flowState: flowState) { showMokorinTalk = false }
@@ -852,6 +894,17 @@ struct GuideFlowView: View {
                 Spacer()
                 miniStateWindow
                     .padding(.trailing, 10)
+                    // 全体UI 24 ページ: 小窓を押すとホームへ戻るか確認（途中なら「改善途中」として残す）
+                    .onTapGesture { showHomeConfirm = true }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("ホームのグラフィックへ戻る")
+                    .accessibilityIdentifier("guide_mini_window")
+                    .alert("ホームへ戻りますか？", isPresented: $showHomeConfirm) {
+                        Button("Yes") { returnHomeKeepingProgress() }
+                        Button("No", role: .cancel) {}
+                    } message: {
+                        Text(step == .session && !sessionIsFinished ? "途中の改善は「改善途中」として残り、改善からあとで再開できます。" : "")
+                    }
             }
             .padding(.top, 8)
             .padding(.bottom, 2)
@@ -895,18 +948,40 @@ struct GuideFlowView: View {
                 bigSessionButton.padding(.horizontal, 20)
                 // 一時停止（STOP は終了して結果へ。途中で休みたいときはこちら）
                 if sessionIsRunning {
-                    Button { sessionIsRunning = false } label: {
-                        Label("一時停止", systemImage: "pause.fill")
-                            .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                    HStack(spacing: 24) {
+                        Button { sessionIsRunning = false } label: {
+                            Label("一時停止", systemImage: "pause.fill")
+                                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("ガイドを止めて、あとで再開できます")
+                        .accessibilityIdentifier("guide_pause_button")
+                        // 全体UI 26 ページ: 状態が適度（緊張が高くない）なら、途中で終えてよい
+                        if MindState.from(score: viewModel.graphicInput.score) != .overTense {
+                            Button { finishSession(early: true) } label: {
+                                Text("→ Finish").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.cyan.opacity(0.9))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("ここで終えて結果を見る")
+                            .accessibilityIdentifier("guide_finish_button")
+                        }
                     }
-                    .buttonStyle(.plain)
                     .padding(.top, 10)
-                    .accessibilityHint("ガイドを止めて、あとで再開できます")
-                    .accessibilityIdentifier("guide_pause_button")
                 }
             }
 
             Spacer(minLength: 24)
+        }
+        .sheet(isPresented: $showMokorinTalk) {
+            ContextCalibrationView(flowState: flowState) { showMokorinTalk = false }
+        }
+        .onAppear {
+            // 改善途中からの再開: 新しい「前」の計測で始め、残り時間から続ける
+            guard let r = resume, !didApplyResume else { return }
+            didApplyResume = true
+            startSession()
+            sessionElapsed = r.remainingSeconds
+            flowState.pendingImprovement = nil
         }
     }
 
@@ -1236,26 +1311,71 @@ struct GuideFlowView: View {
     ]
 
     private var sessionDurationPicker: some View {
-        HStack(spacing: 10) {
-            ForEach(sessionDurationOptions, id: \.seconds) { opt in
-                Button {
-                    sessionDurationSeconds = opt.seconds
-                    sessionElapsed = opt.seconds
-                } label: {
-                    Text(opt.label)
+        VStack(spacing: 6) {
+            // 全体UI 19 ページ: 推奨時間の文章と、推奨時間を光らせる
+            if let rec = recommendedDuration {
+                Text("おすすめは\(rec.seconds / 60)分だよ（\(rec.reason)）")
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.6))
+                    .accessibilityIdentifier("recommended_duration")
+            }
+            HStack(spacing: 10) {
+                ForEach(sessionDurationOptions, id: \.seconds) { opt in
+                    let recommended = recommendedDuration?.seconds == opt.seconds
+                    Button {
+                        sessionDurationSeconds = opt.seconds
+                        sessionElapsed = opt.seconds
+                    } label: {
+                        Text(opt.label)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(sessionDurationSeconds == opt.seconds ? .black : .white.opacity(0.55))
+                            .padding(.horizontal, 18).padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(sessionDurationSeconds == opt.seconds
+                                          ? Color.cyan.opacity(0.85)
+                                          : Color.white.opacity(0.10))
+                            )
+                            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.yellow.opacity(recommended ? 0.85 : 0), lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(opt.label)を選択" + (recommended ? "（おすすめ）" : ""))
+                }
+                // 全体UI 20 ページ: 時間を自分で選ぶ
+                Button { showDurationPicker = true } label: {
+                    Text(sessionDurationOptions.contains { $0.seconds == sessionDurationSeconds } ? "選択" : "\(sessionDurationSeconds / 60)分")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(sessionDurationSeconds == opt.seconds ? .black : .white.opacity(0.55))
-                        .padding(.horizontal, 18).padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(sessionDurationSeconds == opt.seconds
-                                      ? Color.cyan.opacity(0.85)
-                                      : Color.white.opacity(0.10))
-                        )
+                        .foregroundStyle(sessionDurationOptions.contains { $0.seconds == sessionDurationSeconds } ? .white.opacity(0.55) : .black)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 20).fill(sessionDurationOptions.contains { $0.seconds == sessionDurationSeconds } ? Color.white.opacity(0.10) : Color.cyan.opacity(0.85)))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(opt.label)を選択")
+                .accessibilityLabel("時間を自分で選ぶ")
+                .accessibilityIdentifier("duration_custom")
             }
+        }
+        .sheet(isPresented: $showDurationPicker) {
+            NavigationStack {
+                VStack(spacing: 20) {
+                    Text("何分で行いますか？").font(.system(size: 17, weight: .semibold))
+                    Stepper("\(customMinutes) 分", value: $customMinutes, in: 1...10)
+                        .padding(.horizontal, 40)
+                    Button("この時間にする") {
+                        sessionDurationSeconds = customMinutes * 60
+                        sessionElapsed = customMinutes * 60
+                        showDurationPicker = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("→ 時間を相談する") {
+                        showDurationPicker = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showMokorinTalk = true }
+                    }
+                    .accessibilityIdentifier("duration_consult")
+                }
+                .padding(.top, 24)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { showDurationPicker = false } } }
+            }
+            .presentationDetents([.medium])
+            .preferredColorScheme(.dark)
         }
     }
 
@@ -1444,8 +1564,13 @@ struct GuideFlowView: View {
                 }
 
                 // ── もこりんとの振り返り（5 つの答え。保存しない）
-                MokorinReflectionView(alternative: methodRecommendations.map(\.method).first { $0.guideExercise != selectedExercise },
-                                      answer: $reflectionAnswer)
+                MokorinReflectionView(alternative: nextMethod, answer: $reflectionAnswer) { next in
+                    guard let ex = next.guideExercise else { return }
+                    selectedExercise = ex
+                    reflectionAnswer = nil
+                    subjectiveAfter = nil
+                    resetForNewSession()
+                }
 
                 // ── 呼吸後の体感入力
                 SelfReportAfterView(selection: $selfReportAfter, onChanged: {
@@ -1509,6 +1634,10 @@ struct GuideFlowView: View {
         #if DEBUG
         .onAppear {
             // シミュレーター検証用: MW_SCROLL_RESULT=reflection で振り返りの位置まで表示する
+            if ProcessInfo.processInfo.environment["MW_FLOW_AUTOPILOT"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { proxy.scrollTo("result_reflection", anchor: .top) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { reflectionAnswer = .littleCalmer }
+            }
             if ProcessInfo.processInfo.environment["MW_SCROLL_RESULT"] == "reflection" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { proxy.scrollTo("result_reflection", anchor: .top) }
             }
@@ -1736,6 +1865,22 @@ struct GuideFlowView: View {
         return selectedScene?.recommendedExercise
     }
 
+    /// 次に試す方法: 推薦のうち今回と違うガイド、なければ今回と違う呼吸法
+    private var nextMethod: ImprovementMethod? {
+        if let m = methodRecommendations.map(\.method).first(where: { $0.guideExercise != nil && $0.guideExercise != selectedExercise }) { return m }
+        return GuideExercise.allCases.first { $0 != selectedExercise && !(recentMemory?.checkIn?.body?.value.contains(.shallowBreath) == true && ImprovementMethod.from($0).hasLongBreathHold) }
+            .map(ImprovementMethod.from)
+    }
+
+    /// おすすめの実施時間（会話からの推薦の目安を 1・3・5 分のいずれかに）と理由
+    private var recommendedDuration: (seconds: Int, reason: String)? {
+        guard let rec = methodRecommendations.first(where: { $0.method.guideExercise != nil }) ?? methodRecommendations.first else { return nil }
+        let options = [60, 180, 300]
+        let nearest = options.min { abs($0 - rec.suggestedSeconds) < abs($1 - rec.suggestedSeconds) } ?? 60
+        let why = recentMemory?.checkIn?.timing?.value == .soon ? "予定がすぐだから短めに" : "落ち着いて取り組めるように"
+        return (nearest, why)
+    }
+
     /// 本人の緊張の評価（試作スコアの S0）: 会話で聞いた強さ、なければ体感入力から
     private var subjectiveBefore: Int? {
         recentMemory?.checkIn?.tension?.value ?? SubjectiveScale.from(selfReportBefore)
@@ -1766,6 +1911,18 @@ struct GuideFlowView: View {
         return MokorinCompanionViewModel(chat: chat) { recent in
             MokorinResultExplainer.explain(input, history: history, memory: memory, purpose: .result, recentUserText: recent)
         }
+    }
+
+    /// ホームへ戻る。実施の途中なら残り時間を「改善途中」として残す
+    private func returnHomeKeepingProgress() {
+        if step == .session, !sessionIsFinished, let ex = selectedExercise, sessionElapsed > 0 {
+            sessionIsRunning = false
+            flowState.pendingImprovement = PendingImprovement(scene: selectedScene ?? .other, exercise: ex,
+                                                              durationSeconds: sessionDurationSeconds,
+                                                              remainingSeconds: sessionElapsed, savedAt: Date())
+        }
+        dismiss()
+        Task { @MainActor in selectedTab = 0 }
     }
 
     private func resetForNewSession() {

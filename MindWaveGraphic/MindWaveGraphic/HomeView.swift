@@ -22,6 +22,8 @@ struct HomeView: View {
     @Binding var selectedTab: Int
 
     @State private var showStatusDetail     = false
+    /// 緊張の高まりの知らせ（状態が高い緊張に変わったときだけ数秒表示）
+    @State private var showTensionBanner    = false
     @State private var buttonPulse: Bool    = false
     #if DEBUG
     @State private var showDebugDiagnostics = false
@@ -56,7 +58,40 @@ struct HomeView: View {
         return 0
     }
 
-    // 表示用 GraphicInput（Simulator demo override → 心拍フロア補正）
+    // MARK: - 試作スコア（主観評価＋HR・SDNN）
+
+    /// 会話で聞いた緊張の強さ（S0）
+    private var subjectiveS0: Int? { flowState.mokorinMemory?.checkIn?.tension?.value }
+
+    /// 今の計測値（ViewModel が現在値として扱う値だけ。値がなければ nil で、作らない）
+    private var currentPrototypeReadings: (hr: TimedReading?, sdnn: TimedReading?) {
+        let hr = viewModel.snapshotHeartRate.map {
+            TimedReading(value: $0, measuredAt: viewModel.latestWatchHeartRateDate ?? viewModel.latestHeartRateSampleDate ?? Date())
+        }
+        let sdnn = viewModel.snapshotHRV.map { TimedReading(value: $0, measuredAt: viewModel.latestHRVSampleDate ?? Date()) }
+        return (hr, sdnn)
+    }
+
+    /// 試作スコア（S0 があるときだけ）。グラフィックと説明に使う
+    private var prototypeLive: PrototypeTensionResult? {
+        guard let s0 = subjectiveS0 else { return nil }
+        let base = flowState.prototypeBaseline
+        let cur = currentPrototypeReadings
+        return PrototypeTensionScore.calculate(PrototypeTensionInput(
+            subjectiveBaseline: Double(s0), baselineHR: base?.hr, currentHR: cur.hr,
+            baselineSDNN: base?.sdnn, currentSDNN: cur.sdnn, now: Date()))
+    }
+
+    /// S0 を聞いた会話のあと、最初の計測値を基準（HR0・SDNN0）として残す
+    private func captureBaselineIfNeeded() {
+        guard subjectiveS0 != nil, let memory = flowState.mokorinMemory else { return }
+        if flowState.prototypeBaseline?.capturedFor == memory.capturedAt { return }
+        let cur = currentPrototypeReadings
+        guard cur.hr != nil || cur.sdnn != nil else { return }
+        flowState.prototypeBaseline = PrototypeBaseline(hr: cur.hr, sdnn: cur.sdnn, capturedFor: memory.capturedAt)
+    }
+
+    // 表示用 GraphicInput（Simulator demo override → 試作スコア → 心拍フロア補正）
     private var displayInput: GraphicInput {
         let base = viewModel.graphicInput
         #if DEBUG && targetEnvironment(simulator)
@@ -66,12 +101,19 @@ struct HomeView: View {
                                 state: MindState.from(score: corrected))
         }
         #endif
+        // 会話で緊張の強さ（S0）を聞いていれば、試作スコアでグラフィックを動かす（計算はアプリ内で決定的に行う）
+        if let s = prototypeLive?.score {
+            return GraphicInput(score: s, confidence: base.confidence, state: MindState.from(score: s))
+        }
         let correctedScore = max(base.score, heartRateVisualFloor)
         guard correctedScore > base.score else { return base }
         return GraphicInput(score: correctedScore, confidence: base.confidence, state: base.state)
     }
 
     private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
+
+    /// 表示中のスコアから決めた状態（グラフィックの色と一致させる）
+    private var displayState: MindState { MindState.from(score: displayInput.score) }
 
     /// 小さなもこりんを出すか（計測データがあるときだけ。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ表示でも出す）
     private var edgeGuideActive: Bool {
@@ -156,13 +198,49 @@ struct HomeView: View {
                     Spacer()
                     HStack {
                         Spacer()
-                        MokorinEdgeGuide(state: MindState.from(score: displayInput.score), isActive: edgeGuideActive) { selectedTab = 1 }
+                        MokorinEdgeGuide(state: displayState, isActive: edgeGuideActive) { selectedTab = 1 }
                             .padding(.trailing, 10)
                             .padding(.bottom, 12)
                     }
                 }
                 .frame(height: graphicH)
                 .zIndex(40)
+
+                // 5c. 緊張の高まりの知らせ（全体UI 10 ページ）と改善途中（24〜25 ページ）。医学的な警告ではない
+                VStack(spacing: 6) {
+                    if showTensionBanner {
+                        Text("緊張の高まりを検知しました")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color(red: 0.55, green: 0.08, blue: 0.08).opacity(0.9)))
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                            .accessibilityIdentifier("tension_banner")
+                    }
+                    if let p = prototypeLive, let s = p.score {
+                        Text("試作スコア \(Int(s.rounded()))・\(p.statusLabel)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 10).padding(.vertical, 3)
+                            .background(Capsule().fill(Color.black.opacity(0.45)))
+                            .accessibilityLabel("試作スコア \(Int(s.rounded()))。\(p.statusLabel)。医学的に検証された値ではありません")
+                            .accessibilityIdentifier("prototype_live_score")
+                    }
+                    if let p = flowState.pendingImprovement {
+                        Button { selectedTab = 1 } label: {
+                            Text("改善途中（\(p.exercise.title)・残り\(p.remainingSeconds / 60):\(String(format: "%02d", p.remainingSeconds % 60))）  再開 ›")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 14).padding(.vertical, 6)
+                                .background(Capsule().fill(Color.cyan.opacity(0.9)))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("pending_improvement")
+                    }
+                }
+                .padding(.top, 56)
+                .zIndex(45)
+                .animation(.easeInOut(duration: 0.3), value: showTensionBanner)
 
                 // 6. ヘッダー
                 headerBar
@@ -181,6 +259,14 @@ struct HomeView: View {
             withAnimation(.easeInOut(duration: 2.0).repeatForever(autoreverses: true)) {
                 buttonPulse = true
             }
+        }
+        .onAppear { captureBaselineIfNeeded() }
+        .onChange(of: viewModel.snapshotHeartRate) { _, _ in captureBaselineIfNeeded() }
+        .onChange(of: viewModel.snapshotHRV) { _, _ in captureBaselineIfNeeded() }
+        .onChange(of: displayState) { old, new in
+            guard new == .overTense, old != .overTense, edgeGuideActive else { return }
+            showTensionBanner = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { showTensionBanner = false }
         }
         #if DEBUG
         .sheet(isPresented: $showDebugDiagnostics) {
@@ -259,10 +345,11 @@ struct HomeView: View {
                         .shadow(color: accentColor.opacity(0.45), radius: 10)
                         .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
                 }
-                Text("STRESS & BIOMETRICS")
-                    .font(.system(size: 6.5, weight: .light, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.32))
-                    .tracking(2.5)
+                // 全体UI 8 ページ: ロゴは「Graphic」まで入れる
+                Text("GRAPHIC")
+                    .font(.system(size: 8, weight: .light, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.55))
+                    .tracking(4.0)
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 10)
@@ -302,7 +389,8 @@ struct HomeView: View {
 
             VStack(spacing: 0) {
                 panelTopRip
-                CockpitLeverNav(selectedTab: $selectedTab, accentColor: accentColor) { navManager.navigate(to: .dialogue) }
+                CockpitLeverNav(selectedTab: $selectedTab, accentColor: accentColor,
+                                highlightImprove: displayState == .overTense || flowState.pendingImprovement != nil) { navManager.navigate(to: .dialogue) }
                     .padding(.horizontal, 14)
                     .frame(height: 42)
                     .padding(.top, 4)
@@ -1070,8 +1158,10 @@ private struct MetalPanelBackground: View {
 struct CockpitLeverNav: View {
     @Binding var selectedTab: Int
     let accentColor: Color
+    /// 緊張が高いとき・改善途中のとき、「改善」を光らせてレバーの操作を促す（全体UI 9・11 ページ）
+    var highlightImprove: Bool = false
     /// 「対話」（もこりんとの会話を開く）。2026-11-11 改善資料 2 ページ: 下部メニューを「対話」「改善」に変更。
-    /// 履歴は共通メニューの「過去ログ確認」から開ける
+    /// 履歴は共通メニューの「履歴」から開ける
     var onDialogue: () -> Void = {}
 
     /// 対話はタブではなく会話の画面を開くため、レバーは改善（0）とホーム（1）の位置だけを示す
@@ -1108,6 +1198,13 @@ struct CockpitLeverNav: View {
                                 .foregroundStyle(active ? accentColor.opacity(0.88) : Color.white.opacity(0.20))
                         }
                         .frame(maxWidth: .infinity).frame(height: 26)
+                        .overlay {
+                            if item.tab == 1 && highlightImprove && !active {
+                                RoundedRectangle(cornerRadius: 6).strokeBorder(Color.yellow.opacity(0.85), lineWidth: 1.2)
+                                    .padding(.horizontal, 18)
+                                    .shadow(color: .yellow.opacity(0.6), radius: 4)
+                            }
+                        }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

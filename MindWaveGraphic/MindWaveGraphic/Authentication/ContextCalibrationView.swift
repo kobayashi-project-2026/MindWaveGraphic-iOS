@@ -40,6 +40,8 @@ struct ContextCalibrationView: View {
     /// 「ほかの答え・答えない」（今の質問の全部の選択肢。複数選べる項目はまとめて決定）
     @State private var isAllOptionsPresented = false
     @State private var multiSelection: Set<CheckInOption> = []
+    /// 「TOP」（タイトルへ戻る）の確認
+    @State private var isTopConfirmPresented = false
     /// 読み上げ済みの最後のもこりんの発言（同じ発言を二度読まない）
     @State private var lastSpokenMessageID: UUID? = nil
     @Environment(\.scenePhase) private var scenePhase
@@ -125,6 +127,23 @@ struct ContextCalibrationView: View {
                 .accessibilityHint("直前の答えを取り消して、ひとつ前の質問に戻ります")
                 .accessibilityIdentifier("mokorin_go_back")
                 Spacer()
+                // TOP（押し間違い・ゲストからアカウント作成への変更など。全体UI 5 ページ）。初回の会話だけ
+                if !isInAppEdit {
+                    Button("TOP") { isTopConfirmPresented = true }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Color.white.opacity(0.7))
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.white.opacity(0.35), lineWidth: 0.8))
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("タイトル画面へ戻る")
+                        .accessibilityIdentifier("mokorin_top_button")
+                }
+            }
+            .confirmationDialog("タイトル画面へ戻りますか？", isPresented: $isTopConfirmPresented, titleVisibility: .visible) {
+                Button("タイトルへ戻る", role: .destructive) { voice.cancelAll(); flowState.returnToSplash() }
+                Button("キャンセル", role: .cancel) {}
+            } message: {
+                Text("ここまでの会話は消えます。")
             }
             // 操作の説明は置かず、もこりんの問いかけそのものを案内にする
             Text("今の状況を教えてください")
@@ -132,6 +151,26 @@ struct ContextCalibrationView: View {
                 .foregroundStyle(Color.white.opacity(0.85))
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
+            // 会話の進み具合（答えた項目）。タップでその質問へ戻る
+            if !mokorin.answeredTrail.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 4) {
+                        ForEach(Array(mokorin.answeredTrail.enumerated()), id: \.element) { i, slot in
+                            if i > 0 { Text("→").font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.35)) }
+                            Button(slot.shortLabel) { voice.cancelAll(); mokorin.goBack(to: slot) }
+                                .font(.system(size: 11))
+                                .foregroundStyle(accent.opacity(0.85))
+                                .underline()
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(slot.shortLabel)の質問へ戻る")
+                        }
+                    }
+                }
+                .frame(height: 16)
+                .accessibilityIdentifier("mokorin_trail")
+            } else {
+                Color.clear.frame(height: 16)   // 位置を動かさない
+            }
         }
     }
 
@@ -398,6 +437,11 @@ struct ContextCalibrationView: View {
                         }
                     }
                     Section {
+                        Button("自分の言葉で答える") {
+                            isAllOptionsPresented = false
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { isInputFocused = true }
+                        }
+                        .accessibilityIdentifier("mokorin_own_words")
                         Button("この質問は答えない") {
                             isAllOptionsPresented = false
                             mokorin.skipQuestion()

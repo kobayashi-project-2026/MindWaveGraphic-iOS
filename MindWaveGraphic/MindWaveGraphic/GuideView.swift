@@ -19,6 +19,8 @@ struct GuideView: View {
     @State private var selectedScene: MeasurementScene? = nil
     @State private var showFlowView   = false
     @State private var showOtherSheet = false
+    /// 改善途中からの再開
+    @State private var resumeForFlow: PendingImprovement? = nil
 
     private let primaryScenes: [MeasurementScene] = [.interview, .sports, .social, .other]
 
@@ -71,8 +73,11 @@ struct GuideView: View {
             }
             #endif
         }
-        .fullScreenCover(isPresented: $showFlowView) {
-            GuideFlowView(selectedTab: $selectedTab, initialScene: selectedScene)
+        // 全体UI 14 ページ・改善資料 3 ページ: 「改善」を開いたら、場面の選択を通らずに改善方法の一覧へ（途中の改善があれば再開）
+        .onAppear { openImprovementIfNeeded() }
+        .onChange(of: selectedTab) { _, tab in if tab == 1 { openImprovementIfNeeded() } }
+        .fullScreenCover(isPresented: $showFlowView, onDismiss: { resumeForFlow = nil }) {
+            GuideFlowView(selectedTab: $selectedTab, initialScene: selectedScene, resume: resumeForFlow)
                 .environmentObject(viewModel)
                 .environmentObject(historyStore)
                 .environmentObject(flowState)
@@ -485,6 +490,16 @@ struct GuideView: View {
         case .calm: return .daily
         case .other: return .other
         }
+    }
+
+    private func openImprovementIfNeeded() {
+        guard selectedTab == 1, !showFlowView else { return }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["GUIDE_PHASE"] != nil { return }   // 既存の検証用の起動設定を優先
+        #endif
+        resumeForFlow = flowState.pendingImprovement
+        selectedScene = flowState.pendingImprovement?.scene ?? sceneFromConversation
+        showFlowView = true
     }
 
     private var mokorinStartCard: some View {

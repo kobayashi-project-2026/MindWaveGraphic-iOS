@@ -222,6 +222,8 @@ enum ReflectionAnswer: String, CaseIterable, Identifiable {
 struct MokorinReflectionView: View {
     let alternative: ImprovementMethod?
     @Binding var answer: ReflectionAnswer?
+    /// 次の改善方法を試す（ガイドのある方法のとき）
+    var onTryNext: ((ImprovementMethod) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -232,6 +234,15 @@ struct MokorinReflectionView: View {
                     .font(.system(size: 13)).foregroundStyle(.white.opacity(0.9))
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("mokorin_reflection_text")
+            }
+            // 次の改善方法の提案（合わなかったときは別の方法、合ったときも別の選択肢として）
+            if let answer, answer != .worse, let next = alternative {
+                Button { onTryNext?(next) } label: {
+                    Text("次は「\(next.title)」を試す ›").font(.system(size: 12, weight: .semibold)).foregroundStyle(accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(onTryNext == nil || next.guideExercise == nil)
+                .accessibilityIdentifier("reflection_try_next")
             }
             if answer == nil {
                 FlowChips(items: ReflectionAnswer.allCases) { a in

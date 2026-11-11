@@ -27,7 +27,7 @@ struct GlobalMenuBarModifier: ViewModifier {
                     }
 
                     Section("記録・環境設定") {
-                        menuButton(.pastLogs, label: "過去ログ確認")
+                        menuButton(.pastLogs, label: "履歴")
                         menuButton(.settings, label: "設定")
                     }
 

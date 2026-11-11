@@ -78,6 +78,21 @@ enum PrototypeScoreTests {
             T.expect(same.contains("60 → 48") && same.contains("気持ちの変化と同じとは限りません"), same)
             T.expect(TensionScoreComparison.describe(before: (nil, .subjectiveHRSDNNPrototypeV1), after: (40, .subjectiveHRSDNNPrototypeV1)).contains("比較できません"), "欠損")
         }
+        T.test("結果画面の入力: ガイド前を基準・ガイド後を時刻 t。HRV がない記録では SDNN を補わない（例: S0=75, HR 115→101 → 64.22・HR のみ）") {
+            let t = Date()
+            let before = GuideSnapshot(timestamp: t, score: 72, confidence: 0.8, state: .overTense, heartRate: 115, hrv: nil,
+                                       isMockData: false, heartRateSampleDate: t, hrvSampleDate: nil)
+            let after = GuideSnapshot(timestamp: t.addingTimeInterval(90), score: 52, confidence: 0.8, state: .optimalTension, heartRate: 101, hrv: nil,
+                                      isMockData: false, heartRateSampleDate: t.addingTimeInterval(85), hrvSampleDate: nil)
+            let input = PrototypeScoreInputBuilder.make(s0: 75, before: before, after: after)
+            T.expect(input.baselineSDNN == nil && input.currentSDNN == nil, "SDNN は作らない")
+            let r = PrototypeTensionScore.calculate(input)
+            T.expect(abs((r.score ?? -1) - 64.22) < 1e-9, "\(String(describing: r.score))")
+            T.expectEqual(r.status, .partialHROnly)
+            T.expect(PrototypeTensionScore.calculate(PrototypeScoreInputBuilder.make(s0: 75, before: before, after: nil)).hrTerm == nil, "ガイド後がなければ補正なし")
+            T.expectEqual(SubjectiveScale.from(.significantTension), 75)
+            T.expect(SubjectiveScale.from(nil) == nil, "未回答は nil")
+        }
         T.test("JSON の evaluation: 欠損は null・model_version・score_status を出す") {
             let ok = String(data: try! JSONEncoder().encode(TensionEvaluationDTO(PrototypeTensionScore.calculate(input()))), encoding: .utf8)!
             T.expect(ok.contains("\"model_version\":\"subjective_hr_sdnn_prototype_v1\"") && ok.contains("\"stress_score\":60.55"), ok)

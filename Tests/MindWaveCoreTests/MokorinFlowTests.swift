@@ -164,6 +164,18 @@ enum MokorinFlowTests {
             T.expect(vm.messages.first?.text.contains("試合") == true, "現在の状況を伝える")
             T.expectEqual(vm.measurementContext, ctx)
         }
+        await T.test("会話の進み具合: 答えた項目を順に表示し、タップした項目の質問まで戻る（後の答えも取り消す）") {
+            let vm = local()
+            vm.tap(.checkIn(.sleep(.h7to9)))
+            let second = vm.askedSlot!
+            if case .checkIn(let o)? = vm.quickReplies.first { vm.tap(.checkIn(o)) }
+            if case .checkIn(let o)? = vm.quickReplies.first { vm.tap(.checkIn(o)) }
+            T.expectEqual(Array(vm.answeredTrail.prefix(2)), [.sleep, second])
+            vm.goBack(to: second)
+            T.expectEqual(vm.askedSlot, second)
+            T.expectEqual(vm.answeredTrail, [.sleep], "後の答えは取り消し")
+            T.expectEqual(vm.checkIn.sleep?.value, .h7to9, "前の答えは残る")
+        }
         await T.test("やり直し: 会話・集めた情報・戻る履歴を消し、会話IDを更新") {
             let vm = local()
             await vm.submit("明日面接、かなり緊張")

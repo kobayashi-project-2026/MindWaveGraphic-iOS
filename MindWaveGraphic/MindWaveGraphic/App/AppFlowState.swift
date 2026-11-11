@@ -46,6 +46,12 @@ final class AppFlowState: ObservableObject {
     /// 測定前の会話でもこりんが理解した内容（結果の説明・提案で使う）。メモリのみ。保存・外部送信しない
     @Published var mokorinMemory: MokorinSessionMemory? = nil
 
+    /// 改善の途中でホームへ戻ったときの状態（全体UI 24〜25 ページ「改善途中の状態」）。メモリのみ
+    @Published var pendingImprovement: PendingImprovement? = nil
+
+    /// 試作スコアの基準（HR0・SDNN0）。会話で緊張の強さ（S0）を聞いたあとの最初の計測値。メモリのみ
+    @Published var prototypeBaseline: PrototypeBaseline? = nil
+
     // ── メモリ上の一時入力（永続化・ログ出力 禁止） ──
 
     /// 入力中のメールアドレス（メモリ上のみ。送信・保存しない）
@@ -65,10 +71,30 @@ final class AppFlowState: ObservableObject {
         isGuestUser         = false
         measurementContext  = .default
         mokorinMemory       = nil
+        pendingImprovement  = nil
+        prototypeBaseline   = nil
         inputEmail          = ""
         inputPassword       = ""
         inputUsername       = ""
         authStatus          = .logoSplash
         print("[Navigation] returnToSplash")
     }
+}
+
+
+/// 途中でやめた改善（ガイド）の状態。ホームの「改善途中」表示と、改善での再開に使う
+struct PendingImprovement: Equatable {
+    let scene: MeasurementScene
+    let exercise: GuideExercise
+    let durationSeconds: Int
+    let remainingSeconds: Int
+    let savedAt: Date
+}
+
+/// 試作スコアの基準。どの会話（S0）に対する基準かを capturedFor で区別する
+struct PrototypeBaseline: Equatable {
+    let hr: TimedReading?
+    let sdnn: TimedReading?
+    /// 対応する会話の時刻（MokorinSessionMemory.capturedAt）
+    let capturedFor: Date
 }
