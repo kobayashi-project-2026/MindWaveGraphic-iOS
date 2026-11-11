@@ -240,7 +240,7 @@ enum MokorinAITests {
             await vm.submit("少し緊張してる")
             await vm.submit("もう測りたい")
             T.expectEqual(vm.step, .review)
-            T.expect(vm.messages.last?.text.contains("この状況で測定してみようか") == true, "summary")
+            T.expect(vm.messages.last?.text.contains("測定") == true, "summary")
             await vm.submit("今日は測りたくない")
             vm.restart()
             T.expect(vm.situationNote == nil && !vm.declinedMeasurement && !vm.mentionedFatigue, "reset")

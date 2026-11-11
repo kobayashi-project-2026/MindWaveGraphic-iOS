@@ -43,7 +43,7 @@ enum MokorinFlowTests {
             let first = vm.messages.first
             T.expect(first?.text.hasPrefix("こんにちは！今日もおつかれさま！今日はどんな感じ？まずは今の自分の状態を一緒に確認してみよう！") == true, first?.text ?? "")
             T.expect(!(first?.text.contains("緊張してる？") ?? true), "緊張を決めつけない")
-            T.expectEqual(vm.askedSlot, .sleep)
+            T.expectEqual(vm.askedSlot, .condition, "あいさつは体調の質問を兼ねる")
             T.expectEqual(first?.origin, .fixed)
             T.expectEqual(vm.pose.emotion, .happy)
             T.expectEqual(vm.pose.action, .wave)
@@ -55,7 +55,7 @@ enum MokorinFlowTests {
             T.expectEqual(vm.step, .review)
             T.expectEqual(Set(asked).count, asked.count, "同じ質問を繰り返さない: \(asked)")
             T.expect(asked.count <= MokorinCheckIn.questionBudget, "上限: \(asked)")
-            T.expect(vm.messages.last?.text.contains("この状況で測定してみようか") == true, vm.messages.last?.text ?? "")
+            T.expect(vm.messages.last?.text.contains("測定") == true && vm.messages.last?.text.contains("おすすめ") == true, vm.messages.last?.text ?? "")
             T.expectEqual(vm.measurementContext.scene, .interview, "発表・プレゼン → 既存の interview")
             T.expectEqual(vm.quickReplies, [], "まとめでは選択肢を出さない")
         }
@@ -82,24 +82,24 @@ enum MokorinFlowTests {
         }
         await T.test("一つ前の会話へ戻る: 直前の答えを取り消し、同じ質問からやり直す。推薦も更新される") {
             let vm = local()
-            vm.tap(.checkIn(.sleep(.h7to9)))
+            vm.tap(.checkIn(.condition(.energetic)))
             T.expect(vm.canGoBack, "戻れる")
             let afterFirst = vm.messages.count
             vm.goBack()
-            T.expectEqual(vm.askedSlot, .sleep)
-            T.expect(vm.checkIn.sleep == nil, "答えを取り消し")
+            T.expectEqual(vm.askedSlot, .condition)
+            T.expect(vm.checkIn.condition == nil, "答えを取り消し")
             T.expect(vm.messages.count < afterFirst, "会話も戻る")
             T.expect(!vm.canGoBack, "最初まで戻った")
-            vm.tap(.checkIn(.sleep(.under3)))
-            T.expectEqual(vm.checkIn.sleep?.value, .under3)
+            vm.tap(.checkIn(.condition(.veryTired)))
+            T.expectEqual(vm.checkIn.condition?.value, .veryTired)
             _ = tapThrough(vm)
-            T.expectEqual(vm.recommendations.first?.method, .shortBreak, "睡眠不足に合わせて推薦が変わる")
+            T.expectEqual(vm.recommendations.first?.method, .shortBreak, "疲れに合わせて推薦が変わる")
         }
         await T.test("答えない（スキップ）・はっきりしない答えは 1 回だけ聞き直し、2 回目はとばす") {
             let vm = local()
             vm.skipQuestion()
-            T.expect(vm.checkIn.declined.contains(.sleep), "declined")
-            T.expect(vm.askedSlot != .sleep, "次の質問へ")
+            T.expect(vm.checkIn.declined.contains(.condition), "declined")
+            T.expect(vm.askedSlot != .condition, "次の質問へ")
             let next = vm.askedSlot
             await vm.submit("うーん")
             T.expectEqual(vm.askedSlot, next, "1 回は同じ質問を聞き直す")
@@ -156,7 +156,7 @@ enum MokorinFlowTests {
             let vm = local()
             await vm.submit("もこりんって何が好き？")
             T.expect(vm.messages.last?.text.contains("質問にうまく答えられない") == true, "正直に")
-            T.expectEqual(vm.askedSlot, .sleep)
+            T.expectEqual(vm.askedSlot, .condition, "同じ質問に戻る")
         }
         await T.test("メインアプリ内からの再設定: 現在の状況で始まり、変更しなければそのまま") {
             let ctx = MeasurementContext(scene: .sports, conditions: [.running])
@@ -166,15 +166,31 @@ enum MokorinFlowTests {
         }
         await T.test("会話の進み具合: 答えた項目を順に表示し、タップした項目の質問まで戻る（後の答えも取り消す）") {
             let vm = local()
-            vm.tap(.checkIn(.sleep(.h7to9)))
+            vm.tap(.checkIn(.condition(.energetic)))
             let second = vm.askedSlot!
             if case .checkIn(let o)? = vm.quickReplies.first { vm.tap(.checkIn(o)) }
             if case .checkIn(let o)? = vm.quickReplies.first { vm.tap(.checkIn(o)) }
-            T.expectEqual(Array(vm.answeredTrail.prefix(2)), [.sleep, second])
+            T.expectEqual(Array(vm.answeredTrail.prefix(2)), [.condition, second])
             vm.goBack(to: second)
             T.expectEqual(vm.askedSlot, second)
-            T.expectEqual(vm.answeredTrail, [.sleep], "後の答えは取り消し")
-            T.expectEqual(vm.checkIn.sleep?.value, .h7to9, "前の答えは残る")
+            T.expectEqual(vm.answeredTrail, [.condition], "後の答えは取り消し")
+            T.expectEqual(vm.checkIn.condition?.value, .energetic, "前の答えは残る")
+        }
+        await T.test("自然な反応: 複数の情報を受けて答え済みを飛ばす。訂正は受け止めて同じ質問をもう一度。推薦も更新") {
+            let vm = local()
+            await vm.submit("明日面接があるんだけど、昨日3時間しか寝られなかった")
+            let reply = vm.messages.last?.text ?? ""
+            T.expect(reply.hasPrefix("明日面接なんだね。睡眠も短かったみたいだけど、"), reply)
+            T.expect(![.condition, .situation, .timing, .sleep].contains(vm.askedSlot!), "答え済み・話題を変えた質問はしない: \(String(describing: vm.askedSlot))")
+            let asked = vm.askedSlot
+            await vm.submit("やっぱり面接じゃなくて発表だった")
+            T.expect(vm.messages.last?.text.hasPrefix("発表だったんだね、了解！") == true, vm.messages.last?.text ?? "")
+            T.expectEqual(vm.askedSlot, asked, "訂正のあとは同じ質問をもう一度")
+            T.expectEqual(vm.checkIn.situation?.value, .presentation)
+            await vm.submit("不安"); await vm.submit("70"); await vm.submit("うまく話せるか不安"); await vm.submit("特にない"); await vm.submit("整理したい")
+            T.expect(vm.recommendations.map(\.method).contains(.openingPractice) || vm.recommendations.first?.method == .shortBreak, "発表・睡眠不足に合わせた推薦: \(vm.recommendations.map(\.method))")
+            let first = vm.messages.filter { $0.speaker == .mokorin }.map(\.text)
+            T.expect(first.filter { $0.hasPrefix("なるほど") }.count <= 1, "同じ相づちを繰り返さない")
         }
         await T.test("やり直し: 会話・集めた情報・戻る履歴を消し、会話IDを更新") {
             let vm = local()

@@ -1011,7 +1011,7 @@ struct GuideFlowView: View {
 
             // ── 呼吸ビジュアル（大型・邪魔なし）。拡大した分（scaleEffect はレイアウトの大きさを変えない）を下に確保し、残り時間と重ねない
             sessionVisual
-                .padding(.bottom, isCompactHeight ? 22 : (sessionIsRunning ? 52 : 30))
+                .padding(.bottom, isCompactHeight ? 36 : (sessionIsRunning ? 52 : 30))
 
             // ── 残り時間表示
             VStack(spacing: 2) {
@@ -1022,7 +1022,7 @@ struct GuideFlowView: View {
                 }
                 HStack(alignment: .lastTextBaseline, spacing: 5) {
                     Text(sessionTimeString)
-                        .font(.system(size: isCompactHeight ? 44 : 64, weight: .thin, design: .rounded))
+                        .font(.system(size: isCompactHeight ? 40 : 64, weight: .thin, design: .rounded))
                         .foregroundStyle(.white.opacity(sessionIsFinished ? 0.22 : 0.88))
                         .monospacedDigit()
                         .contentTransition(.numericText())

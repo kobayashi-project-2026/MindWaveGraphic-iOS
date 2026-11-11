@@ -457,7 +457,7 @@ nonisolated enum CheckInExtractor {
         if let situation {
             e.situation = situation
             if situation != .restless { e.situationNote = MokorinSessionMemory.clippedNote(raw) }
-        } else if asked == .situation, !text.isEmpty, !isUnsure(text) {
+        } else if asked == .situation, !isFiller(text), !isUnsure(text) {
             e.situation = .other
             e.situationNote = MokorinSessionMemory.clippedNote(raw)
         }
@@ -515,6 +515,13 @@ nonisolated enum CheckInExtractor {
         guard let r = markers.compactMap({ text.range(of: $0, options: .backwards) }).max(by: { $0.upperBound < $1.upperBound }) else { return text }
         let tail = String(text[r.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
         return tail.count >= 2 ? tail : text
+    }
+
+    /// 「うーん」「えーと」など、答えになっていない短い言葉（「その他」の場面として記録しない）
+    static func isFiller(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if t.count < 3 { return true }
+        return ["うーん", "えーと", "えっと", "んー", "うーむ", "あー", "えー", "特にない", "なし"].contains { t.hasPrefix($0) && t.count <= $0.count + 2 }
     }
 
     static func isUnsure(_ text: String) -> Bool {

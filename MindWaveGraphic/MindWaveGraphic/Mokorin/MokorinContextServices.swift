@@ -178,7 +178,7 @@ nonisolated enum MokorinScript {
     /// 反応と質問をつなぐ（「睡眠も短かったみたいだね。」＋質問 →「睡眠も短かったみたいだけど、」＋質問）
     static func join(reaction: String?, question: String) -> String {
         guard let r = reaction else { return question }
-        if r.hasSuffix("みたいだね。") { return String(r.dropLast(3)) + "けど、" + question }
+        if r.hasSuffix("みたいだね。") { return String(r.dropLast(2)) + "けど、" + question }   // 「〜みたいだね。」→「〜みたいだけど、」
         return r + question
     }
 
