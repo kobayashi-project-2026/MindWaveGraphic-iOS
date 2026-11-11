@@ -112,6 +112,46 @@ struct HomeView: View {
 
     private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
 
+    /// 現在の状態のカード（2026-11-11 改修: 状態・大きな数値・データの種類を一目で）
+    private var statusHero: some View {
+        let score = Int(displayInput.score.rounded())
+        let label: String = {
+            switch displayState {
+            case .underAroused: return "落ち着いている"
+            case .optimalTension: return "適度な緊張"
+            case .overTense: return "緊張が高め"
+            }
+        }()
+        let source: (text: String, color: Color) = {
+            if let p = prototypeLive { return ("試作スコア・" + (p.status == .subjectiveOnly ? "本人の評価のみ" : p.status == .complete ? "評価＋心拍・SDNN" : "評価＋一部の生体情報"), .cyan) }
+            if !hasDisplayData { return ("未計測", Color.white.opacity(0.5)) }
+            return viewModel.isMockMode ? ("デモ値", .orange) : ("実測", .green)
+        }()
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("今の状態")
+                .font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.55))
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(hasDisplayData || prototypeLive != nil ? "\(score)" : "--")
+                    .font(.system(size: 34, weight: .thin, design: .rounded))
+                    .foregroundStyle(accentColor)
+                    .contentTransition(.numericText())
+                Text(hasDisplayData || prototypeLive != nil ? label : "計測前")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+            }
+            Text(source.text)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(source.color)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Capsule().fill(source.color.opacity(0.15)))
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.45))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(accentColor.opacity(0.35), lineWidth: 0.8)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("今の状態 \(hasDisplayData || prototypeLive != nil ? "\(score) \(label)" : "計測前")。\(source.text)")
+        .accessibilityIdentifier("home_status_hero")
+    }
+
     /// 表示中のスコアから決めた状態（グラフィックの色と一致させる）
     private var displayState: MindState { MindState.from(score: displayInput.score) }
 
@@ -198,13 +238,22 @@ struct HomeView: View {
                     Spacer()
                     HStack {
                         Spacer()
-                        MokorinEdgeGuide(state: displayState, isActive: edgeGuideActive) { selectedTab = 1 }
+                        MokorinEdgeGuide(state: displayState, isActive: true, hasData: edgeGuideActive) { selectedTab = 1 }
                             .padding(.trailing, 10)
                             .padding(.bottom, 12)
                     }
                 }
                 .frame(height: graphicH)
                 .zIndex(40)
+
+                // 5c'. 現在の状態（大きな数値・状態・データの種類）。グラフィックの中央を隠さないよう左上に置く
+                HStack {
+                    statusHero
+                    Spacer()
+                }
+                .padding(.top, 96)
+                .padding(.horizontal, 16)
+                .zIndex(44)
 
                 // 5c. 緊張の高まりの知らせ（全体UI 10 ページ）と改善途中（24〜25 ページ）。医学的な警告ではない
                 VStack(spacing: 6) {
@@ -216,15 +265,6 @@ struct HomeView: View {
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color(red: 0.55, green: 0.08, blue: 0.08).opacity(0.9)))
                             .transition(.move(edge: .top).combined(with: .opacity))
                             .accessibilityIdentifier("tension_banner")
-                    }
-                    if let p = prototypeLive, let s = p.score {
-                        Text("試作スコア \(Int(s.rounded()))・\(p.statusLabel)")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .padding(.horizontal, 10).padding(.vertical, 3)
-                            .background(Capsule().fill(Color.black.opacity(0.45)))
-                            .accessibilityLabel("試作スコア \(Int(s.rounded()))。\(p.statusLabel)。医学的に検証された値ではありません")
-                            .accessibilityIdentifier("prototype_live_score")
                     }
                     if let p = flowState.pendingImprovement {
                         Button { selectedTab = 1 } label: {
@@ -238,7 +278,7 @@ struct HomeView: View {
                         .accessibilityIdentifier("pending_improvement")
                     }
                 }
-                .padding(.top, 56)
+                .padding(.top, 60)
                 .zIndex(45)
                 .animation(.easeInOut(duration: 0.3), value: showTensionBanner)
 
@@ -264,7 +304,8 @@ struct HomeView: View {
         .onChange(of: viewModel.snapshotHeartRate) { _, _ in captureBaselineIfNeeded() }
         .onChange(of: viewModel.snapshotHRV) { _, _ in captureBaselineIfNeeded() }
         .onChange(of: displayState) { old, new in
-            guard new == .overTense, old != .overTense, edgeGuideActive else { return }
+            // 実測値のときだけ（デモ値・未計測では出さない）
+            guard new == .overTense, old != .overTense, hasDisplayData, !viewModel.isMockMode else { return }
             showTensionBanner = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 5) { showTensionBanner = false }
         }
@@ -1190,14 +1231,14 @@ struct CockpitLeverNav: View {
                     } label: {
                         VStack(spacing: 2) {
                             Image(systemName: item.icon)
-                                .font(.system(size: 11, weight: active ? .semibold : .ultraLight))
+                                .font(.system(size: 15, weight: active ? .semibold : .light))
                                 .foregroundStyle(active ? accentColor : Color.white.opacity(0.22))
                                 .shadow(color: active ? accentColor.opacity(0.65) : .clear, radius: 4)
                             Text(item.label)
-                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                                .foregroundStyle(active ? accentColor.opacity(0.88) : Color.white.opacity(0.20))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(active ? accentColor : Color.white.opacity(0.62))
                         }
-                        .frame(maxWidth: .infinity).frame(height: 26)
+                        .frame(maxWidth: .infinity).frame(height: 36)
                         .overlay {
                             if item.tab == 1 && highlightImprove && !active {
                                 RoundedRectangle(cornerRadius: 6).strokeBorder(Color.yellow.opacity(0.85), lineWidth: 1.2)

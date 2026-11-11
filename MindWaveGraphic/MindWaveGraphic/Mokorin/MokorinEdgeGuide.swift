@@ -11,8 +11,10 @@ import SwiftUI
 
 struct MokorinEdgeGuide: View {
     let state: MindState
-    /// 計測データがあるときだけ出す
+    /// 表示するか
     let isActive: Bool
+    /// 計測データがあるか（ないときは計測を案内するだけで、状態は伝えない）
+    var hasData: Bool = true
     let onImprove: () -> Void
 
     @State private var visible = false
@@ -28,7 +30,7 @@ struct MokorinEdgeGuide: View {
     }
 
     var body: some View {
-        let m = Self.message(for: state)
+        let m = hasData ? Self.message(for: state) : (text: "計測を始めると、\n今の状態をお知らせするね！", actionable: false)
         ZStack(alignment: .bottomTrailing) {
             if visible && isActive && dismissedState != state {
                 HStack(alignment: .bottom, spacing: 4) {
@@ -68,12 +70,13 @@ struct MokorinEdgeGuide: View {
         .onAppear { show() }
         .onChange(of: state) { _, _ in dismissedState = nil; show() }
         .onChange(of: isActive) { _, _ in show() }
+        .onChange(of: hasData) { _, _ in dismissedState = nil; show() }
     }
 
     private func show() {
         hideTask?.cancel()
         visible = isActive
-        guard isActive, !Self.message(for: state).actionable else { return }
+        guard isActive, !(hasData && Self.message(for: state).actionable) else { return }
         // 改善の案内でないときは数秒で隠れる（グラフィックを主役にする）
         hideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(8))

@@ -561,7 +561,8 @@ struct ContextCalibrationView: View {
         .padding(.top, 10)
         .padding(.bottom, 6)
         .background(
-            LinearGradient(colors: [Color.black.opacity(0.0), Color.black.opacity(0.95)], startPoint: .top, endPoint: .center)
+            Color.black.opacity(0.96)
+                .overlay(alignment: .top) { Rectangle().fill(Color.white.opacity(0.06)).frame(height: 0.5) }
                 .ignoresSafeArea(edges: .bottom)
         )
     }
