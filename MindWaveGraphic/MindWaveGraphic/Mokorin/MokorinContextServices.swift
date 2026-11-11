@@ -118,6 +118,9 @@ nonisolated enum MokorinScript {
             + "\(slot.question)\n下から選んでも、「答えない」でとばしても大丈夫だよ。"
     }
 
+    /// 一般的な相づち（続けて同じものを使わない）
+    static let genericAcks = ["そっか。", "なるほど。", "教えてくれてありがとう。", "うんうん。"]
+
     /// 答えへの短い反応（同じ相づちを続けない。睡眠・体調・気持ちには具体的に返す）
     static func checkInReaction(changed: Set<CheckInSlot>, checkIn c: MokorinCheckIn, turn: Int) -> String? {
         if changed.contains(.condition), let v = c.condition?.value {
@@ -143,8 +146,7 @@ nonisolated enum MokorinScript {
             return "呼吸が浅い・苦しい感じがあるんだね。苦しさが強いときは、無理をせず休んでね。"
         }
         if changed.isEmpty { return nil }
-        let acks = ["そっか。", "なるほど。", "教えてくれてありがとう。", "うんうん。"]
-        return acks[abs(turn) % acks.count]
+        return genericAcks[abs(turn) % genericAcks.count]
     }
 
     /// 質問を終えたときのまとめ（推薦は理由つきで最大 2 つ。測定・改善へ進むかは本人が決める）

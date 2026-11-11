@@ -28,6 +28,9 @@ struct GuideView: View {
         VStack(spacing: 0) {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 20) {
+                    // 改善資料 3 ページ: 会話で分かった状況を引き継ぎ、場面の選択を飛ばして方法の選択へ
+                    mokorinStartCard
+                        .padding(.horizontal, 20)
                     selectionHint
                         .padding(.horizontal, 20)
                     sceneGrid
@@ -59,7 +62,8 @@ struct GuideView: View {
             print("[UI][Guide] view_appeared")
             #if DEBUG
             if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session"
-               || ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "result" {
+               || ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "result"
+               || ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "select" {
                 selectedScene = .interview
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
                     showFlowView = true
@@ -213,10 +217,11 @@ struct GuideView: View {
                     }
                 }
             }
-            Text("整える")
+            // 2026-11-11 改善資料 2 ページ: 下部メニューの「整える」を「改善」に
+            Text("改善")
                 .font(.system(size: 26, weight: .bold))
                 .foregroundStyle(Color.white)
-            Text("シチュエーションを選んで呼吸ガイドを開始します")
+            Text("もこりんのおすすめから、改善方法を選べます")
                 .font(.system(size: 12))
                 .foregroundStyle(Color.white.opacity(0.38))
                 .tracking(0.1)
@@ -460,6 +465,53 @@ struct GuideView: View {
     }
 
     // MARK: - CTA セクション
+
+    /// 会話（測定前）の場面から、ガイドの場面（MeasurementScene）を決める
+    private var sceneFromConversation: MeasurementScene {
+        if let s = flowState.mokorinMemory?.checkIn?.situation?.value {
+            switch s {
+            case .presentation: return .speech
+            case .interviewExam: return .interview
+            case .communication, .importantEvent: return .social
+            case .restless: return .daily
+            case .other: return .other
+            }
+        }
+        switch flowState.measurementContext.scene {
+        case .interview: return .interview
+        case .sports: return .sports
+        case .important: return .social
+        case .work: return .study
+        case .calm: return .daily
+        case .other: return .other
+        }
+    }
+
+    private var mokorinStartCard: some View {
+        let recs = MokorinMethodAdvisor.recommend(flowState.mokorinMemory?.checkIn ?? MokorinCheckIn())
+        return HStack(alignment: .center, spacing: 10) {
+            MokorinAvatarView(size: 52, pose: MokorinPose().with(.happy, .wave))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(recs.first.map { "今日は「\($0.method.title)」がおすすめだよ！" } ?? "話した内容に合わせて、方法を選ぼう！")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    selectedScene = sceneFromConversation
+                    showFlowView = true
+                } label: {
+                    Text("方法を選ぶ ›").font(.system(size: 13, weight: .semibold)).foregroundStyle(.black)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(Capsule().fill(Color.cyan.opacity(0.9)))
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("場面の選択を飛ばして、改善方法の選択へ進みます")
+                .accessibilityIdentifier("guide_start_with_mokorin")
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.05)))
+    }
 
     private var ctaSection: some View {
         VStack(spacing: 0) {

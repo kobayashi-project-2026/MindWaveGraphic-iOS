@@ -37,6 +37,9 @@ struct ContextCalibrationView: View {
     @FocusState private var isInputFocused: Bool
     @State private var isEditing = false
     @State private var isHistoryPresented = false
+    /// 「ほかの答え・答えない」（今の質問の全部の選択肢。複数選べる項目はまとめて決定）
+    @State private var isAllOptionsPresented = false
+    @State private var multiSelection: Set<CheckInOption> = []
     /// 読み上げ済みの最後のもこりんの発言（同じ発言を二度読まない）
     @State private var lastSpokenMessageID: UUID? = nil
     @Environment(\.scenePhase) private var scenePhase
@@ -67,14 +70,15 @@ struct ContextCalibrationView: View {
                 VStack(spacing: 14) {
                     header
                         .padding(.top, 8)
-                    Spacer(minLength: 0)
+                    // もこりんの位置は返答の長さで動かさない（会話は下の領域でスクロール）。2026-11-11 改善資料 1 ページ
                     characterStage(size: characterSize(for: geo.size.height))
-                    // 長い返答・小さい画面で収まらないときだけスクロールにする（収まるときは従来どおり）
-                    ViewThatFits(in: .vertical) {
-                        conversationArea
-                        ScrollView(showsIndicators: false) { conversationArea }
+                    ScrollViewReader { proxy in
+                        ScrollView(showsIndicators: false) {
+                            conversationArea.id("conversation")
+                        }
+                        .onChange(of: mokorin.messages.count) { _, _ in proxy.scrollTo("conversation", anchor: .top) }
                     }
-                    Spacer(minLength: 0)
+                    .frame(maxHeight: .infinity, alignment: .top)
                 }
                 .padding(.horizontal, 20)
                 .frame(width: geo.size.width)
@@ -83,6 +87,7 @@ struct ContextCalibrationView: View {
         }
         .sheet(isPresented: $isEditing) { editSheet }
         .sheet(isPresented: $isHistoryPresented) { historySheet }
+        .sheet(isPresented: $isAllOptionsPresented) { allOptionsSheet }
         .onAppear { connectVoice() }
         .onDisappear { voice.cancelAll() }
         // VoiceOver: 録音の開始と、音声入力の問題（原因ごとの文言）を読み上げで知らせる
@@ -105,12 +110,29 @@ struct ContextCalibrationView: View {
     // MARK: - Header（必要最低限）
 
     private var header: some View {
-        // 操作の説明は置かず、もこりんの問いかけそのものを案内にする
-        Text("今の状況を教えてください")
-            .font(.system(size: 17, weight: .medium))
-            .foregroundStyle(Color.white.opacity(0.85))
-            .multilineTextAlignment(.center)
-            .accessibilityAddTraits(.isHeader)
+        VStack(spacing: 6) {
+            // 一つ前の会話へ戻る（左上）。履歴へ移らずに、直前の答えをその場でやり直す。戻れないときも場所は確保して位置を動かさない
+            HStack {
+                Button { voice.cancelAll(); mokorin.goBack() } label: {
+                    Label("一つ前の会話へ戻る", systemImage: "chevron.left")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.white.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .opacity(mokorin.canGoBack ? 1 : 0)
+                .disabled(!mokorin.canGoBack)
+                .accessibilityHidden(!mokorin.canGoBack)
+                .accessibilityHint("直前の答えを取り消して、ひとつ前の質問に戻ります")
+                .accessibilityIdentifier("mokorin_go_back")
+                Spacer()
+            }
+            // 操作の説明は置かず、もこりんの問いかけそのものを案内にする
+            Text("今の状況を教えてください")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.85))
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+        }
     }
 
     // MARK: - 中央のもこりん
@@ -335,6 +357,72 @@ struct ContextCalibrationView: View {
                 }
             }
         }
+        // ほかの答え（全部の選択肢）・この質問はとばす
+        if let slot = mokorin.askedSlot, mokorin.step != .review, mokorin.failedText == nil, !mokorin.declinedMeasurement {
+            Button {
+                multiSelection = []
+                isAllOptionsPresented = true
+            } label: {
+                Text(slot.allowsMultiple ? "ほかの答え・複数選ぶ・答えない" : "ほかの答え・答えない")
+                    .font(.system(size: 12))
+                    .foregroundStyle(accent.opacity(0.9))
+            }
+            .buttonStyle(.plain)
+            .disabled(mokorin.isSending || voice.isListening)
+            .accessibilityIdentifier("mokorin_all_options")
+        }
+    }
+
+    /// 今の質問の全部の選択肢（音声・文字でも答えられる。ここは補助）
+    private var allOptionsSheet: some View {
+        NavigationStack {
+            List {
+                if let slot = mokorin.askedSlot {
+                    Section(slot.question) {
+                        ForEach(slot.options, id: \.self) { option in
+                            Button {
+                                if slot.allowsMultiple {
+                                    if multiSelection.contains(option) { multiSelection.remove(option) } else { multiSelection.insert(option) }
+                                } else {
+                                    isAllOptionsPresented = false
+                                    mokorin.answer(options: [option])
+                                }
+                            } label: {
+                                HStack {
+                                    Text(option.label).foregroundStyle(.primary)
+                                    Spacer()
+                                    if multiSelection.contains(option) { Image(systemName: "checkmark").foregroundStyle(accent) }
+                                }
+                            }
+                            .accessibilityAddTraits(multiSelection.contains(option) ? .isSelected : [])
+                        }
+                    }
+                    Section {
+                        Button("この質問は答えない") {
+                            isAllOptionsPresented = false
+                            mokorin.skipQuestion()
+                        }
+                        .accessibilityIdentifier("mokorin_skip_question")
+                    }
+                }
+            }
+            .navigationTitle("ほかの答え")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("閉じる") { isAllOptionsPresented = false } }
+                if mokorin.askedSlot?.allowsMultiple == true {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("決定") {
+                            isAllOptionsPresented = false
+                            mokorin.answer(options: Array(multiSelection))
+                        }
+                        .disabled(multiSelection.isEmpty)
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .presentationDetents([.medium, .large])
     }
 
     // MARK: - 下部（測定ボタン・マイク・文字入力）

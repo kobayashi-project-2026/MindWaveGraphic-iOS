@@ -648,7 +648,9 @@ final class MokorinContextViewModel: ObservableObject {
         } else {
             markReadyWithCurrentSelection()
             step = .review
-            appendMokorin([reaction, MokorinScript.checkInSummary(checkIn, recommendations: recommendations)].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
+            // まとめは「教えてくれてありがとう。」で始まるため、一般的な相づちは重ねない（具体的な反応だけ添える）
+            let specific = reaction.flatMap { MokorinScript.genericAcks.contains($0) ? nil : $0 }
+            appendMokorin([specific, MokorinScript.checkInSummary(checkIn, recommendations: recommendations)].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
             setPose(checkIn.needsRestFirst ? .sad : .happy, .nod)
         }
     }

@@ -253,7 +253,7 @@ struct MainTabView: View {
                 .animation(.easeInOut(duration: 1.0), value: si)
 
                 // Home / 整える / 履歴 のレバー（HomeView と同一コンポーネント）
-                CockpitLeverNav(selectedTab: selectedTabBinding, accentColor: ac)
+                CockpitLeverNav(selectedTab: selectedTabBinding, accentColor: ac) { navManager.navigate(to: .dialogue) }
                     .padding(.horizontal, 12)
                     .frame(height: 44)
             }

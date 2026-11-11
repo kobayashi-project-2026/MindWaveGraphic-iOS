@@ -73,6 +73,14 @@ struct HomeView: View {
 
     private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
 
+    /// 小さなもこりんを出すか（計測データがあるときだけ。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ表示でも出す）
+    private var edgeGuideActive: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MW_EDGE_GUIDE_DEMO"] == "1" { return true }
+        #endif
+        return hasDisplayData
+    }
+
     private var scoreIntensity: Double { min(max(displayInput.score / 100.0, 0), 1) }
 
     private var accentColor: Color {
@@ -142,6 +150,19 @@ struct HomeView: View {
                 .frame(height: graphicH)
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
+
+                // 5b. 小さなもこりん（現在の評価に合わせて画面の端に現れる。押すと改善へ）
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        MokorinEdgeGuide(state: MindState.from(score: displayInput.score), isActive: edgeGuideActive) { selectedTab = 1 }
+                            .padding(.trailing, 10)
+                            .padding(.bottom, 12)
+                    }
+                }
+                .frame(height: graphicH)
+                .zIndex(40)
 
                 // 6. ヘッダー
                 headerBar
@@ -281,7 +302,7 @@ struct HomeView: View {
 
             VStack(spacing: 0) {
                 panelTopRip
-                CockpitLeverNav(selectedTab: $selectedTab, accentColor: accentColor)
+                CockpitLeverNav(selectedTab: $selectedTab, accentColor: accentColor) { navManager.navigate(to: .dialogue) }
                     .padding(.horizontal, 14)
                     .frame(height: 42)
                     .padding(.top, 4)
@@ -1049,15 +1070,20 @@ private struct MetalPanelBackground: View {
 struct CockpitLeverNav: View {
     @Binding var selectedTab: Int
     let accentColor: Color
+    /// 「対話」（もこりんとの会話を開く）。2026-11-11 改善資料 2 ページ: 下部メニューを「対話」「改善」に変更。
+    /// 履歴は共通メニューの「過去ログ確認」から開ける
+    var onDialogue: () -> Void = {}
 
+    /// 対話はタブではなく会話の画面を開くため、レバーは改善（0）とホーム（1）の位置だけを示す
     private var leverPos: Int {
-        switch selectedTab { case 1: return 0; case 2: return 2; default: return 1 }
+        switch selectedTab { case 1: return 0; default: return 1 }
     }
 
+    /// tab = -1 は「対話」
     private let navItems: [(label: String, icon: String, tab: Int)] = [
-        ("整える", "wind",       1),
-        ("ホーム",  "house.fill", 0),
-        ("履歴",   "clock.fill",  2),
+        ("改善", "wind",       1),
+        ("ホーム", "house.fill", 0),
+        ("対話", "bubble.left.and.bubble.right.fill", -1),
     ]
 
     var body: some View {
@@ -1067,6 +1093,7 @@ struct CockpitLeverNav: View {
                     let item = navItems[i]
                     let active = selectedTab == item.tab
                     Button {
+                        if item.tab < 0 { onDialogue(); return }
                         withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
                             selectedTab = item.tab
                         }
@@ -1085,7 +1112,7 @@ struct CockpitLeverNav: View {
                     }
                     .buttonStyle(.plain)
                     .animation(.easeInOut(duration: 0.18), value: active)
-                    .accessibilityIdentifier(item.tab == 1 ? "nav_calm" : item.tab == 0 ? "nav_home" : "nav_history")
+                    .accessibilityIdentifier(item.tab == 1 ? "nav_calm" : item.tab == 0 ? "nav_home" : "nav_dialogue")
                 }
             }
 
@@ -1162,9 +1189,9 @@ struct CockpitLeverNav: View {
                         .onEnded { v in
                             withAnimation {
                                 if v.translation.width > 40 {
-                                    selectedTab = leverPos == 0 ? 0 : leverPos == 1 ? 2 : 2
+                                    if leverPos == 0 { selectedTab = 0 } else { onDialogue() }
                                 } else if v.translation.width < -40 {
-                                    selectedTab = leverPos == 2 ? 0 : leverPos == 1 ? 1 : 1
+                                    selectedTab = 1
                                 }
                             }
                         }
