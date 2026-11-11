@@ -12,6 +12,7 @@
 // 返答の先頭には必ず「（スタブ応答…）」と付け、実際の AI の返答と取り違えないようにしている。
 
 import { FIXED_CAUTION } from "../src/contract.ts";
+import { SLOT_QUESTIONS, normalizeCheckIn } from "../src/checkin.ts";
 
 export type StubMode = "ok" | "timeout" | "http_500" | "http_429" | "http_401" | "refusal" | "invalid_json" | "prohibited" | "invalid_candidate";
 
@@ -87,8 +88,16 @@ export function stubContextResult(body: Record<string, unknown>): Record<string,
   } else {
     reply = inTensionStep ? "そっか。今の気持ちは、少し緊張・かなり緊張・落ち着いてる のどれに近い？" : "もう少し教えてくれる？これから何か予定があるの？";
   }
+  // 会話の情報（STEP 0〜6）を使う新しいアプリには、次に尋ねる候補の質問を返す（機械的な決め方）
+  const remaining = /次に尋ねる候補（優先順）: ([a-z_,]+)/.exec(note)?.[1]?.split(",") ?? null;
+  const asking = /今尋ねている項目: ([a-z_]+)/.exec(note)?.[1];
+  if (remaining) {
+    const next = remaining.find((slot) => slot !== asking);
+    reply = next ? `${scene || conds.length || tension ? "教えてくれてありがとう。" : "そっか。"}${SLOT_QUESTIONS[next] ?? ""}` : "教えてくれてありがとう。この状況で測定してみようか？";
+  }
   return {
     reply,
+    check_in: normalizeCheckIn({ tension_level: tension === "high" ? 75 : tension === "slight" ? 20 : tension === "calm" ? 0 : null }),
     scene_candidate: scene,
     condition_candidates: conds,
     needs_clarification: needs,

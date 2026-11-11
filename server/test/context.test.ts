@@ -66,7 +66,8 @@ test("Structured Outputs: strict・全項目 required・候補は既存 enum に
   assert.equal(body.store, false);
   const input = body.input as Array<{ role: string; content: string }>;
   assert.deepEqual(input.map((m) => m.role), ["developer", "assistant", "user"]);
-  assert.ok(!JSON.stringify(body).match(/heart|hrv|bpm|sk-/i));
+  // 計測値の項目がない（本人が話す「心臓がドキドキ」= heart_pounding や、禁止を述べる指示文は対象外）
+  assert.ok(!JSON.stringify(body).match(/heart_rate|hrv_sdnn|"hrv"|"sdnn"|bpm|sk-/i));
 });
 
 test("結果の検証: 未知の候補・型不正・医療的表現は不採用、none と他の状態の同時指定は none を外す", () => {
@@ -258,4 +259,47 @@ test("スタブ: 測定を望まない・質問・場面にない予定（試験
 test("指示: 過去の出来事は予定（場面）として扱わない（2026-11-05 の実通信で「昨日の試験」が work になった）", () => {
   const body = buildContextResponsesRequest(request(FIRST), { model: "m", maxOutputTokens: 100 });
   assert.ok(String(body.instructions).includes("過去の出来事は、これからの予定ではない"));
+});
+
+test("2026-11-11 会話の情報（check_in）: 要求で受け取り developer メッセージに入れる。不正な値は 400。古いアプリ（項目なし）も可", async () => {
+  const { handler } = setup();
+  const checkIn = { sleep: "5_7h", activity: null, condition: null, situation: "interview_exam", timing: null, emotion: null, tension_level: 75,
+    causes: [], body_signals: ["heart_pounding"], support: null, declined: ["activity"], asked: ["sleep", "situation"], remaining_slots: ["timing", "emotion", "support"] };
+  const ok = await handler(post(request(FIRST, { current: { scene: null, conditions: [], check_in: checkIn, next_slot: "timing" } })), ENV);
+  assert.equal(ok.status, 200);
+  const body = buildContextResponsesRequest({ ...(JSON.parse(JSON.stringify(request(FIRST))) as any), current: { scene: null, conditions: [], check_in: checkIn, next_slot: "timing" } }, { model: "m", maxOutputTokens: 100 }) as any;
+  const note = String(body.input[0].content);
+  assert.ok(note.includes("場面=interview_exam") && note.includes("緊張の強さ(0〜100)=75") && note.includes("次に尋ねる候補（優先順）: timing,emotion,support"), note);
+  const bad = await handler(post(request(FIRST, { current: { scene: null, conditions: [], check_in: { ...checkIn, emotion: "dance" } } })), ENV);
+  assert.equal(bad.status, 400);
+  const badTension = await handler(post(request(FIRST, { current: { scene: null, conditions: [], check_in: { ...checkIn, tension_level: 150 } } })), ENV);
+  assert.equal(badTension.status, 400);
+});
+
+test("check_in の出力: strict の schema（全項目 required・null 可）。未知の値は採用しない。none と具体的な症状は同時に出さない", async () => {
+  const schema = CONTEXT_JSON_SCHEMA as any;
+  assert.ok(schema.required.includes("check_in"));
+  const ci = schema.properties.check_in;
+  assert.equal(ci.additionalProperties, false);
+  assert.deepEqual([...ci.required].sort(), Object.keys(ci.properties).sort());
+  const base = { reply: "明日の面接なんだね。今の気持ちは？", scene_candidate: "interview", condition_candidates: [], needs_clarification: false,
+    clarification_question: null, tension_candidate: null, emotion: "calm", action: "nod", situation_note: null, user_intent: "answer" };
+  const r = validateContextResult({ ...base, check_in: { sleep: "lots", activity: null, condition: null, situation: "interview_exam", timing: "tomorrow_or_later",
+    emotion: null, tension_level: 300, causes: ["failure", "x"], body_signals: ["none", "trembling"], support: null, declined: [] } });
+  assert.ok(r.ok);
+  assert.equal(r.value.check_in.sleep, null);
+  assert.equal(r.value.check_in.tension_level, null);
+  assert.deepEqual(r.value.check_in.causes, ["failure"]);
+  assert.deepEqual(r.value.check_in.body_signals, ["trembling"]);
+  const old = validateContextResult(base);
+  assert.ok(old.ok && old.value.check_in.situation === null, "check_in なしの出力でも動く");
+  assert.ok(String(buildContextResponsesRequest(request(FIRST), { model: "m", maxOutputTokens: 100 }).instructions).includes("気持ちの種類（emotion）と緊張の強さ（tension_level）は別"));
+});
+
+test("スタブ: 次に尋ねる候補があれば、その質問を 1 つ返す（今尋ねている項目はとばす）", async () => {
+  const { stubContextResult } = await import("../scripts/stub-openai.ts");
+  const r = stubContextResult({ input: [{ role: "developer", content: "現在の段階: tension。 次に尋ねる候補（優先順）: sleep,condition,situation。今尋ねている項目: sleep。" },
+    { role: "user", content: "6時間くらい" }] }) as any;
+  assert.match(r.reply, /今の体調はどう？/);
+  assert.ok(r.check_in && "tension_level" in r.check_in);
 });

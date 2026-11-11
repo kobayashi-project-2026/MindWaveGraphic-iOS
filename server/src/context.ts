@@ -9,6 +9,7 @@
 //
 // iOS 側の正本: MindWaveGraphic/MindWaveGraphic/Contracts/ContextAssistContracts.swift
 
+import { CHECKIN_INSTRUCTIONS, CHECKIN_JSON_SCHEMA, buildCheckInNote, normalizeCheckIn, validateCheckInRequest, type CheckInResult } from "./checkin.ts";
 import { SCHEMA_VERSION, type Validation } from "./contract.ts";
 import { CHAT_SCENES, extractUsage, type ChatUsage } from "./chat.ts";
 import { UpstreamError, upstreamErrorFromResponse } from "./openai.ts";
@@ -48,7 +49,9 @@ export interface ContextAssistRequest {
   step: (typeof CONTEXT_STEPS)[number];
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   /** 画面で現在選ばれている内容（利用者がボタンで選んだもの・確認済みの提案） */
-  current: { scene: ContextScene | null; conditions: BodyCondition[]; tension?: (typeof SUBJECTIVE_TENSIONS)[number] | null };
+  current: { scene: ContextScene | null; conditions: BodyCondition[]; tension?: (typeof SUBJECTIVE_TENSIONS)[number] | null;
+    /** 会話の情報（STEP 0〜6。2026-11-11 追加・省略可能） */
+    check_in?: Record<string, unknown>; next_slot?: string | null };
 }
 
 export interface ContextAssistResult {
@@ -67,6 +70,8 @@ export interface ContextAssistResult {
   situation_note: string | null;
   /** 利用者の発言の意図。不正・欠落は answer。2026-11-05 追加 */
   user_intent: (typeof USER_INTENTS)[number];
+  /** 今回の発言から取り出した会話の情報（2026-11-11 追加。古いアプリは無視する） */
+  check_in: CheckInResult;
 }
 
 export interface ContextAssistResponse {
@@ -127,8 +132,11 @@ export function validateContextAssistRequest(body: unknown): Validation<ContextA
 
   const current = body.current;
   if (!isObject(current)) return fail("current がない");
-  const cExtra = extraKeys(current, ["scene", "conditions", "tension"], "current");
+  const cExtra = extraKeys(current, ["scene", "conditions", "tension", "check_in", "next_slot"], "current");
   if (cExtra) return fail(cExtra);
+  const checkInError = validateCheckInRequest(current.check_in);
+  if (checkInError) return fail(checkInError);
+  if (!(current.next_slot === undefined || current.next_slot === null || (typeof current.next_slot === "string" && current.next_slot.length <= 20))) return fail("current.next_slot が不正");
   if (!(current.scene === null || isOneOf(current.scene, CONTEXT_SCENES))) return fail("current.scene が不正");
   if (!Array.isArray(current.conditions) || !current.conditions.every((c) => isOneOf(c, BODY_CONDITIONS))) return fail("current.conditions が不正");
   if (!(current.tension === undefined || current.tension === null || isOneOf(current.tension, SUBJECTIVE_TENSIONS))) return fail("current.tension が不正");
@@ -172,13 +180,14 @@ export const CONTEXT_INSTRUCTIONS = [
   "- 利用者が「もう測りたい」「始めて」と言ったら user_intent=ready。未確認の項目は聞かずにまとめる。それ以外の普通の答えは answer。",
   "- 深刻な体の症状（胸の痛み・息苦しさなど）を話されたら、無理をせず近くの人や医療機関に相談するよう短く伝える。診断はしない。",
   "- 長い説明を求められたときだけ詳しく話す（それでも160文字以内）。",
+  CHECKIN_INSTRUCTIONS,
 ].join("\n");
 
 /** OpenAI Structured Outputs（strict）に渡す JSON Schema */
 export const CONTEXT_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action", "situation_note", "user_intent"],
+  required: ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action", "situation_note", "user_intent", "check_in"],
   properties: {
     reply: { type: "string", description: "もこりんの返答（120文字程度まで）" },
     scene_candidate: { type: ["string", "null"], enum: [...CONTEXT_SCENES, null], description: "明言された場面。なければ null" },
@@ -190,6 +199,7 @@ export const CONTEXT_JSON_SCHEMA = {
     action: { type: "string", enum: [...MOKORIN_ACTIONS], description: "もこりんの動作" },
     situation_note: { type: ["string", "null"], description: "利用者が述べた予定の短い要約（40文字以内）。推測しない。なければ null" },
     user_intent: { type: "string", enum: [...USER_INTENTS], description: "利用者の発言の意図" },
+    check_in: CHECKIN_JSON_SCHEMA,
   },
 } as const;
 
@@ -198,7 +208,8 @@ export function buildCurrentNote(req: ContextAssistRequest): string {
   const scene = req.current.scene ? SCENE_LABELS[req.current.scene] : "未選択";
   const conds = req.current.conditions.length > 0 ? req.current.conditions.map((c) => CONDITION_LABELS[c]).join("・") : "未選択";
   const tension = req.current.tension ? { calm: "落ち着いている", slight: "少し緊張", high: "かなり緊張" }[req.current.tension] : "未回答";
-  return `現在の段階: ${req.step}。本人の主観的な緊張: ${tension}。画面で選択中の場面: ${scene}。身体状態: ${conds}。`;
+  return `現在の段階: ${req.step}。本人の主観的な緊張: ${tension}。画面で選択中の場面: ${scene}。身体状態: ${conds}。` +
+    buildCheckInNote(req.current.check_in, req.current.next_slot);
 }
 
 export function buildContextResponsesRequest(
@@ -225,7 +236,7 @@ const PROHIBITED = ["と診断", "診断結果", "病気", "治療", "処方", "
 export function validateContextResult(v: unknown): Validation<ContextAssistResult> {
   const fail = (message: string): Validation<ContextAssistResult> => ({ ok: false, message });
   if (!isObject(v)) return fail("result がオブジェクトではない");
-  const extra = extraKeys(v, ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action", "situation_note", "user_intent"], "result");
+  const extra = extraKeys(v, ["reply", "scene_candidate", "condition_candidates", "needs_clarification", "clarification_question", "tension_candidate", "emotion", "action", "situation_note", "user_intent", "check_in"], "result");
   if (extra) return fail(extra);
   if (typeof v.reply !== "string" || v.reply.trim().length === 0) return fail("reply が空");
   if (chars(v.reply) > CONTEXT_LIMITS.maxReplyChars) return fail("reply が長すぎる");
@@ -258,6 +269,8 @@ export function validateContextResult(v: unknown): Validation<ContextAssistResul
       situation_note: typeof v.situation_note === "string" && v.situation_note.trim().length > 0
         && chars(v.situation_note.trim()) <= CONTEXT_LIMITS.maxSituationNoteChars ? v.situation_note.trim() : null,
       user_intent: isOneOf(v.user_intent, USER_INTENTS) ? v.user_intent : "answer",
+      // 会話の情報は補助のため、未知の値は採用せず空にする（他の候補の採否には影響させない）
+      check_in: normalizeCheckIn(v.check_in),
     },
   };
 }
