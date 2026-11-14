@@ -54,13 +54,14 @@ struct MainTabView: View {
                 HomeView(selectedTab: selectedTabBinding)
                     .tag(0)
                     .toolbar(.hidden, for: .tabBar)
-                GuideView(selectedTab: selectedTabBinding)
+                GuideFlowView(selectedTab: selectedTabBinding, initialScene: .other)
                     .tag(1)
                     .toolbar(.hidden, for: .tabBar)
                 HistoryView()
                     .tag(2)
                     .toolbar(.hidden, for: .tabBar)
             }
+
             .safeAreaInset(edge: .bottom) {
                 // HomeView (tab 0) は下部コックピットパネルが自前でパディングを持つため0にする
                 Color.clear
