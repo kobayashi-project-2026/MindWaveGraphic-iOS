@@ -690,52 +690,91 @@ struct GuideFlowView: View {
     }
 
     // MARK: - ▼ STEP 2: Exercise Selection
-
-    private var exerciseListContent: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 16) {
-                // BREATH SELECT ヘッダー
-                HStack(spacing: 0) {
-                    Rectangle().fill(Color.cyan.opacity(0.22)).frame(height: 0.6)
-                    Text("BREATH SELECT")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color.cyan.opacity(0.52))
-                        .tracking(3.0)
-                        .fixedSize()
-                        .padding(.horizontal, 10)
-                    Rectangle().fill(Color.cyan.opacity(0.22)).frame(height: 0.6)
-                }
-                .padding(.top, 4)
-
-                // 大型カード（縦3枚）
-                VStack(spacing: 10) {
-                    ForEach(GuideExercise.allCases) { exercise in
-                        LargeExerciseCard(
-                            exercise:   exercise,
-                            isSelected: selectedExercise == exercise
-                        ) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                selectedExercise = exercise
-                            }
-                            MindWaveDebugLogger.log(.flow, "exercise selected exercise=\(exercise.rawValue)")
-                        }
-                    }
-                }
-
-                // 選択済みディテール
-                if let exercise = selectedExercise {
-                    ExerciseDetailPanel(exercise: exercise)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-
-                    // 体感入力（任意）
-                    SelfReportPickerView(selection: $selfReportBefore)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
+    // 現在の緊張スコア・状態からおすすめの呼吸法を判定
+    private var recommendedExercise: GuideExercise {
+        let score = sessionScoreIntensity * 100.0
+        if score >= 66 || viewModel.graphicInput.state == .overTense {
+            return .breathing214
+        } else if score >= 33 || viewModel.graphicInput.state == .optimalTension {
+            return .breathing478
+        } else {
+            return .box
         }
     }
+
+    private var recommendedSpeechText: String {
+        switch recommendedExercise {
+        case .breathing214:
+            return "今は緊張が高めだね！\n『2-1-4』で素早く落ち着こう！"
+        case .breathing478:
+            return "深呼吸で整えよう！\n『4-7-8』がおすすめだよ！"
+        case .box:
+            return "いいリズムだね！\n『BOX』で集中力を高めよう！"
+        }
+    }
+
+    private var exerciseListContent: some View {
+            ZStack(alignment: .bottomTrailing) {
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 16) {
+                        // BREATH SELECT ヘッダー
+                        HStack(spacing: 0) {
+                            Rectangle().fill(Color.cyan.opacity(0.22)).frame(height: 0.6)
+                            Text("BREATH SELECT")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(Color.cyan.opacity(0.52))
+                                .tracking(3.0)
+                                .fixedSize()
+                                .padding(.horizontal, 10)
+                            Rectangle().fill(Color.cyan.opacity(0.22)).frame(height: 0.6)
+                        }
+                        .padding(.top, 4)
+
+                        // 大型カード（縦3枚・おすすめカードは点滅発光）
+                        VStack(spacing: 10) {
+                            ForEach(GuideExercise.allCases) { exercise in
+                                LargeExerciseCard(
+                                    exercise:      exercise,
+                                    isSelected:    selectedExercise == exercise,
+                                    isRecommended: selectedExercise == nil && exercise == recommendedExercise
+                                ) {
+                                    withAnimation(.easeInOut(duration: 0.15)) {
+                                        selectedExercise = exercise
+                                    }
+                                    MindWaveDebugLogger.log(.flow, "exercise selected exercise=\(exercise.rawValue)")
+                                }
+                            }
+                        }
+
+                        // 選択済みディテール
+                        if let exercise = selectedExercise {
+                            ExerciseDetailPanel(exercise: exercise)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+
+                            // 体感入力（任意）
+                            SelfReportPickerView(selection: $selfReportBefore)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+
+                        // 下部にもこりんが重なってもスクロールできるよう余白を確保
+                        Spacer().frame(height: 140)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+                }
+
+                // 横からひょこっと登場しておすすめ呼吸法を勧めるもこりん
+                GuideMokorinRecommendPopup(
+                    speechText: recommendedSpeechText,
+                    onTapRecommend: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selectedExercise = recommendedExercise
+                        }
+                    }
+                )
+                .padding(.bottom, 8)
+            }
+        }
 
     // MARK: - ▼ STEP 3: Session
 
@@ -1732,9 +1771,12 @@ private struct ExerciseDetailPanel: View {
 // MARK: - LargeExerciseCard（大型呼吸法選択カード）
 
 private struct LargeExerciseCard: View {
-    let exercise:   GuideExercise
-    let isSelected: Bool
-    let action:     () -> Void
+    let exercise:      GuideExercise
+    let isSelected:    Bool
+    var isRecommended: Bool = false
+    let action:        () -> Void
+
+    @State private var blinkPulse = false
 
     var body: some View {
         Button(action: action) {
@@ -1742,34 +1784,59 @@ private struct LargeExerciseCard: View {
                 // アイコン円
                 ZStack {
                     Circle()
-                        .fill(isSelected ? Color.cyan.opacity(0.20) : Color.white.opacity(0.06))
+                        .fill(
+                            isSelected ? Color.cyan.opacity(0.20) :
+                            isRecommended ? Color.cyan.opacity(blinkPulse ? 0.22 : 0.08) :
+                            Color.white.opacity(0.06)
+                        )
                         .frame(width: 54, height: 54)
                     Circle()
-                        .stroke(isSelected ? Color.cyan.opacity(0.40) : Color.clear, lineWidth: 1.0)
+                        .stroke(
+                            isSelected ? Color.cyan.opacity(0.40) :
+                            isRecommended ? Color.cyan.opacity(blinkPulse ? 0.65 : 0.15) :
+                            Color.clear,
+                            lineWidth: 1.0
+                        )
                         .frame(width: 54, height: 54)
                     Image(systemName: exercise.icon)
                         .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(isSelected ? Color.cyan.opacity(0.95) : Color.white.opacity(0.50))
+                        .foregroundStyle(
+                            isSelected ? Color.cyan.opacity(0.95) :
+                            isRecommended ? Color.cyan.opacity(blinkPulse ? 0.95 : 0.55) :
+                            Color.white.opacity(0.50)
+                        )
                 }
 
                 // テキスト
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .lastTextBaseline, spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
                         Text(exercise.title)
                             .font(.system(size: 20, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(isSelected ? .white : .white.opacity(0.75))
+                            .foregroundStyle(isSelected || isRecommended ? .white : .white.opacity(0.75))
                             .tracking(0.5)
                         Text(exercise.subtitle)
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(isSelected ? Color.cyan.opacity(0.75) : Color.white.opacity(0.28))
+                            .foregroundStyle(isSelected || isRecommended ? Color.cyan.opacity(0.85) : Color.white.opacity(0.28))
+
+                        if isRecommended {
+                            Text("おすすめ")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.cyan.opacity(blinkPulse ? 0.98 : 0.55))
+                                )
+                        }
                     }
                     Text(exercise.timingLabel)
                         .font(.system(size: 11, weight: .light, design: .monospaced))
-                        .foregroundStyle(isSelected ? Color.cyan.opacity(0.60) : Color.white.opacity(0.24))
+                        .foregroundStyle(isSelected || isRecommended ? Color.cyan.opacity(0.68) : Color.white.opacity(0.24))
                         .tracking(1.5)
                     Text(exercise.description)
                         .font(.system(size: 11, weight: .light))
-                        .foregroundStyle(.white.opacity(isSelected ? 0.55 : 0.28))
+                        .foregroundStyle(.white.opacity(isSelected || isRecommended ? 0.62 : 0.28))
                         .lineLimit(1)
                 }
 
@@ -1778,21 +1845,29 @@ private struct LargeExerciseCard: View {
                 // 選択インジケーター
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(isSelected ? Color.cyan.opacity(0.90) : .white.opacity(0.15))
+                    .foregroundStyle(
+                        isSelected ? Color.cyan.opacity(0.90) :
+                        isRecommended ? Color.cyan.opacity(blinkPulse ? 0.70 : 0.22) :
+                        .white.opacity(0.15)
+                    )
             }
             .padding(.vertical, 16)
             .padding(.horizontal, 16)
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(isSelected
-                              ? Color(red: 0.02, green: 0.18, blue: 0.30)
-                              : Color.white.opacity(0.04))
+                        .fill(
+                            isSelected ? Color(red: 0.02, green: 0.18, blue: 0.30) :
+                            isRecommended ? Color(red: 0.02, green: 0.14, blue: 0.26).opacity(blinkPulse ? 0.95 : 0.55) :
+                            Color.white.opacity(0.04)
+                        )
                     // 上端アクセントライン
                     VStack(spacing: 0) {
                         LinearGradient(
                             colors: [
-                                isSelected ? Color.cyan.opacity(0.75) : Color.white.opacity(0.08),
+                                isSelected ? Color.cyan.opacity(0.75) :
+                                isRecommended ? Color.cyan.opacity(blinkPulse ? 0.85 : 0.20) :
+                                Color.white.opacity(0.08),
                                 .clear
                             ],
                             startPoint: .leading, endPoint: .trailing
@@ -1804,23 +1879,89 @@ private struct LargeExerciseCard: View {
                     // ボーダー
                     RoundedRectangle(cornerRadius: 16)
                         .strokeBorder(
-                            isSelected ? Color.cyan.opacity(0.52) : Color.white.opacity(0.08),
-                            lineWidth: isSelected ? 1.1 : 0.7
+                            isSelected ? Color.cyan.opacity(0.52) :
+                            isRecommended ? Color.cyan.opacity(blinkPulse ? 0.85 : 0.20) :
+                            Color.white.opacity(0.08),
+                            lineWidth: (isSelected || isRecommended) ? 1.3 : 0.7
                         )
-                    // 選択時グロー
+                    // 選択時またはおすすめ点滅時の外周グロー
                     if isSelected {
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(Color.cyan.opacity(0.30), lineWidth: 3)
                             .blur(radius: 6)
+                    } else if isRecommended {
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.cyan.opacity(blinkPulse ? 0.55 : 0.05), lineWidth: 4)
+                            .blur(radius: 7)
                     }
                 }
             )
         }
         .buttonStyle(.plain)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
+                blinkPulse = true
+            }
+        }
         .accessibilityLabel(exercise.title)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
+
+/// 呼吸法選択画面で横からひょこっと登場しておすすめを提案するもこりん
+private struct GuideMokorinRecommendPopup: View {
+    let speechText: String
+    let onTapRecommend: () -> Void
+
+    @State private var isVisible = false
+    @State private var mokorinPose = MokorinPose()
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            Spacer(minLength: 10)
+
+            Button(action: onTapRecommend) {
+                ZStack(alignment: .bottomTrailing) {
+                    Text(speechText)
+                        .font(.system(size: 13.5, weight: .bold))
+                        .foregroundStyle(Color(red: 0.12, green: 0.15, blue: 0.18))
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(3)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(Color.white.opacity(0.96))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .strokeBorder(Color(red: 0.30, green: 0.75, blue: 0.85), lineWidth: 2.5)
+                        )
+                        .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
+                }
+            }
+            .buttonStyle(.plain)
+            .offset(y: -48)
+
+            MokorinAvatarView(size: 132, pose: mokorinPose)
+                .frame(width: 132, height: 132)
+                .onTapGesture(perform: onTapRecommend)
+        }
+        .padding(.trailing, 6)
+        .offset(x: isVisible ? 0 : 340)
+        .opacity(isVisible ? 1 : 0)
+        .animation(.spring(response: 0.48, dampingFraction: 0.78), value: isVisible)
+        .onAppear {
+            mokorinPose = mokorinPose.with(.happy, .wave)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                withAnimation(.spring(response: 0.48, dampingFraction: 0.78)) {
+                    isVisible = true
+                }
+            }
+        }
+    }
+}
+
 
 // MARK: - ResultComparisonCard（変更なし）
 
