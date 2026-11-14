@@ -1055,10 +1055,11 @@ struct CockpitLeverNav: View {
     }
 
     private let navItems: [(label: String, icon: String, tab: Int)] = [
-        ("整える", "wind",       1),
-        ("ホーム",  "house.fill", 0),
-        ("履歴",   "clock.fill",  2),
+        ("整える", "wind",                            1),
+        ("ホーム",  "house.fill",                      0),
+        ("対話",   "bubble.left.and.bubble.right.fill", 2),
     ]
+
 
     var body: some View {
         VStack(spacing: 2) {

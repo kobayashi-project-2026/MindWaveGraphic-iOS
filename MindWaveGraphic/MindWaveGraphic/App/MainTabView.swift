@@ -30,9 +30,17 @@ struct MainTabView: View {
     private var selectedTabBinding: Binding<Int> {
         Binding(
             get: { navManager.selectedTab.rawValue },
-            set: { navManager.selectTab(index: $0) }
+            set: { newValue in
+                if newValue == 2 {
+                    // 右レバー（tab 2）は「対話（状況確認）」モーダルを開く
+                    navManager.navigate(to: .dialogue)
+                } else {
+                    navManager.selectTab(index: newValue)
+                }
+            }
         )
     }
+
 
     // タブ切替フラッシュ
     @State private var transitionOpacity: Double = 0
