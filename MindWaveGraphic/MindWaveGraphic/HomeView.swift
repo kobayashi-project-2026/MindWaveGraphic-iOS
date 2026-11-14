@@ -71,6 +71,11 @@ struct HomeView: View {
         return GraphicInput(score: correctedScore, confidence: base.confidence, state: base.state)
     }
 
+    // 過緊張状態かどうか（コックピットの赤アラート閾値 scoreIntensity > 0.66 と連動）
+    private var isHyperTensionState: Bool {
+        displayInput.score >= 66.0
+    }
+
     private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
 
     private var scoreIntensity: Double { min(max(displayInput.score / 100.0, 0), 1) }
@@ -143,13 +148,37 @@ struct HomeView: View {
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
 
-                // 6. ヘッダー
-                headerBar
-                    .padding(.top, 8)
-                    .padding(.horizontal, 18)
-                    .zIndex(50)
+                // 6. ヘッダー ＋ 過緊張時の上部通知バナー
+                VStack(spacing: 10) {
+                    headerBar
+                    HyperTensionTopBanner(isVisible: isHyperTensionState) {
+                        withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
+                            selectedTab = 1
+                        }
+                    }
+                }
+                .padding(.top, 8)
+                .padding(.horizontal, 18)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isHyperTensionState)
+                .zIndex(50)
 
-                // 7. コックピット下部
+                // 7. コックピット計器パネルの右端から横スライドでひょこっと登場するもこりん
+                VStack(spacing: 0) {
+                    Spacer()
+                    MokorinCockpitPopupView(
+                        isHyperTension: isHyperTensionState,
+                        score: displayInput.score,
+                        onTapNavigateToGuide: {
+                            withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
+                                selectedTab = 1
+                            }
+                        }
+                    )
+                    .padding(.bottom, dashH + 2)
+                }
+                .zIndex(40)
+
+                // 8. コックピット下部
                 VStack(spacing: 0) {
                     Spacer()
                     cockpitConsole(dashH: dashH)
@@ -281,10 +310,14 @@ struct HomeView: View {
 
             VStack(spacing: 0) {
                 panelTopRip
-                CockpitLeverNav(selectedTab: $selectedTab, accentColor: accentColor)
-                    .padding(.horizontal, 14)
-                    .frame(height: 42)
-                    .padding(.top, 4)
+                CockpitLeverNav(
+                    selectedTab: $selectedTab,
+                    accentColor: accentColor,
+                    highlightGuide: isHyperTensionState
+                )
+                .padding(.horizontal, 14)
+                .frame(height: 42)
+                .padding(.top, 4)
                 Spacer(minLength: 2)
                 HStack(alignment: .center, spacing: 6) {
                     pulseInstrument.frame(maxWidth: .infinity)
@@ -1049,6 +1082,9 @@ private struct MetalPanelBackground: View {
 struct CockpitLeverNav: View {
     @Binding var selectedTab: Int
     let accentColor: Color
+    var highlightGuide: Bool = false
+
+    @State private var glowPulse = false
 
     private var leverPos: Int {
         switch selectedTab { case 1: return 0; case 2: return 2; default: return 1 }
@@ -1060,13 +1096,14 @@ struct CockpitLeverNav: View {
         ("対話",   "bubble.left.and.bubble.right.fill", 2),
     ]
 
-
     var body: some View {
         VStack(spacing: 2) {
             HStack(spacing: 0) {
                 ForEach(navItems.indices, id: \.self) { i in
                     let item = navItems[i]
                     let active = selectedTab == item.tab
+                    let isGuideGlowing = (highlightGuide && item.tab == 1)
+
                     Button {
                         withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
                             selectedTab = item.tab
@@ -1074,19 +1111,55 @@ struct CockpitLeverNav: View {
                     } label: {
                         VStack(spacing: 2) {
                             Image(systemName: item.icon)
-                                .font(.system(size: 11, weight: active ? .semibold : .ultraLight))
-                                .foregroundStyle(active ? accentColor : Color.white.opacity(0.22))
-                                .shadow(color: active ? accentColor.opacity(0.65) : .clear, radius: 4)
+                                .font(.system(size: 11, weight: (active || isGuideGlowing) ? .semibold : .ultraLight))
+                                .foregroundStyle(
+                                    active ? accentColor :
+                                    isGuideGlowing ? MindWaveCyberTheme.cyan :
+                                    Color.white.opacity(0.22)
+                                )
+                                .shadow(
+                                    color: active ? accentColor.opacity(0.65) :
+                                           isGuideGlowing ? MindWaveCyberTheme.cyan.opacity(glowPulse ? 0.95 : 0.35) :
+                                           .clear,
+                                    radius: isGuideGlowing ? 8 : 4
+                                )
                             Text(item.label)
-                                .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                                .foregroundStyle(active ? accentColor.opacity(0.88) : Color.white.opacity(0.20))
+                                .font(.system(size: 8.5, weight: isGuideGlowing ? .bold : .medium, design: .monospaced))
+                                .foregroundStyle(
+                                    active ? accentColor.opacity(0.88) :
+                                    isGuideGlowing ? MindWaveCyberTheme.cyan.opacity(glowPulse ? 1.0 : 0.65) :
+                                    Color.white.opacity(0.20)
+                                )
+                                .shadow(
+                                    color: isGuideGlowing ? MindWaveCyberTheme.cyan.opacity(glowPulse ? 0.85 : 0.25) : .clear,
+                                    radius: 6
+                                )
                         }
                         .frame(maxWidth: .infinity).frame(height: 26)
+                        .background(
+                            Group {
+                                if isGuideGlowing {
+                                    Capsule()
+                                        .fill(MindWaveCyberTheme.cyan.opacity(glowPulse ? 0.18 : 0.05))
+                                        .overlay(
+                                            Capsule()
+                                                .strokeBorder(MindWaveCyberTheme.cyan.opacity(glowPulse ? 0.75 : 0.25), lineWidth: 0.8)
+                                        )
+                                        .padding(.horizontal, 12)
+                                }
+                            }
+                        )
+                        .scaleEffect(isGuideGlowing && glowPulse ? 1.06 : 1.0)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .animation(.easeInOut(duration: 0.18), value: active)
                     .accessibilityIdentifier(item.tab == 1 ? "nav_calm" : item.tab == 0 ? "nav_home" : "nav_history")
+                }
+            }
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                    glowPulse = true
                 }
             }
 

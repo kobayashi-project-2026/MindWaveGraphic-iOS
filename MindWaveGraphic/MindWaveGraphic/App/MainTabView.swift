@@ -26,7 +26,7 @@ struct MainTabView: View {
     /// 既存Viewが参照する Int 型のタブ番号（navManager から導出。独自の状態は持たない）
     private var selectedTab: Int { navManager.selectedTab.rawValue }
 
-    /// HomeView / GuideView / CockpitLeverNav に渡す Binding。書き込みは navManager へ委譲する。
+    /// HomeView / GuideFlowView / CockpitLeverNav に渡す Binding。書き込みは navManager へ委譲する。
     private var selectedTabBinding: Binding<Int> {
         Binding(
             get: { navManager.selectedTab.rawValue },
@@ -41,7 +41,6 @@ struct MainTabView: View {
         )
     }
 
-
     // タブ切替フラッシュ
     @State private var transitionOpacity: Double = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -54,7 +53,7 @@ struct MainTabView: View {
                 HomeView(selectedTab: selectedTabBinding)
                     .tag(0)
                     .toolbar(.hidden, for: .tabBar)
-                GuideView(selectedTab: selectedTabBinding)
+                GuideFlowView(selectedTab: selectedTabBinding, initialScene: .other)
                     .tag(1)
                     .toolbar(.hidden, for: .tabBar)
                 HistoryView()
@@ -62,9 +61,9 @@ struct MainTabView: View {
                     .toolbar(.hidden, for: .tabBar)
             }
             .safeAreaInset(edge: .bottom) {
-                // HomeView (tab 0) は下部コックピットパネルが自前でパディングを持つため0にする
+                // HomeView (tab 0) と GuideFlowView (tab 1) は下部バーを非表示にするため余白を 0 にする
                 Color.clear
-                    .frame(height: selectedTab == 0 ? 0 : MainTabView.missionBarReservedHeight)
+                    .frame(height: selectedTab == 2 ? MainTabView.missionBarReservedHeight : 0)
                     .allowsHitTesting(false)
             }
 
@@ -95,9 +94,9 @@ struct MainTabView: View {
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
 
-            // HomeView (tab 0) ではmissionBarを非表示にする
-            // HomeViewのCockpitNavLeverが代わりにナビゲーションを担当する
-            if selectedTab != 0 {
+            // HomeView (tab 0) と GuideFlowView (tab 1) では missionBar を非表示にする
+            // （GuideFlowView は下部の「開始 / STOP」ボタンと重なるのを防ぐため）
+            if selectedTab == 2 {
                 missionBar
                     .padding(.horizontal, 16)
                     .padding(.bottom, 18)
