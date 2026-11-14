@@ -8,7 +8,6 @@
 import SwiftUI
 
 struct AIChatView: View {
-
     @ObservedObject var chat: ChatViewModel
     let onClose: () -> Void
 
@@ -21,17 +20,38 @@ struct AIChatView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                MindWaveCyberBackground()
-                VStack(spacing: 0) {
-                    mokorinHeader
-                    statusBanner
-                    messageList
+            GeometryReader { geo in
+                let mokorinStageHeight = max(150, geo.size.height * 0.25)
+
+                ZStack {
+                    // 背景：コックピットグラフィック画面と全く同じ宇宙・星雲グラフィック
+                    StarfieldGraphicView(
+                                            input: GraphicInput(score: 50, confidence: 0.85, state: MindState.from(score: 50)),
+                                            showsParameterOverlay: false
+                                        )
+                    .ignoresSafeArea()
+
+                    // チャット文字が読みやすいようごく薄く暗めにする
+                    Color.black.opacity(0.22)
+                        .ignoresSafeArea()
+
+                    VStack(spacing: 0) {
+                        // 上部 3/4：ステータス＆会話リスト
+                        statusBanner
+                        messageList
+                            .frame(maxHeight: .infinity)
+
+                        // パターンA：会話リストの下に入力バー
+                        inputBar
+
+                        // 下部 1/4：もこりん専用ステージ（大きく動いてしゃべるスペース）
+                        mokorinStage(height: mokorinStageHeight)
+                    }
                 }
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) { inputBar }
             .navigationTitle("AI相談")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("閉じる", action: onClose)
@@ -60,9 +80,11 @@ struct AIChatView: View {
             chat.refreshConsent()
             mokorinPose = mokorinPose.with(.happy, .wave)
         }
-        // もこりんの表情・動作: 考え中は calm、返答が届いたらうなずく、失敗は sad、リセットで手をふる
+        // もこりんの表情・動作: 考え中は calm、返答が届いたら jump / nod、失敗は sad、リセットで手をふる
         .onChange(of: chat.isSending) { _, sending in
-            if sending { mokorinPose = mokorinPose.with(.calm, nil) }
+            if sending {
+                mokorinPose = mokorinPose.with(.calm, nil)
+            }
         }
         .onChange(of: chat.messages.count) { _, count in
             guard let last = chat.messages.last else {
@@ -70,23 +92,89 @@ struct AIChatView: View {
                 return
             }
             if last.role == .assistant, count > 0 {
-                mokorinPose = mokorinPose.with(chat.lastFailureMessage == nil ? .calm : .sad, .nod)
+                if chat.lastFailureMessage == nil {
+                    mokorinPose = mokorinPose.with(.happy, .jump)
+                } else {
+                    mokorinPose = mokorinPose.with(.sad, .nod)
+                }
             }
         }
     }
 
-    // MARK: - もこりん
+    // MARK: - 下部 1/4：もこりん専用ステージ
 
-    private var mokorinHeader: some View {
-        HStack(spacing: 10) {
-            MokorinAvatarView(size: 64, pose: mokorinPose)
-            Text(chat.isSending ? "もこりんが考え中…" : "もこりんが一緒に考えるよ")
-                .font(.system(size: 12))
-                .foregroundStyle(MindWaveCyberTheme.textSecondary)
-            Spacer()
+    private func mokorinStage(height: CGFloat) -> some View {
+        let avatarSize = min(height * 0.88, 148)
+
+        return HStack(alignment: .center, spacing: 12) {
+            MokorinAvatarView(size: avatarSize, pose: mokorinPose)
+                .frame(width: avatarSize, height: avatarSize)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(chat.isSending ? MindWaveCyberTheme.orange : MindWaveCyberTheme.cyan)
+                        .frame(width: 6, height: 6)
+                    Text("MOKORIN")
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundStyle(MindWaveCyberTheme.cyan.opacity(0.85))
+                        .tracking(1.2)
+                }
+
+                Text(mokorinSpeechText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(MindWaveCyberTheme.textPrimary)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(red: 0.03, green: 0.07, blue: 0.18).opacity(0.82))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(MindWaveCyberTheme.cyan.opacity(0.32), lineWidth: 1)
+            )
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.top, 6)
+        .padding(.bottom, 10)
+        .frame(height: height)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.15),
+                    Color(red: 0.02, green: 0.05, blue: 0.14).opacity(0.75)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(MindWaveCyberTheme.cyan.opacity(0.18))
+                .frame(height: 0.5)
+        }
+    }
+
+    /// 現在の状況に応じたもこりんのセリフ
+    private var mokorinSpeechText: String {
+        if chat.isSending {
+            return "うーん、どうやって整理しようかな…ちょっと待ってね！"
+        }
+        if chat.lastFailureMessage != nil {
+            return "あれれ、うまく届かなかったみたい…もう一回送ってみようか？"
+        }
+        if let lastAssistant = chat.messages.last(where: { $0.role == .assistant }) {
+            return lastAssistant.text
+        }
+        if chat.messages.isEmpty {
+            return "今の緊張や気になっていること、なんでも話してね。一緒に整理しよう！"
+        }
+        return "うんうん、聞いてるよ！"
     }
 
     // MARK: - 状態の表示
@@ -126,7 +214,7 @@ struct AIChatView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
-        .background(RoundedRectangle(cornerRadius: MindWaveCyberTheme.panelRadius).fill(MindWaveCyberTheme.panelBackground))
+        .background(RoundedRectangle(cornerRadius: MindWaveCyberTheme.panelRadius).fill(MindWaveCyberTheme.panelBackground.opacity(0.92)))
         .overlay(RoundedRectangle(cornerRadius: MindWaveCyberTheme.panelRadius).strokeBorder(MindWaveCyberTheme.cyan.opacity(0.25)))
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -142,7 +230,8 @@ struct AIChatView: View {
             Spacer(minLength: 0)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(color.opacity(0.10)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.55)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(color.opacity(0.35)))
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .accessibilityElement(children: .combine)
@@ -191,7 +280,11 @@ struct AIChatView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(MindWaveCyberTheme.textSecondary)
         }
-        .padding(.vertical, 24)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.45)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.12)))
+        .padding(.vertical, 8)
         .accessibilityElement(children: .combine)
     }
 
@@ -224,7 +317,8 @@ struct AIChatView: View {
             }
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(MindWaveCyberTheme.orange.opacity(0.10)))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.65)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(MindWaveCyberTheme.orange.opacity(0.35)))
     }
 
     // MARK: - 入力欄
@@ -233,13 +327,13 @@ struct AIChatView: View {
         VStack(spacing: 4) {
             HStack(alignment: .bottom, spacing: 10) {
                 TextField("メッセージを入力", text: $chat.draft, axis: .vertical)
-                    .lineLimit(1...5)
+                    .lineLimit(1...4)
                     .focused($isInputFocused)
                     .font(.system(size: 15))
                     .foregroundStyle(MindWaveCyberTheme.textPrimary)
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 18).fill(Color.white.opacity(0.07)))
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 18).fill(Color.white.opacity(0.10)))
                     .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(MindWaveCyberTheme.borderColor))
                     .onChange(of: chat.draft) { _, v in
                         if v.count > ChatLimits.maxUserChars { chat.draft = String(v.prefix(ChatLimits.maxUserChars)) }
@@ -268,8 +362,8 @@ struct AIChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 8)
-        .padding(.bottom, 8)
-        .background(MindWaveCyberTheme.background.opacity(0.96))
+        .padding(.bottom, 6)
+        .background(.ultraThinMaterial)
     }
 }
 
@@ -293,7 +387,7 @@ private struct ChatBubble: View {
                     .padding(.vertical, 9)
                     .background(
                         RoundedRectangle(cornerRadius: 14)
-                            .fill(isUser ? MindWaveCyberTheme.cyan.opacity(0.22) : Color.white.opacity(0.06))
+                            .fill(isUser ? MindWaveCyberTheme.cyan.opacity(0.28) : Color.black.opacity(0.55))
                     )
                     .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(borderColor))
                 if message.truncated {
@@ -317,8 +411,8 @@ private struct ChatBubble: View {
     private var borderColor: Color {
         switch message.origin {
         case .stub:  return MindWaveCyberTheme.orange.opacity(0.5)
-        case .local: return Color.white.opacity(0.15)
-        default:     return Color.clear
+        case .local: return Color.white.opacity(0.18)
+        default:     return isUser ? MindWaveCyberTheme.cyan.opacity(0.35) : Color.white.opacity(0.12)
         }
     }
 
