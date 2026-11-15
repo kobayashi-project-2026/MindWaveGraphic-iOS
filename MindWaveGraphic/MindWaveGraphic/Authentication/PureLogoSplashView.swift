@@ -1,81 +1,62 @@
+
 // PureLogoSplashView.swift
 // Authentication
 //
 // アプリ起動直後に表示されるロゴ画面。
 // 約1.5秒後に自動的にAccountGuidanceViewへ遷移する。
-// .task モディファイアを使うことで、Viewが消えたとき自動的にキャンセルされる。
 
 import SwiftUI
 
-// MARK: - PureLogoSplashView
-
-/// 起動ロゴ画面。pulseアニメーション後に自動遷移する。
 struct PureLogoSplashView: View {
-
     var flowState: AppFlowState
 
     @State private var pulse: Bool = false
 
     var body: some View {
         ZStack {
-            CyberGridBackground()
+            Color.black.ignoresSafeArea()
 
-            VStack(spacing: 20) {
+            // 宇宙星空背景
+            LaunchStarfieldBG()
+                .ignoresSafeArea()
 
+            VStack(spacing: 0) {
                 Spacer()
 
-                // ロゴマーク
-                ZStack {
-                    Circle()
-                        .stroke(AuthDesign.accent.opacity(0.3), lineWidth: 1)
-                        .frame(width: 100, height: 100)
-                        .scaleEffect(pulse ? 1.25 : 1.0)
-                        .opacity(pulse ? 0 : 0.6)
-                        .animation(.easeOut(duration: 1.2).repeatForever(autoreverses: false),
-                                   value: pulse)
-
-                    Circle()
-                        .fill(AuthDesign.accent.opacity(0.12))
-                        .frame(width: 80, height: 80)
-
-                    Image(systemName: "waveform.path.ecg")
-                        .font(.system(size: 32, weight: .ultraLight))
-                        .foregroundStyle(AuthDesign.accent)
-                }
-
-                // アプリ名
-                VStack(spacing: 6) {
+                // アプリ名ロゴ（動画通りアイコンなしのクリーンなタイポグラフィ）
+                VStack(spacing: 12) {
                     Text("MIND WAVE")
-                        .font(AuthDesign.logoFont)
-                        .foregroundStyle(AuthDesign.textPrimary)
-                        .tracking(6)
+                        .font(.system(size: 38, weight: .ultraLight, design: .monospaced))
+                        .foregroundStyle(Color.white)
+                        .tracking(8)
 
                     Text("GRAPHIC")
-                        .font(.system(size: 13, weight: .light, design: .monospaced))
+                        .font(.system(size: 14, weight: .light, design: .monospaced))
                         .foregroundStyle(AuthDesign.accent)
-                        .tracking(8)
+                        .tracking(10)
                 }
 
                 Spacer()
 
-                // ローディングインジケーター
+                // 下部ローディングドット
                 HStack(spacing: 6) {
-                    ForEach(0..<3) { i in
+                    ForEach(0..<3, id: \.self) { i in
                         Circle()
-                            .fill(AuthDesign.accent.opacity(pulse ? 0.8 : 0.3))
+                            .fill(AuthDesign.accent.opacity(pulse ? 0.85 : 0.25))
                             .frame(width: 5, height: 5)
-                            .animation(.easeInOut(duration: 0.6)
-                                        .repeatForever(autoreverses: true)
-                                        .delay(Double(i) * 0.2),
-                                       value: pulse)
+                            .animation(
+                                .easeInOut(duration: 0.6)
+                                    .repeatForever(autoreverses: true)
+                                    .delay(Double(i) * 0.2),
+                                value: pulse
+                            )
                     }
                 }
-                .padding(.bottom, 60)
+                .padding(.bottom, 56)
             }
         }
         .onAppear { pulse = true }
         .task {
-            // Viewが消えると自動キャンセルされるため、画面破棄後に遷移は起きない
             try? await Task.sleep(for: .seconds(1.5))
             guard !Task.isCancelled else { return }
             await MainActor.run {

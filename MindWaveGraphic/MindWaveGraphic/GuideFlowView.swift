@@ -83,21 +83,21 @@ struct GuideFlowView: View {
     var body: some View {
         ZStack {
             flowBackground
-
+            
             VStack(spacing: 0) {
                 // ── 固定トップバー
                 flowTopBar
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
                     .padding(.bottom, 8)
-
+                
                 // ── ステッププログレス（選択フローのみ）
                 if step == .sceneSelection || step == .exerciseSelection {
                     stepProgressIndicator
                         .padding(.horizontal, 24)
                         .padding(.bottom, 10)
                 }
-
+                
                 // セッション時: コックピットHUDセパレーター
                 if step == .session {
                     Canvas { ctx, sz in
@@ -112,7 +112,7 @@ struct GuideFlowView: View {
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
                 }
-
+                
                 // ── スクロール可能なコンテンツ（CTA は下部固定に移動）
                 Group {
                     switch step {
@@ -186,12 +186,12 @@ struct GuideFlowView: View {
                             endRadius: 120
                         )
                     }
-                    .ignoresSafeArea(edges: .bottom)
+                        .ignoresSafeArea(edges: .bottom)
                 )
             }
         }
         .onReceive(flowTimer) { _ in tickTimer() }
-        #if DEBUG
+#if DEBUG
         .onAppear {
             // シミュレーター撮影補助: GUIDE_AUTOSTART=1 で session を自動開始
             if ProcessInfo.processInfo.environment["GUIDE_AUTOSTART"] == "1",
@@ -228,7 +228,7 @@ struct GuideFlowView: View {
                 step = .result
             }
         }
-        #endif
+#endif
         .sheet(isPresented: $showFeedbackView) {
             if let before = beforeSnapshot,
                let scene  = selectedScene,
@@ -245,14 +245,18 @@ struct GuideFlowView: View {
         .alert("ガイドを中断しますか？", isPresented: $showAbandonAlert) {
             Button("中断する", role: .destructive) {
                 MindWaveDebugLogger.log(.flow, "flow cancelled step=\(step)")
+                // ① 次回「整える」を開いたときのために状態を初期リセット
+                step = .exerciseSelection
+                selectedExercise = nil
+                // ② ホーム（グラフィック画面）へ戻る
                 dismiss()
+                selectedTab = 0
             }
             Button("続ける", role: .cancel) {}
         } message: {
             Text("現在のガイドを中断すると記録は保存されません。")
         }
     }
-
     // MARK: - Background
 
     // 表示に使う心拍数値（Simulator demo override → DEMO_HEART_RATE → 実データ）
