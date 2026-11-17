@@ -85,3 +85,6 @@ secrets/
 # 対象はこのフォルダだけ（プロジェクト本体・他の共有設定は対象外）。
 # ============================================================
 MindWaveGraphic/MindWaveGraphic.xcodeproj/xcshareddata/xcschemes/
+
+# 開発用サーバーの接続先・トークン（scripts/dev-device-setup.sh が作る。共有しない）
+MindWaveGraphic/DevServer.local.xcconfig

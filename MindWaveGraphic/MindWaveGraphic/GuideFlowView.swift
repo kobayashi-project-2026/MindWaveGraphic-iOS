@@ -17,6 +17,8 @@ import Combine
 struct GuideFlowView: View {
     @EnvironmentObject var viewModel:    MindWaveViewModel
     @EnvironmentObject var historyStore: GuideHistoryStore
+    /// 測定前の会話の内容（もこりんの結果の説明・提案に使う。メモリのみ）
+    @EnvironmentObject var flowState:    AppFlowState
     @Binding var selectedTab: Int
     @Environment(\.dismiss)              private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -28,11 +30,21 @@ struct GuideFlowView: View {
 
     // MARK: - custom init
 
-    init(selectedTab: Binding<Int>, initialScene: MeasurementScene? = nil) {
+    /// 途中でやめた改善から再開する（全体UI 25 ページ）
+    private let resume: PendingImprovement?
+
+    init(selectedTab: Binding<Int>, initialScene: MeasurementScene? = nil, resume: PendingImprovement? = nil) {
         _selectedTab = selectedTab
+        self.resume = resume
         if let scene = initialScene {
             _step          = State(initialValue: .exerciseSelection)
             _selectedScene = State(initialValue: scene)
+        }
+        if let r = resume {
+            _step                   = State(initialValue: .session)
+            _selectedScene          = State(initialValue: r.scene)
+            _selectedExercise       = State(initialValue: r.exercise)
+            _sessionDurationSeconds = State(initialValue: r.durationSeconds)
         }
         #if DEBUG
         if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session" {
@@ -56,6 +68,21 @@ struct GuideFlowView: View {
     @State private var showAbandonAlert                        = false
     @State private var hrvUpdatedDuringSession                 = false
     @State private var showFeedbackView                        = false
+    /// もこりんと結果を見る（利用者が求めたときだけ開く）
+    @State private var showMokorinCompanion                    = false
+    /// AI相談（もこりんと話し直す。閉じると方法の選択に戻り、おすすめが更新される）
+    @State private var showMokorinTalk                         = false
+    /// 終了後の本人の緊張の評価（0〜100）と振り返りの答え（メモリのみ。保存しない）
+    @State private var subjectiveAfter: Int?                   = nil
+    @State private var reflectionAnswer: ReflectionAnswer?     = nil
+    /// 小窓から「ホームへ戻りますか？」
+    @State private var showHomeConfirm                         = false
+    /// 実施時間の「選択」（1〜10 分）
+    @State private var showDurationPicker                      = false
+    @State private var customMinutes                           = 2
+    @State private var didApplyResume                          = false
+    /// タブに常駐した状態で、ホームから「途中の改善」を再開するとき（init の resume を使えないため）
+    @State private var adoptedResume: PendingImprovement?       = nil
 
     // Session
     @State private var sessionElapsed:    Int  = 0
@@ -202,6 +229,8 @@ struct GuideFlowView: View {
             }
             // 撮影補助: GUIDE_PHASE=result で AI Feedback 表示画面へジャンプ
             if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "result" {
+                // MW_DEMO_S0=1: 会話で緊張の強さ（かなり＝75）を聞いた場合と同じ表示の確認用（体感入力から S0 を決める）
+                if ProcessInfo.processInfo.environment["MW_DEMO_S0"] == "1" { selfReportBefore = .significantTension }
                 let hr = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"]
                     .flatMap(Double.init) ?? 115.0
                 let beforeScore: Double = hr >= 130 ? 85 : hr >= 115 ? 72 : hr >= 100 ? 55 : hr >= 80 ? 38 : 18
@@ -226,9 +255,18 @@ struct GuideFlowView: View {
                     heartRate: hr, exercise: .breathing478, scene: .interview
                 )
                 step = .result
+                // MW_COMPANION=result: 結果の表示後に「もこりんと結果を見る」を開く
+                if ProcessInfo.processInfo.environment["MW_COMPANION"] == "result" {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { showMokorinCompanion = true }
+                }
             }
         }
-#endif
+        #endif
+        .sheet(isPresented: $showMokorinCompanion) {
+            if let model = makeMokorinCompanion() {
+                MokorinCompanionView(title: "もこりんと結果を見る", model: model) { showMokorinCompanion = false }
+            }
+        }
         .sheet(isPresented: $showFeedbackView) {
             if let before = beforeSnapshot,
                let scene  = selectedScene,
@@ -250,7 +288,7 @@ struct GuideFlowView: View {
                 selectedExercise = nil
                 // ② ホーム（グラフィック画面）へ戻る
                 dismiss()
-                selectedTab = 0
+                Task { @MainActor in selectedTab = 0 }
             }
             Button("続ける", role: .cancel) {}
         } message: {
@@ -415,11 +453,11 @@ struct GuideFlowView: View {
 
     private var topBarTitle: String {
         switch step {
-        case .sceneSelection:    return "SCENE SELECT"
-        case .exerciseSelection: return "GUIDE SELECT"
-        case .session:           return "GUIDE SESSION"
-        case .remeasurement:     return "RE-MEASURE"
-        case .result:            return "RESULT"
+        case .sceneSelection:    return "場面を選ぶ"
+        case .exerciseSelection: return "改善"
+        case .session:           return "改善中"
+        case .remeasurement:     return "再計測"
+        case .result:            return "結果"
         }
     }
 
@@ -548,13 +586,16 @@ struct GuideFlowView: View {
 
         case .exerciseSelection:
             // ガイド選択: 「戻る」+ 「セッション開始」
-            HStack(spacing: 12) {
+            // 全体UI 15〜16 ページ: 戻る（ホームへ）・開始・AI相談。場面の選択画面は通らない
+            HStack(spacing: 10) {
                 Button {
-                    withAnimation { step = .sceneSelection }
+                    dismiss()
+                    Task { @MainActor in selectedTab = 0 }
                 } label: {
                     backLabel
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("ホームへ戻る")
 
                 Button {
                     startSession()
@@ -567,6 +608,16 @@ struct GuideFlowView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(selectedExercise == nil)
+
+                Button { showMokorinTalk = true } label: {
+                    Text("AI相談")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.cyan.opacity(0.9))
+                        .padding(.horizontal, 14).padding(.vertical, 17)
+                        .background(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.cyan.opacity(0.5), lineWidth: 0.8))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("guide_select_ai_consult")
             }
 
         default:
@@ -694,97 +745,227 @@ struct GuideFlowView: View {
     }
 
     // MARK: - ▼ STEP 2: Exercise Selection
-    // 現在の緊張スコア・状態からおすすめの呼吸法を判定
-    private var recommendedExercise: GuideExercise {
-        let score = sessionScoreIntensity * 100.0
-        if score >= 66 || viewModel.graphicInput.state == .overTense {
-            return .breathing214
-        } else if score >= 33 || viewModel.graphicInput.state == .optimalTension {
-            return .breathing478
-        } else {
-            return .box
-        }
-    }
-
-    private var recommendedSpeechText: String {
-        switch recommendedExercise {
-        case .breathing214:
-            return "今は緊張が高めだね！\n『2-1-4』で素早く落ち着こう！"
-        case .breathing478:
-            return "深呼吸で整えよう！\n『4-7-8』がおすすめだよ！"
-        case .box:
-            return "いいリズムだね！\n『BOX』で集中力を高めよう！"
-        }
-    }
 
     private var exerciseListContent: some View {
-            ZStack(alignment: .bottomTrailing) {
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 16) {
-                        // BREATH SELECT ヘッダー
-                        HStack(spacing: 0) {
-                            Rectangle().fill(Color.cyan.opacity(0.22)).frame(height: 0.6)
-                            Text("BREATH SELECT")
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color.cyan.opacity(0.52))
-                                .tracking(3.0)
-                                .fixedSize()
-                                .padding(.horizontal, 10)
-                            Rectangle().fill(Color.cyan.opacity(0.22)).frame(height: 0.6)
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 18) {
+                // ── 上部: もこりんのおすすめ（理由つき）
+                HStack(alignment: .center, spacing: 12) {
+                    MokorinAvatarView(size: 64, pose: MokorinPose().with(.happy, .nod))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("今のあなたには")
+                            .font(.system(size: 13)).foregroundStyle(.white.opacity(0.65))
+                        Text("「\((recommendedExercise.map { ImprovementMethod.from($0).title }) ?? methodRecommendations.first?.method.title ?? "呼吸法")」がおすすめ")
+                            .font(.system(size: 19, weight: .bold)).foregroundStyle(.white)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let reason = methodRecommendations.first(where: { $0.method.guideExercise != nil })?.reason ?? methodRecommendations.first?.reason {
+                            Text(reason).font(.system(size: 12)).foregroundStyle(Color.cyan.opacity(0.85))
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(.top, 4)
+                    }
+                }
+                .padding(.top, 6)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("mokorin_recommendation")
 
-                        // 大型カード（縦3枚・おすすめカードは点滅発光）
-                        VStack(spacing: 10) {
-                            ForEach(GuideExercise.allCases) { exercise in
-                                LargeExerciseCard(
-                                    exercise:      exercise,
-                                    isSelected:    selectedExercise == exercise,
-                                    isRecommended: selectedExercise == nil && exercise == recommendedExercise
-                                ) {
-                                    withAnimation(.easeInOut(duration: 0.15)) {
-                                        selectedExercise = exercise
-                                    }
-                                    MindWaveDebugLogger.log(.flow, "exercise selected exercise=\(exercise.rawValue)")
+                // ── おすすめの方法（大きく強調）
+                if let rec = recommendedExercise {
+                    recommendedExerciseCard(rec)
+                }
+
+                // ── ほかの呼吸法（自分で選べる）
+                sectionHeader("ほかの呼吸法", note: "タイマーとグラフィックつき")
+                VStack(spacing: 8) {
+                    ForEach(GuideExercise.allCases.filter { $0 != recommendedExercise }) { exercise in
+                        compactExerciseRow(exercise)
+                    }
+                }
+
+                // ── ガイドのない方法（手順だけ。タイマーで行うものではないことを明示）
+                sectionHeader("手順を見て自分で", note: "タイマーなし")
+                VStack(spacing: 8) {
+                    ForEach(stepOnlyMethods, id: \.self) { method in
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(Array(method.steps.enumerated()), id: \.offset) { i, step in
+                                    Text("\(i + 1). \(step)").font(.system(size: 13)).foregroundStyle(.white.opacity(0.8))
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 6)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(method.title).font(.system(size: 14, weight: .medium)).foregroundStyle(.white.opacity(0.9))
+                                if methodRecommendations.contains(where: { $0.method == method }) {
+                                    Text("おすすめ").font(.system(size: 9, weight: .bold)).foregroundStyle(.black)
+                                        .padding(.horizontal, 5).padding(.vertical, 1)
+                                        .background(Capsule().fill(Color.cyan.opacity(0.85)))
                                 }
                             }
                         }
-
-                        // 選択済みディテール
-                        if let exercise = selectedExercise {
-                            ExerciseDetailPanel(exercise: exercise)
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
-
-                            // 体感入力（任意）
-                            SelfReportPickerView(selection: $selfReportBefore)
-                                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        }
-
-                        // 下部にもこりんが重なってもスクロールできるよう余白を確保
-                        Spacer().frame(height: 140)
+                        .tint(.cyan)
+                        .padding(.horizontal, 14).padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.04)))
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 8)
                 }
 
-                // 横からひょこっと登場しておすすめ呼吸法を勧めるもこりん
-                GuideMokorinRecommendPopup(
-                    speechText: recommendedSpeechText,
-                    onTapRecommend: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            selectedExercise = recommendedExercise
-                        }
-                    }
-                )
-                .padding(.bottom, 8)
+                // 体感入力（任意）
+                SelfReportPickerView(selection: $selfReportBefore)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
+        }
+        .onAppear {
+            // 改善タブに常駐するため、開くたびに途中の改善・会話の場面を引き継ぐ
+            if resume == nil, let p = flowState.pendingImprovement {
+                adoptPendingImprovement(p)
+                return
+            }
+            if selectedScene == nil || selectedScene == .other { selectedScene = sceneFromConversation }
+            // おすすめを最初から選んでおく（本人は自由に変えられる）
+            if selectedExercise == nil, let ex = recommendedExercise { selectedExercise = ex }
+            if let d = recommendedDuration?.seconds, sessionElapsed == sessionDurationSeconds {
+                sessionDurationSeconds = d
+                sessionElapsed = d
+            }
+            #if DEBUG
+            // MW_FLOW_AUTOPILOT=1: 一連の画面遷移の検証用（開始 → 数秒実施 → STOP。押した場合と同じ処理を呼ぶ）
+            if ProcessInfo.processInfo.environment["MW_FLOW_AUTOPILOT"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if step == .exerciseSelection { startSession() } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { if step == .session { sessionIsRunning = true } }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { if step == .session { finishSession(early: true) } }
+            }
+            #endif
+        }
+        .sheet(isPresented: $showMokorinTalk) {
+            ContextCalibrationView(flowState: flowState) { showMokorinTalk = false }
+        }
+    }
+
+    /// 会話（測定前）の場面から、ガイドの場面（MeasurementScene）を決める
+    private var sceneFromConversation: MeasurementScene {
+        if let s = flowState.mokorinMemory?.checkIn?.situation?.value {
+            switch s {
+            case .presentation: return .speech
+            case .interviewExam: return .interview
+            case .communication, .importantEvent: return .social
+            case .restless: return .daily
+            case .other: return .other
             }
         }
+        switch flowState.measurementContext.scene {
+        case .interview: return .interview
+        case .sports: return .sports
+        case .important: return .social
+        case .work: return .study
+        case .calm: return .daily
+        case .other: return .other
+        }
+    }
+
+    /// 途中でやめた改善を、残り時間から再開する（全体UI 25 ページ）
+    private func adoptPendingImprovement(_ p: PendingImprovement) {
+        adoptedResume          = p
+        didApplyResume         = false
+        selectedScene          = p.scene
+        selectedExercise       = p.exercise
+        sessionDurationSeconds = p.durationSeconds
+        step                   = .session
+    }
+
+    /// ガイドのない方法の一覧（推薦されたものを先に）
+    private var stepOnlyMethods: [ImprovementMethod] {
+        let recs = methodRecommendations.map(\.method).filter { $0.guideExercise == nil && !$0.steps.isEmpty && $0 != .rest }
+        let base: [ImprovementMethod] = [.stretch, .muscleRelaxation, .grounding]
+        return recs + base.filter { !recs.contains($0) }
+    }
+
+    private func sectionHeader(_ title: String, note: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title).font(.system(size: 14, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
+            Text(note).font(.system(size: 11)).foregroundStyle(.white.opacity(0.45))
+        }
+        .padding(.top, 4)
+    }
+
+    /// おすすめの呼吸法の大きなカード（光らせて強調）
+    private func recommendedExerciseCard(_ exercise: GuideExercise) -> some View {
+        let selected = selectedExercise == exercise
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { selectedExercise = exercise }
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: exercise.icon)
+                    .font(.system(size: 28, weight: .light)).foregroundStyle(Color.cyan)
+                    .frame(width: 56, height: 56)
+                    .background(Circle().fill(Color.cyan.opacity(0.12)))
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(exercise.title).font(.system(size: 26, weight: .bold, design: .monospaced)).foregroundStyle(.white)
+                        Text("おすすめ").font(.system(size: 10, weight: .bold)).foregroundStyle(.black)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(Color.yellow.opacity(0.9)))
+                    }
+                    Text(exercise.timingLabel).font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.cyan.opacity(0.8))
+                    Text(exercise.description).font(.system(size: 12)).foregroundStyle(.white.opacity(0.65)).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22)).foregroundStyle(selected ? Color.cyan : .white.opacity(0.3))
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(LinearGradient(colors: [Color.cyan.opacity(0.22), Color.cyan.opacity(0.06)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.yellow.opacity(selected ? 0.9 : 0.5), lineWidth: selected ? 2 : 1))
+                    .shadow(color: Color.cyan.opacity(0.35), radius: 14)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("おすすめ：\(exercise.title)。\(exercise.description)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .accessibilityIdentifier("recommended_exercise_card")
+    }
+
+    /// ほかの呼吸法（コンパクトな行）
+    private func compactExerciseRow(_ exercise: GuideExercise) -> some View {
+        let selected = selectedExercise == exercise
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { selectedExercise = exercise }
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: exercise.icon).font(.system(size: 18, weight: .light)).foregroundStyle(.white.opacity(0.7)).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(exercise.title + "  " + exercise.subtitle).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+                    Text(exercise.description).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20)).foregroundStyle(selected ? Color.cyan : .white.opacity(0.25))
+            }
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(selected ? 0.10 : 0.04))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.cyan.opacity(selected ? 0.7 : 0.15), lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
 
     // MARK: - ▼ STEP 3: Session
 
     private var sessionContent: some View {
         VStack(spacing: 0) {
-            // ── エクササイズ切り替えタブ（コックピット セグメント）
+            // ── エクササイズ切り替えタブ（開始前だけ。実施中はグラフィックを主役にするため方法名だけ表示）
+            if sessionElapsed < sessionDurationSeconds || sessionIsRunning || sessionIsFinished {
+                if let ex = selectedExercise {
+                    Text("\(ex.title)  \(ex.subtitle)")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color.cyan.opacity(0.9))
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background(Capsule().fill(Color.cyan.opacity(0.12)))
+                        .padding(.top, 6)
+                }
+            } else {
             HStack(spacing: 6) {
                 ForEach(GuideExercise.allCases) { ex in
                     let isActive = selectedExercise == ex
@@ -840,6 +1021,7 @@ struct GuideFlowView: View {
             .padding(.horizontal, 12)
             .padding(.top, 6)
             .animation(.easeInOut(duration: 0.18), value: selectedExercise)
+            }
 
             // ── ミニ状態ウィンドウ（タブ直下・右寄せ固定、呼吸円と重ならない）
             HStack(spacing: 0) {
@@ -854,33 +1036,43 @@ struct GuideFlowView: View {
                 Spacer()
                 miniStateWindow
                     .padding(.trailing, 10)
+                    // 全体UI 24 ページ: 小窓を押すとホームへ戻るか確認（途中なら「改善途中」として残す）
+                    .onTapGesture { showHomeConfirm = true }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityLabel("ホームのグラフィックへ戻る")
+                    .accessibilityIdentifier("guide_mini_window")
+                    .alert("ホームへ戻りますか？", isPresented: $showHomeConfirm) {
+                        Button("Yes") { returnHomeKeepingProgress() }
+                        Button("No", role: .cancel) {}
+                    } message: {
+                        Text(step == .session && !sessionIsFinished ? "途中の改善は「改善途中」として残り、改善からあとで再開できます。" : "")
+                    }
             }
             .padding(.top, 8)
             .padding(.bottom, 2)
 
-            // ── 呼吸ビジュアル（大型・邪魔なし）
+            // ── 呼吸ビジュアル（大型・邪魔なし）。拡大した分（scaleEffect はレイアウトの大きさを変えない）を下に確保し、残り時間と重ねない
             sessionVisual
+                .padding(.bottom, isCompactHeight ? 36 : (sessionIsRunning ? 52 : 30))
 
             // ── 残り時間表示
             VStack(spacing: 2) {
                 if sessionIsFinished {
-                    Text("SESSION COMPLETE")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundStyle(Color.cyan.opacity(0.60))
-                        .tracking(2.5)
+                    Text("おつかれさま！結果をまとめているよ")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.cyan.opacity(0.8))
                 }
                 HStack(alignment: .lastTextBaseline, spacing: 5) {
                     Text(sessionTimeString)
-                        .font(.system(size: 40, weight: .thin, design: .rounded))
+                        .font(.system(size: isCompactHeight ? 40 : 64, weight: .thin, design: .rounded))
                         .foregroundStyle(.white.opacity(sessionIsFinished ? 0.22 : 0.88))
                         .monospacedDigit()
                         .contentTransition(.numericText())
                     if !sessionIsFinished {
-                        Text("REMAINING")
-                            .font(.system(size: 8, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.white.opacity(0.20))
-                            .tracking(1.5)
-                            .padding(.bottom, 5)
+                        Text("のこり")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .padding(.bottom, 10)
                     }
                 }
             }
@@ -895,9 +1087,47 @@ struct GuideFlowView: View {
             // ── BIG セッションボタン（コックピット緊急停止風）
             if !sessionIsFinished {
                 bigSessionButton.padding(.horizontal, 20)
+                // 一時停止（STOP は終了して結果へ。途中で休みたいときはこちら）
+                if sessionIsRunning {
+                    HStack(spacing: 24) {
+                        Button { sessionIsRunning = false } label: {
+                            Label("一時停止", systemImage: "pause.fill")
+                                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("ガイドを止めて、あとで再開できます")
+                        .accessibilityIdentifier("guide_pause_button")
+                        // 全体UI 26 ページ: 状態が適度（緊張が高くない）なら、途中で終えてよい
+                        if MindState.from(score: viewModel.graphicInput.score) != .overTense {
+                            Button { finishSession(early: true) } label: {
+                                Text("→ Finish").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color.cyan.opacity(0.9))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("ここで終えて結果を見る")
+                            .accessibilityIdentifier("guide_finish_button")
+                        }
+                    }
+                    .padding(.top, 10)
+                }
             }
 
             Spacer(minLength: 24)
+        }
+        .sheet(isPresented: $showMokorinTalk) {
+            ContextCalibrationView(flowState: flowState) { showMokorinTalk = false }
+        }
+        .onAppear {
+            // 改善途中からの再開: 新しい「前」の計測で始め、残り時間から続ける
+            // タブに常駐していて実施画面がそのまま残っている場合は、残り時間もそのまま。再開の印だけ消す
+            if adoptedResume == nil, resume == nil, flowState.pendingImprovement != nil {
+                flowState.pendingImprovement = nil
+                return
+            }
+            guard let r = adoptedResume ?? resume, !didApplyResume else { return }
+            didApplyResume = true
+            startSession()
+            sessionElapsed = r.remainingSeconds
+            flowState.pendingImprovement = nil
         }
     }
 
@@ -923,7 +1153,7 @@ struct GuideFlowView: View {
                     center: .center, startRadius: 0, endRadius: 90
                 )
             }
-            .frame(width: 400, height: 400)
+            .frame(width: isCompactHeight ? 300 : 400, height: isCompactHeight ? 300 : 400)
             .frame(maxWidth: .infinity)
             .allowsHitTesting(false)
 
@@ -941,10 +1171,20 @@ struct GuideFlowView: View {
                         .frame(width: 240, height: 240)
                 }
             }
+            // 改善資料 3 ページ: グラフィックを大きく表示する（実施中はさらに大きく）
+            .scaleEffect(isCompactHeight ? (sessionIsRunning ? 1.0 : 0.92) : (sessionIsRunning ? 1.38 : 1.2))
+            .animation(.easeInOut(duration: 0.5), value: sessionIsRunning)
             .frame(maxWidth: .infinity)
         }
+        .overlay(alignment: .topLeading) {
+            // 終わりが近いときの案内は左上（残り時間・STOP に重ねない）
+            MokorinSessionHint(remaining: sessionElapsed, total: sessionDurationSeconds, isRunning: sessionIsRunning)
+                .padding(.leading, 6)
+                .padding(.top, 2)
+                .animation(.easeInOut(duration: 0.4), value: sessionElapsed)
+        }
         .padding(.horizontal, 8)
-        .frame(minHeight: 300)
+        .frame(minHeight: isCompactHeight ? 250 : 340)
         // ── 左右コックピットサイドフレーム（リベット付き）
         .overlay(alignment: .leading) {
             Canvas { ctx, size in
@@ -1219,32 +1459,80 @@ struct GuideFlowView: View {
     ]
 
     private var sessionDurationPicker: some View {
-        HStack(spacing: 10) {
-            ForEach(sessionDurationOptions, id: \.seconds) { opt in
-                Button {
-                    sessionDurationSeconds = opt.seconds
-                    sessionElapsed = opt.seconds
-                } label: {
-                    Text(opt.label)
+        VStack(spacing: 6) {
+            // 全体UI 19 ページ: 推奨時間の文章と、推奨時間を光らせる
+            if let rec = recommendedDuration {
+                Text("おすすめは\(rec.seconds / 60)分だよ（\(rec.reason)）")
+                    .font(.system(size: 11)).foregroundStyle(.white.opacity(0.6))
+                    .accessibilityIdentifier("recommended_duration")
+            }
+            HStack(spacing: 10) {
+                ForEach(sessionDurationOptions, id: \.seconds) { opt in
+                    let recommended = recommendedDuration?.seconds == opt.seconds
+                    Button {
+                        sessionDurationSeconds = opt.seconds
+                        sessionElapsed = opt.seconds
+                    } label: {
+                        Text(opt.label)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(sessionDurationSeconds == opt.seconds ? .black : .white.opacity(0.55))
+                            .padding(.horizontal, 18).padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20)
+                                    .fill(sessionDurationSeconds == opt.seconds
+                                          ? Color.cyan.opacity(0.85)
+                                          : Color.white.opacity(0.10))
+                            )
+                            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(Color.yellow.opacity(recommended ? 0.85 : 0), lineWidth: 1.5))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(opt.label)を選択" + (recommended ? "（おすすめ）" : ""))
+                }
+                // 全体UI 20 ページ: 時間を自分で選ぶ
+                Button { showDurationPicker = true } label: {
+                    Text(sessionDurationOptions.contains { $0.seconds == sessionDurationSeconds } ? "選択" : "\(sessionDurationSeconds / 60)分")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(sessionDurationSeconds == opt.seconds ? .black : .white.opacity(0.55))
-                        .padding(.horizontal, 18).padding(.vertical, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 20)
-                                .fill(sessionDurationSeconds == opt.seconds
-                                      ? Color.cyan.opacity(0.85)
-                                      : Color.white.opacity(0.10))
-                        )
+                        .foregroundStyle(sessionDurationOptions.contains { $0.seconds == sessionDurationSeconds } ? .white.opacity(0.55) : .black)
+                        .padding(.horizontal, 14).padding(.vertical, 8)
+                        .background(RoundedRectangle(cornerRadius: 20).fill(sessionDurationOptions.contains { $0.seconds == sessionDurationSeconds } ? Color.white.opacity(0.10) : Color.cyan.opacity(0.85)))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(opt.label)を選択")
+                .accessibilityLabel("時間を自分で選ぶ")
+                .accessibilityIdentifier("duration_custom")
             }
+        }
+        .sheet(isPresented: $showDurationPicker) {
+            NavigationStack {
+                VStack(spacing: 20) {
+                    Text("何分で行いますか？").font(.system(size: 17, weight: .semibold))
+                    Stepper("\(customMinutes) 分", value: $customMinutes, in: 1...10)
+                        .padding(.horizontal, 40)
+                    Button("この時間にする") {
+                        sessionDurationSeconds = customMinutes * 60
+                        sessionElapsed = customMinutes * 60
+                        showDurationPicker = false
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("→ 時間を相談する") {
+                        showDurationPicker = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { showMokorinTalk = true }
+                    }
+                    .accessibilityIdentifier("duration_consult")
+                }
+                .padding(.top, 24)
+                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { showDurationPicker = false } } }
+            }
+            .presentationDetents([.medium])
+            .preferredColorScheme(.dark)
         }
     }
 
     private var bigSessionButton: some View {
         let isStop = sessionIsRunning
-        return Button { sessionIsRunning.toggle() } label: {
+        // 改善資料 4 ページ: STOP で結果へ（既存の終了処理を通る）。一時停止・再開は別の小さなボタン
+        return Button {
+            if sessionIsRunning { finishSession(early: true) } else { sessionIsRunning = true }
+        } label: {
             ZStack {
                 // 外縁グロー（2層）
                 // 最外グロー（3層）
@@ -1288,7 +1576,7 @@ struct GuideFlowView: View {
                 HStack(spacing: 12) {
                     Image(systemName: isStop ? "stop.fill" : "play.fill")
                         .font(.system(size: 22, weight: .bold))
-                    Text(isStop ? "STOP" : "START")
+                    Text(isStop ? "STOP" : (sessionElapsed < sessionDurationSeconds && !sessionIsFinished ? "再開" : "START"))
                         .font(.system(size: 22, weight: .bold, design: .monospaced))
                         .tracking(4.0)
                 }
@@ -1319,6 +1607,12 @@ struct GuideFlowView: View {
                 .font(.system(size: 13, weight: .light))
                 .foregroundStyle(.white.opacity(0.48))
                 .multilineTextAlignment(.center)
+            // もこりんの案内（計測を妨げないよう、動き・音声なしの1行だけ）
+            Text("もこりん：今、測定しているよ。いつもどおりにしていてね。")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.55))
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("mokorin_measuring_hint")
 
             VStack(spacing: 8) {
                 let newSamples    = viewModel.watchMessageCount - remeasurementStartCount
@@ -1361,35 +1655,48 @@ struct GuideFlowView: View {
     // MARK: - ▼ STEP 5: Result
 
     private var resultContent: some View {
+        ScrollViewReader { proxy in
         ScrollView(showsIndicators: false) {
             VStack(spacing: 16) {
-                // ── ヘッダーライン
-                HStack(spacing: 8) {
-                    Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5)
-                    Text("SESSION COMPLETE")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.28))
-                        .tracking(2.5)
-                        .fixedSize()
-                    Rectangle().fill(Color.white.opacity(0.10)).frame(height: 0.5)
-                }
-                .padding(.top, 10)
+                // ── 上部: 実施の結果（方法・時間・主な数値・実測/デモ）
+                resultHero
+                    .padding(.top, 8)
 
-                // ── 前後スナップショット比較（簡素化）
-                if let before = beforeSnapshot, let after = afterSnapshot {
-                    ResultComparisonCard(before: before, after: after)
+                // ── 中央: 変化のグラフィック（前後のスコア）ともこりんの説明
+                if let before = beforeSnapshot {
+                    resultChangeGraphic(before: before, after: afterSnapshot)
+                }
+                resultMokorinExplanation
+
+                Color.clear.frame(height: 1).id("result_reflection")
+                // ── 本人の緊張の評価（前後）と試作スコア（主観評価＋HR・SDNN。検証用の表示）
+                if let result = prototypeResult {
+                    PrototypeScorePanel(s0: subjectiveBefore, s0After: $subjectiveAfter, result: result,
+                                        usesDemoData: (beforeSnapshot?.isMockData ?? false) || (afterSnapshot?.isMockData ?? false))
                 }
 
-                // ── AI DEBRIEF（主表示）
-                if let insight = latestAIInsight {
-                    AIDebriefCard(
-                        insight:         insight,
-                        selfReportBefore: selfReportBefore,
-                        selfReportAfter:  selfReportAfter
-                    )
-                } else if let feedback = aiFeedbackResult {
-                    // フォールバック: 旧カード（insight未生成時のみ）
-                    AIFeedbackCardView(result: feedback)
+                // ── もこりんとの振り返り（5 つの答え。保存しない）
+                MokorinReflectionView(alternative: nextMethod, answer: $reflectionAnswer) { next in
+                    guard let ex = next.guideExercise else { return }
+                    selectedExercise = ex
+                    reflectionAnswer = nil
+                    subjectiveAfter = nil
+                    resetForNewSession()
+                }
+
+                // ── AI の詳しいフィードバック（必要なときだけ開く）
+                if latestAIInsight != nil || aiFeedbackResult != nil {
+                    DisclosureGroup {
+                        if let insight = latestAIInsight {
+                            AIDebriefCard(insight: insight, selfReportBefore: selfReportBefore, selfReportAfter: selfReportAfter)
+                        } else if let feedback = aiFeedbackResult {
+                            AIFeedbackCardView(result: feedback)
+                        }
+                    } label: {
+                        Text("詳しいフィードバック").font(.system(size: 13, weight: .medium)).foregroundStyle(.white.opacity(0.75))
+                    }
+                    .tint(.cyan)
+                    .accessibilityIdentifier("result_detail_feedback")
                 }
 
                 // ── 呼吸後の体感入力
@@ -1449,6 +1756,20 @@ struct GuideFlowView: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 36)
+            Color.clear.frame(height: 1).id("result_bottom")
+        }
+        #if DEBUG
+        .onAppear {
+            // シミュレーター検証用: MW_SCROLL_RESULT=reflection で振り返りの位置まで表示する
+            if ProcessInfo.processInfo.environment["MW_FLOW_AUTOPILOT"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { proxy.scrollTo("result_reflection", anchor: .top) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { reflectionAnswer = .littleCalmer }
+            }
+            if ProcessInfo.processInfo.environment["MW_SCROLL_RESULT"] == "reflection" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { proxy.scrollTo("result_reflection", anchor: .top) }
+            }
+        }
+        #endif
         }
     }
 
@@ -1460,7 +1781,25 @@ struct GuideFlowView: View {
             guard sessionIsRunning else { return }
             if sessionElapsed > 0 {
                 sessionElapsed -= 1
-                if sessionElapsed == 0 {
+                if sessionElapsed == 0 { finishSession(early: false) }
+            }
+        case .remeasurement:
+            remeasurementElapsed += 1
+            let newSamples = viewModel.watchMessageCount - remeasurementStartCount
+            if newSamples >= GuideFlowConstants.minWatchSamplesForRemeasurement
+               || remeasurementElapsed >= GuideFlowConstants.maxRemeasurementSeconds {
+                completeRemeasurement()
+            }
+        default: break
+        }
+    }
+
+    /// ガイドを終える（時間どおり、または STOP）。既存の終了処理: フィードバック生成 → 再計測 → 結果
+    private func finishSession(early: Bool) {
+        guard step == .session, !sessionIsFinished else { return }
+        let practiced = sessionDurationSeconds - sessionElapsed
+        MindWaveDebugLogger.log(.flow, "session finish early=\(early) practicedSeconds=\(practiced)")
+        do {
                     sessionIsRunning  = false
                     sessionIsFinished = true
                     aiFeedbackResult  = LocalAIFeedbackGenerator.generate(
@@ -1473,8 +1812,8 @@ struct GuideFlowView: View {
                         breathingMethod:   selectedExercise ?? .breathing478,
                         currentHeartRate:  guideHeartRateNumeric,
                         state:             viewModel.graphicInput.state,
-                        sessionElapsed:    sessionDurationSeconds,
-                        sessionCompleted:  true,
+                        sessionElapsed:    practiced,
+                        sessionCompleted:  !early,
                         beforeHeartRate:   beforeSnapshot?.heartRate,
                         afterHeartRate:    nil,
                         beforeState:       beforeSnapshot?.state,
@@ -1486,20 +1825,10 @@ struct GuideFlowView: View {
                     )
                     latestAIInsight = LocalMindWaveAIEngine.generate(context: ctx)
                     MindWaveDebugLogger.log(.flow, "session completed")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + (early ? 0.3 : 1.5)) {
                         guard self.sessionIsFinished else { return }
                         self.startRemeasurement()
                     }
-                }
-            }
-        case .remeasurement:
-            remeasurementElapsed += 1
-            let newSamples = viewModel.watchMessageCount - remeasurementStartCount
-            if newSamples >= GuideFlowConstants.minWatchSamplesForRemeasurement
-               || remeasurementElapsed >= GuideFlowConstants.maxRemeasurementSeconds {
-                completeRemeasurement()
-            }
-        default: break
         }
     }
 
@@ -1642,6 +1971,212 @@ struct GuideFlowView: View {
             latestAIInsight        = outcome.insight
             insightProviderVersion = outcome.providerVersion
         }
+    }
+
+    // MARK: - もこりん（会話の内容からのおすすめ・試作スコア）
+
+    /// 同じ流れ（6 時間以内）の測定前の会話の内容
+    private var recentMemory: MokorinSessionMemory? {
+        guard let m = flowState.mokorinMemory, Date().timeIntervalSince(m.capturedAt) <= 6 * 3600 else { return nil }
+        return m
+    }
+
+    private var methodRecommendations: [MethodRecommendation] {
+        MokorinMethodAdvisor.recommend(recentMemory?.checkIn ?? MokorinCheckIn())
+    }
+
+    /// おすすめの呼吸法（会話からの推薦がなければ、場面の既定のおすすめ）
+    private var recommendedExercise: GuideExercise? {
+        if let ex = methodRecommendations.compactMap({ $0.method.guideExercise }).first { return ex }
+        if recentMemory?.checkIn?.body?.value.contains(.shallowBreath) == true { return .breathing214 }
+        // 会話がなく測定値があるときは、緊張スコア・状態から選ぶ（PR #5 の判定）
+        if guideHeartRateNumeric > 0 {
+            let score = sessionScoreIntensity * 100.0
+            if score >= 66 || viewModel.graphicInput.state == .overTense { return .breathing214 }
+            if score >= 33 || viewModel.graphicInput.state == .optimalTension { return .breathing478 }
+            return .box
+        }
+        return selectedScene?.recommendedExercise
+    }
+
+    /// 次に試す方法: 推薦のうち今回と違うガイド、なければ今回と違う呼吸法
+    private var nextMethod: ImprovementMethod? {
+        if let m = methodRecommendations.map(\.method).first(where: { $0.guideExercise != nil && $0.guideExercise != selectedExercise }) { return m }
+        return GuideExercise.allCases.first { $0 != selectedExercise && !(recentMemory?.checkIn?.body?.value.contains(.shallowBreath) == true && ImprovementMethod.from($0).hasLongBreathHold) }
+            .map(ImprovementMethod.from)
+    }
+
+    /// おすすめの実施時間（会話からの推薦の目安を 1・3・5 分のいずれかに）と理由
+    private var recommendedDuration: (seconds: Int, reason: String)? {
+        guard let rec = methodRecommendations.first(where: { $0.method.guideExercise != nil }) ?? methodRecommendations.first else { return nil }
+        let options = [60, 180, 300]
+        let nearest = options.min { abs($0 - rec.suggestedSeconds) < abs($1 - rec.suggestedSeconds) } ?? 60
+        let why = recentMemory?.checkIn?.timing?.value == .soon ? "予定がすぐだから短めに" : "落ち着いて取り組めるように"
+        return (nearest, why)
+    }
+
+    /// 本人の緊張の評価（試作スコアの S0）: 会話で聞いた強さ、なければ体感入力から
+    private var subjectiveBefore: Int? {
+        recentMemory?.checkIn?.tension?.value ?? SubjectiveScale.from(selfReportBefore)
+    }
+
+    private var prototypeResult: PrototypeTensionResult? {
+        guard let before = beforeSnapshot else { return nil }
+        return PrototypeTensionScore.calculate(PrototypeScoreInputBuilder.make(s0: subjectiveBefore, before: before, after: afterSnapshot))
+    }
+
+    /// もこりんの結果の説明（端末内）と、自由な質問用の会話（POST /v1/chat・同意時のみ・測定値は既存の方針でしか送らない）
+    private func makeMokorinCompanion() -> MokorinCompanionViewModel? {
+        guard let before = beforeSnapshot else { return nil }
+        let input = MokorinResultInput(startedAt: before.timestamp, scene: selectedScene ?? .other,
+                                       exerciseTitle: (selectedExercise ?? .breathing478).title,
+                                       durationSeconds: sessionDurationSeconds, before: before, after: afterSnapshot,
+                                       selfReportBefore: selfReportBefore, selfReportAfter: selfReportAfter)
+        let history = historyStore.records
+        let memory = flowState.mokorinMemory
+        let flowState = self.flowState, viewModel = self.viewModel
+        let chat = ChatViewModel(
+            sceneProvider: { flowState.measurementContext.scene },
+            measurementProvider: {
+                ChatBiometricPolicy.measurementContext(from: viewModel.lastAnalysisResult, now: Date(),
+                                                       consented: InsightConsentStore().isConsented)
+            },
+            biometricConsentProvider: { InsightConsentStore().isConsented })
+        return MokorinCompanionViewModel(chat: chat) { recent in
+            MokorinResultExplainer.explain(input, history: history, memory: memory, purpose: .result, recentUserText: recent)
+        }
+    }
+
+    // MARK: - 結果（2026-11-11 改修）
+
+    /// iPhone SE など縦が短い画面（実施画面のグラフィックを小さめにして、上下の操作を隠さない）
+    private var isCompactHeight: Bool { UIScreen.main.bounds.height < 700 }
+
+    private var usesDemoResult: Bool { (beforeSnapshot?.isMockData ?? false) || (afterSnapshot?.isMockData ?? false) }
+
+    /// 結果の上部: 方法・時間、本人の評価・心拍・SDNN の前後、実測かデモか
+    private var resultHero: some View {
+        let practiced = max(0, sessionDurationSeconds - sessionElapsed)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("\((selectedExercise ?? .breathing478).title) を \(practiced / 60 > 0 ? "\(practiced / 60)分" : "")\(practiced % 60 > 0 ? "\(practiced % 60)秒" : "")")
+                    .font(.system(size: 22, weight: .bold)).foregroundStyle(.white)
+                Spacer()
+                Text(usesDemoResult ? "デモ値" : "実測")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(usesDemoResult ? Color.orange : Color.green)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(Capsule().fill((usesDemoResult ? Color.orange : Color.green).opacity(0.15)))
+                    .accessibilityIdentifier("result_data_badge")
+            }
+            HStack(spacing: 8) {
+                metricChip("緊張（本人）", before: subjectiveBefore.map(Double.init), after: subjectiveAfter.map(Double.init), unit: "")
+                metricChip("心拍", before: beforeSnapshot?.heartRate, after: afterSnapshot?.heartRate, unit: "bpm")
+                metricChip("SDNN", before: beforeSnapshot?.hrv, after: afterSnapshot?.hrv, unit: "ms")
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color.white.opacity(0.06))
+            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.cyan.opacity(0.25), lineWidth: 1)))
+        .accessibilityIdentifier("result_hero")
+    }
+
+    /// 前後の値（ないものは「--」。0 にしない）
+    private func metricChip(_ title: String, before: Double?, after: Double?, unit: String) -> some View {
+        let f: (Double?) -> String = { $0.map { "\(Int($0.rounded()))" } ?? "--" }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.system(size: 10)).foregroundStyle(.white.opacity(0.55))
+            Text("\(f(before)) → \(f(after))").font(.system(size: 15, weight: .semibold, design: .rounded)).foregroundStyle(.white)
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(before == nil && after == nil ? "未取得" : unit).font(.system(size: 9)).foregroundStyle(.white.opacity(0.4))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.3)))
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 変化のグラフィック: ガイドの前後の緊張スコア（既存の計算値）を棒で比べる
+    private func resultChangeGraphic(before: GuideSnapshot, after: GuideSnapshot?) -> some View {
+        let b = before.score, a = after?.score
+        let delta = a.map { Int(($0 - b).rounded()) }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("緊張スコアの変化").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
+                Spacer()
+                if let d = delta {
+                    Text(d == 0 ? "±0" : (d > 0 ? "+\(d)" : "\(d)"))
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(d < 0 ? Color.cyan : (d > 0 ? Color.orange : .white))
+                }
+            }
+            scoreBar(label: "前", value: b, color: .orange)
+            if let a { scoreBar(label: "後", value: a, color: .cyan) }
+            else { Text("ガイド後の値は取れていないよ").font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)) }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 18).fill(Color.white.opacity(0.04)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("緊張スコア 前 \(Int(b.rounded()))" + (a.map { "、後 \(Int($0.rounded()))" } ?? "、後は未取得"))
+        .accessibilityIdentifier("result_change_graphic")
+    }
+
+    private func scoreBar(label: String, value: Double, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Text(label).font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.7)).frame(width: 18)
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.08))
+                    Capsule().fill(LinearGradient(colors: [color.opacity(0.5), color], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(8, g.size.width * CGFloat(min(100, max(0, value)) / 100)))
+                }
+            }
+            .frame(height: 14)
+            Text("\(Int(value.rounded()))").font(.system(size: 13, weight: .semibold, design: .rounded)).foregroundStyle(.white).frame(width: 30, alignment: .trailing)
+        }
+    }
+
+    /// もこりんの短い説明（端末内。詳しくは「もこりんと結果を見る」）
+    @ViewBuilder
+    private var resultMokorinExplanation: some View {
+        if let before = beforeSnapshot {
+            let input = MokorinResultInput(startedAt: before.timestamp, scene: selectedScene ?? .other,
+                                           exerciseTitle: (selectedExercise ?? .breathing478).title,
+                                           durationSeconds: sessionDurationSeconds, before: before, after: afterSnapshot,
+                                           selfReportBefore: selfReportBefore, selfReportAfter: selfReportAfter)
+            let brief = MokorinResultExplainer.explain(input, history: historyStore.records, memory: flowState.mokorinMemory)
+            let lines = Array((brief.cautions.prefix(usesDemoResult ? 1 : 0) + brief.interpretation.prefix(1) + brief.missing.prefix(1)).prefix(2))
+            HStack(alignment: .top, spacing: 10) {
+                MokorinAvatarView(size: 56, pose: MokorinPose().with(.happy, .nod))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(lines.isEmpty ? "おつかれさま！一緒に結果を見てみよう。" : lines.joined(separator: "\n"))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Color(red: 0.08, green: 0.12, blue: 0.22))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button { showMokorinCompanion = true } label: {
+                        Text("もこりんと詳しく見る ›").font(.system(size: 13, weight: .semibold)).foregroundStyle(Color(red: 0.1, green: 0.45, blue: 0.7))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("mokorin_result_button")
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 16).fill(Color(red: 0.93, green: 0.96, blue: 1.0)))
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("result_mokorin_explanation")
+        }
+    }
+
+    /// ホームへ戻る。実施の途中なら残り時間を「改善途中」として残す
+    private func returnHomeKeepingProgress() {
+        if step == .session, !sessionIsFinished, let ex = selectedExercise, sessionElapsed > 0 {
+            sessionIsRunning = false
+            flowState.pendingImprovement = PendingImprovement(scene: selectedScene ?? .other, exercise: ex,
+                                                              durationSeconds: sessionDurationSeconds,
+                                                              remainingSeconds: sessionElapsed, savedAt: Date())
+        }
+        dismiss()
+        Task { @MainActor in selectedTab = 0 }
     }
 
     private func resetForNewSession() {
@@ -1911,61 +2446,6 @@ private struct LargeExerciseCard: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
-
-/// 呼吸法選択画面で横からひょこっと登場しておすすめを提案するもこりん
-private struct GuideMokorinRecommendPopup: View {
-    let speechText: String
-    let onTapRecommend: () -> Void
-
-    @State private var isVisible = false
-    @State private var mokorinPose = MokorinPose()
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            Spacer(minLength: 10)
-
-            Button(action: onTapRecommend) {
-                ZStack(alignment: .bottomTrailing) {
-                    Text(speechText)
-                        .font(.system(size: 13.5, weight: .bold))
-                        .foregroundStyle(Color(red: 0.12, green: 0.15, blue: 0.18))
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(3)
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 11)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(Color.white.opacity(0.96))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .strokeBorder(Color(red: 0.30, green: 0.75, blue: 0.85), lineWidth: 2.5)
-                        )
-                        .shadow(color: .black.opacity(0.35), radius: 8, x: 0, y: 4)
-                }
-            }
-            .buttonStyle(.plain)
-            .offset(y: -48)
-
-            MokorinAvatarView(size: 132, pose: mokorinPose)
-                .frame(width: 132, height: 132)
-                .onTapGesture(perform: onTapRecommend)
-        }
-        .padding(.trailing, 6)
-        .offset(x: isVisible ? 0 : 340)
-        .opacity(isVisible ? 1 : 0)
-        .animation(.spring(response: 0.48, dampingFraction: 0.78), value: isVisible)
-        .onAppear {
-            mokorinPose = mokorinPose.with(.happy, .wave)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                withAnimation(.spring(response: 0.48, dampingFraction: 0.78)) {
-                    isVisible = true
-                }
-            }
-        }
-    }
-}
-
 
 // MARK: - ResultComparisonCard（変更なし）
 

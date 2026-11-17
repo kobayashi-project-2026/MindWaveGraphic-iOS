@@ -1,0 +1,12 @@
+// DevServer.xcconfig — 開発用サーバーの接続先（iOS アプリの Debug 構成だけが読み込む。Release では使わない）
+//
+// 値はここに書かない。scripts/dev-device-setup.sh が Git 管理外の DevServer.local.xcconfig に書き込む。
+// DebugInfo.plist がこの値を Info.plist に入れ、RemoteInsightConfiguration が DEBUG のときだけ読む
+// （Xcode スキームの環境変数 MW_INSIGHT_BASE_URL / MW_INSIGHT_CLIENT_TOKEN がある場合はそちらを優先）。
+// ホーム画面から起動した場合（スキームの環境変数が渡らない）も、開発用サーバーへ接続できるようにするため。
+
+MW_DEV_SERVER_HOST =
+MW_DEV_SERVER_PORT =
+MW_DEV_CLIENT_TOKEN =
+
+#include? "DevServer.local.xcconfig"

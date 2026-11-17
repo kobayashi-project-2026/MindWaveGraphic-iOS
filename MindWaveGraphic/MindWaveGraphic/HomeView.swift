@@ -22,6 +22,7 @@ struct HomeView: View {
     @Binding var selectedTab: Int
 
     @State private var showStatusDetail     = false
+    /// 緊張の高まりの知らせ（状態が高い緊張に変わったときだけ数秒表示）
     @State private var buttonPulse: Bool    = false
     #if DEBUG
     @State private var showDebugDiagnostics = false
@@ -56,7 +57,40 @@ struct HomeView: View {
         return 0
     }
 
-    // 表示用 GraphicInput（Simulator demo override → 心拍フロア補正）
+    // MARK: - 試作スコア（主観評価＋HR・SDNN）
+
+    /// 会話で聞いた緊張の強さ（S0）
+    private var subjectiveS0: Int? { flowState.mokorinMemory?.checkIn?.tension?.value }
+
+    /// 今の計測値（ViewModel が現在値として扱う値だけ。値がなければ nil で、作らない）
+    private var currentPrototypeReadings: (hr: TimedReading?, sdnn: TimedReading?) {
+        let hr = viewModel.snapshotHeartRate.map {
+            TimedReading(value: $0, measuredAt: viewModel.latestWatchHeartRateDate ?? viewModel.latestHeartRateSampleDate ?? Date())
+        }
+        let sdnn = viewModel.snapshotHRV.map { TimedReading(value: $0, measuredAt: viewModel.latestHRVSampleDate ?? Date()) }
+        return (hr, sdnn)
+    }
+
+    /// 試作スコア（S0 があるときだけ）。グラフィックと説明に使う
+    private var prototypeLive: PrototypeTensionResult? {
+        guard let s0 = subjectiveS0 else { return nil }
+        let base = flowState.prototypeBaseline
+        let cur = currentPrototypeReadings
+        return PrototypeTensionScore.calculate(PrototypeTensionInput(
+            subjectiveBaseline: Double(s0), baselineHR: base?.hr, currentHR: cur.hr,
+            baselineSDNN: base?.sdnn, currentSDNN: cur.sdnn, now: Date()))
+    }
+
+    /// S0 を聞いた会話のあと、最初の計測値を基準（HR0・SDNN0）として残す
+    private func captureBaselineIfNeeded() {
+        guard subjectiveS0 != nil, let memory = flowState.mokorinMemory else { return }
+        if flowState.prototypeBaseline?.capturedFor == memory.capturedAt { return }
+        let cur = currentPrototypeReadings
+        guard cur.hr != nil || cur.sdnn != nil else { return }
+        flowState.prototypeBaseline = PrototypeBaseline(hr: cur.hr, sdnn: cur.sdnn, capturedFor: memory.capturedAt)
+    }
+
+    // 表示用 GraphicInput（Simulator demo override → 試作スコア → 心拍フロア補正）
     private var displayInput: GraphicInput {
         let base = viewModel.graphicInput
         #if DEBUG && targetEnvironment(simulator)
@@ -66,17 +100,77 @@ struct HomeView: View {
                                 state: MindState.from(score: corrected))
         }
         #endif
+        // 会話で緊張の強さ（S0）を聞いていれば、試作スコアでグラフィックを動かす（計算はアプリ内で決定的に行う）
+        if let s = prototypeLive?.score {
+            return GraphicInput(score: s, confidence: base.confidence, state: MindState.from(score: s))
+        }
         let correctedScore = max(base.score, heartRateVisualFloor)
         guard correctedScore > base.score else { return base }
         return GraphicInput(score: correctedScore, confidence: base.confidence, state: base.state)
     }
 
     // 過緊張状態かどうか（コックピットの赤アラート閾値 scoreIntensity > 0.66 と連動）
+    /// 実測値のときだけ（未計測・デモ値では出さない。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ値でも出す）
     private var isHyperTensionState: Bool {
-        displayInput.score >= 66.0
+        guard displayInput.score >= 66.0, hasDisplayData else { return false }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MW_EDGE_GUIDE_DEMO"] == "1" { return true }
+        #endif
+        return !viewModel.isMockMode
     }
 
     private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
+
+    /// 現在の状態のカード（2026-11-11 改修: 状態・大きな数値・データの種類を一目で）
+    private var statusHero: some View {
+        let score = Int(displayInput.score.rounded())
+        let label: String = {
+            switch displayState {
+            case .underAroused: return "落ち着いている"
+            case .optimalTension: return "適度な緊張"
+            case .overTense: return "緊張が高め"
+            }
+        }()
+        let source: (text: String, color: Color) = {
+            if let p = prototypeLive { return ("試作スコア・" + (p.status == .subjectiveOnly ? "本人の評価のみ" : p.status == .complete ? "評価＋心拍・SDNN" : "評価＋一部の生体情報"), .cyan) }
+            if !hasDisplayData { return ("未計測", Color.white.opacity(0.5)) }
+            return viewModel.isMockMode ? ("デモ値", .orange) : ("実測", .green)
+        }()
+        return VStack(alignment: .leading, spacing: 2) {
+            Text("今の状態")
+                .font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.55))
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(hasDisplayData || prototypeLive != nil ? "\(score)" : "--")
+                    .font(.system(size: 34, weight: .thin, design: .rounded))
+                    .foregroundStyle(accentColor)
+                    .contentTransition(.numericText())
+                Text(hasDisplayData || prototypeLive != nil ? label : "計測前")
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
+            }
+            Text(source.text)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(source.color)
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Capsule().fill(source.color.opacity(0.15)))
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.45))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(accentColor.opacity(0.35), lineWidth: 0.8)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("今の状態 \(hasDisplayData || prototypeLive != nil ? "\(score) \(label)" : "計測前")。\(source.text)")
+        .accessibilityIdentifier("home_status_hero")
+    }
+
+    /// 表示中のスコアから決めた状態（グラフィックの色と一致させる）
+    private var displayState: MindState { MindState.from(score: displayInput.score) }
+
+    /// もこりんのポップアップを出すか（計測データがあるときだけ。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ表示でも出す）
+    private var edgeGuideActive: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MW_EDGE_GUIDE_DEMO"] == "1" { return true }
+        #endif
+        return hasDisplayData
+    }
 
     private var scoreIntensity: Double { min(max(displayInput.score / 100.0, 0), 1) }
 
@@ -148,7 +242,16 @@ struct HomeView: View {
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
 
-                // 6. ヘッダー ＋ 過緊張時の上部通知バナー
+                // 5c'. 現在の状態（大きな数値・状態・データの種類）。グラフィックの中央を隠さないよう左上に置く
+                HStack {
+                    statusHero
+                    Spacer()
+                }
+                .padding(.top, 96)
+                .padding(.horizontal, 16)
+                .zIndex(44)
+
+                // 6. ヘッダー ＋ 過緊張時の上部通知バナー（PR #5）＋ 改善途中（全体UI 24〜25 ページ）。医学的な警告ではない
                 VStack(spacing: 10) {
                     headerBar
                     HyperTensionTopBanner(isVisible: isHyperTensionState) {
@@ -156,15 +259,28 @@ struct HomeView: View {
                             selectedTab = 1
                         }
                     }
+                    .accessibilityIdentifier("tension_banner")
+                    if let p = flowState.pendingImprovement {
+                        Button { selectedTab = 1 } label: {
+                            Text("改善途中（\(p.exercise.title)・残り\(p.remainingSeconds / 60):\(String(format: "%02d", p.remainingSeconds % 60))）  再開 ›")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 14).padding(.vertical, 6)
+                                .background(Capsule().fill(Color.cyan.opacity(0.9)))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("pending_improvement")
+                    }
                 }
                 .padding(.top, 8)
                 .padding(.horizontal, 18)
                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isHyperTensionState)
                 .zIndex(50)
 
-                // 7. コックピット計器パネルの右端から横スライドでひょこっと登場するもこりん
+                // 7. コックピット計器パネルの右端から横スライドでひょこっと登場するもこりん（計測データがあるときだけ）
                 VStack(spacing: 0) {
                     Spacer()
+                    if edgeGuideActive {
                     MokorinCockpitPopupView(
                         isHyperTension: isHyperTensionState,
                         score: displayInput.score,
@@ -175,6 +291,7 @@ struct HomeView: View {
                         }
                     )
                     .padding(.bottom, dashH + 2)
+                    }
                 }
                 .zIndex(40)
 
@@ -190,6 +307,9 @@ struct HomeView: View {
                 buttonPulse = true
             }
         }
+        .onAppear { captureBaselineIfNeeded() }
+        .onChange(of: viewModel.snapshotHeartRate) { _, _ in captureBaselineIfNeeded() }
+        .onChange(of: viewModel.snapshotHRV) { _, _ in captureBaselineIfNeeded() }
         #if DEBUG
         .sheet(isPresented: $showDebugDiagnostics) {
             NavigationStack {
@@ -267,10 +387,11 @@ struct HomeView: View {
                         .shadow(color: accentColor.opacity(0.45), radius: 10)
                         .animation(.easeInOut(duration: 1.0), value: scoreIntensity)
                 }
-                Text("STRESS & BIOMETRICS")
-                    .font(.system(size: 6.5, weight: .light, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.32))
-                    .tracking(2.5)
+                // 全体UI 8 ページ: ロゴは「Graphic」まで入れる
+                Text("GRAPHIC")
+                    .font(.system(size: 8, weight: .light, design: .monospaced))
+                    .foregroundStyle(Color.white.opacity(0.55))
+                    .tracking(4.0)
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 10)
@@ -310,14 +431,11 @@ struct HomeView: View {
 
             VStack(spacing: 0) {
                 panelTopRip
-                CockpitLeverNav(
-                    selectedTab: $selectedTab,
-                    accentColor: accentColor,
-                    highlightGuide: isHyperTensionState
-                )
-                .padding(.horizontal, 14)
-                .frame(height: 42)
-                .padding(.top, 4)
+                CockpitLeverNav(selectedTab: $selectedTab, accentColor: accentColor,
+                                highlightImprove: isHyperTensionState || flowState.pendingImprovement != nil) { navManager.navigate(to: .dialogue) }
+                    .padding(.horizontal, 14)
+                    .frame(height: 42)
+                    .padding(.top, 4)
                 Spacer(minLength: 2)
                 HStack(alignment: .center, spacing: 6) {
                     pulseInstrument.frame(maxWidth: .infinity)
@@ -1082,18 +1200,24 @@ private struct MetalPanelBackground: View {
 struct CockpitLeverNav: View {
     @Binding var selectedTab: Int
     let accentColor: Color
-    var highlightGuide: Bool = false
-
+    /// 緊張が高いとき・改善途中のとき、「改善」を光らせてレバーの操作を促す（全体UI 9・11 ページ）
+    var highlightImprove: Bool = false
+    /// 「対話」（もこりんとの会話を開く）。2026-11-11 改善資料 2 ページ: 下部メニューを「対話」「改善」に変更。
+    /// 履歴は共通メニューの「履歴」から開ける
+    var onDialogue: () -> Void = {}
+    /// PR #5: 「改善」の位置を点滅させる
     @State private var glowPulse = false
 
+    /// 対話はタブではなく会話の画面を開くため、レバーは改善（0）とホーム（1）の位置だけを示す
     private var leverPos: Int {
-        switch selectedTab { case 1: return 0; case 2: return 2; default: return 1 }
+        switch selectedTab { case 1: return 0; default: return 1 }
     }
 
+    /// tab = -1 は「対話」
     private let navItems: [(label: String, icon: String, tab: Int)] = [
-        ("整える", "wind",                            1),
-        ("ホーム",  "house.fill",                      0),
-        ("対話",   "bubble.left.and.bubble.right.fill", 2),
+        ("改善", "wind",       1),
+        ("ホーム", "house.fill", 0),
+        ("対話", "bubble.left.and.bubble.right.fill", -1),
     ]
 
     var body: some View {
@@ -1102,16 +1226,17 @@ struct CockpitLeverNav: View {
                 ForEach(navItems.indices, id: \.self) { i in
                     let item = navItems[i]
                     let active = selectedTab == item.tab
-                    let isGuideGlowing = (highlightGuide && item.tab == 1)
+                    let isGuideGlowing = (highlightImprove && item.tab == 1 && !active)
 
                     Button {
+                        if item.tab < 0 { onDialogue(); return }
                         withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
                             selectedTab = item.tab
                         }
                     } label: {
                         VStack(spacing: 2) {
                             Image(systemName: item.icon)
-                                .font(.system(size: 11, weight: (active || isGuideGlowing) ? .semibold : .ultraLight))
+                                .font(.system(size: 15, weight: (active || isGuideGlowing) ? .semibold : .light))
                                 .foregroundStyle(
                                     active ? accentColor :
                                     isGuideGlowing ? MindWaveCyberTheme.cyan :
@@ -1124,18 +1249,15 @@ struct CockpitLeverNav: View {
                                     radius: isGuideGlowing ? 8 : 4
                                 )
                             Text(item.label)
-                                .font(.system(size: 8.5, weight: isGuideGlowing ? .bold : .medium, design: .monospaced))
+                                .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(
-                                    active ? accentColor.opacity(0.88) :
-                                    isGuideGlowing ? MindWaveCyberTheme.cyan.opacity(glowPulse ? 1.0 : 0.65) :
-                                    Color.white.opacity(0.20)
-                                )
-                                .shadow(
-                                    color: isGuideGlowing ? MindWaveCyberTheme.cyan.opacity(glowPulse ? 0.85 : 0.25) : .clear,
-                                    radius: 6
+                                    active ? accentColor :
+                                    isGuideGlowing ? MindWaveCyberTheme.cyan.opacity(glowPulse ? 1.0 : 0.7) :
+                                    Color.white.opacity(0.62)
                                 )
                         }
-                        .frame(maxWidth: .infinity).frame(height: 26)
+                        .frame(maxWidth: .infinity).frame(height: 36)
+                        // 緊張が高いとき・改善途中のとき「改善」を光らせる（全体UI 9・11 ページ、PR #5 の点滅）
                         .background(
                             Group {
                                 if isGuideGlowing {
@@ -1154,7 +1276,7 @@ struct CockpitLeverNav: View {
                     }
                     .buttonStyle(.plain)
                     .animation(.easeInOut(duration: 0.18), value: active)
-                    .accessibilityIdentifier(item.tab == 1 ? "nav_calm" : item.tab == 0 ? "nav_home" : "nav_history")
+                    .accessibilityIdentifier(item.tab == 1 ? "nav_calm" : item.tab == 0 ? "nav_home" : "nav_dialogue")
                 }
             }
             .onAppear {
@@ -1236,9 +1358,9 @@ struct CockpitLeverNav: View {
                         .onEnded { v in
                             withAnimation {
                                 if v.translation.width > 40 {
-                                    selectedTab = leverPos == 0 ? 0 : leverPos == 1 ? 2 : 2
+                                    if leverPos == 0 { selectedTab = 0 } else { onDialogue() }
                                 } else if v.translation.width < -40 {
-                                    selectedTab = leverPos == 2 ? 0 : leverPos == 1 ? 1 : 1
+                                    selectedTab = 1
                                 }
                             }
                         }

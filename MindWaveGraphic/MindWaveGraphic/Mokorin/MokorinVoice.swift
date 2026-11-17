@@ -21,21 +21,22 @@ import Combine
 /// 音声入力の権限・利用可否
 nonisolated enum MokorinVoiceAvailability: Equatable, Sendable {
     case available
-    case denied(String)
-    case unavailable(String)
+    /// 使えない理由（マイク・音声認識の権限なし、認識サービスが使えない）
+    case unavailable(MokorinVoiceFailure)
 }
 
 /// 音声 → 文字
 nonisolated protocol MokorinSpeechInput: AnyObject {
-    /// マイク・音声認識の権限を確認し、必要なら許可を求める（初回だけ OS の確認が表示される）
+    /// 音声認識・マイクの権限を確認し、必要なら許可を求める（初回だけ OS の確認が表示される）。
+    /// 許可の確認が終わるまで録音は始めない
     func requestAvailability() async -> MokorinVoiceAvailability
-    /// 録音と認識を始める。途中経過・確定した文字・エラーを返す
+    /// 録音と認識を始める。途中経過は onPartial、終わったら onFinish を 1 回だけ呼ぶ（メインスレッド）。
+    /// 録音を始められなければ throw（onFinish は呼ばない）
     func start(onPartial: @escaping (String) -> Void,
-               onFinal: @escaping (String) -> Void,
-               onError: @escaping (String) -> Void) throws
-    /// 録音を終えて、確定した文字を onFinal で返す
+               onFinish: @escaping (MokorinRecognitionOutcome) -> Void) throws
+    /// 録音を終えて、聞き取った文字を確定する（話していなければ取り消し扱い）
     func stop()
-    /// 録音を取り消す（onFinal を呼ばない）
+    /// 録音を取り消す（onFinish に .cancelled を返すか、何も返さない）
     func cancel()
 }
 
@@ -54,6 +55,7 @@ final class MokorinVoiceController: ObservableObject {
 
     enum State: Equatable {
         case idle
+        /// 権限の確認・録音の準備中（マイクのボタンは押せない）
         case preparing
         /// 録音中（途中の認識結果）
         case listening(String)
@@ -64,13 +66,16 @@ final class MokorinVoiceController: ObservableObject {
     }
 
     @Published private(set) var state: State = .idle
-    /// 最後に表示する問題（権限がない・認識できなかった等）。文字入力で続けられることを添えて表示する
+    /// 最後に起きた問題（原因ごとの文言）。nil = 問題なし。文字入力はいつでも使える
     @Published private(set) var problem: String? = nil
+    @Published private(set) var lastFailure: MokorinVoiceFailure? = nil
     /// 返答を読み上げるか（初めてマイクを使ったときに ON になる。画面のボタンで切り替えられる）
     @Published var speaksReplies = false
 
     private let input: MokorinSpeechInput
     private let output: MokorinSpeechOutput
+    /// 今の録音を表す番号。古い録音の結果（遅れて届いたコールバック）を捨てるために使う
+    private var listenToken = UUID()
     /// 認識した文字を会話へ送る（MokorinContextViewModel.submit）
     var onUtterance: ((String) async -> Void)?
     /// 読み上げ中の口の動きなど
@@ -84,6 +89,14 @@ final class MokorinVoiceController: ObservableObject {
         }
     }
 
+    /// アプリで使う音声コントローラー。DEBUG ビルドで MW_MOKORIN_FAKE_VOICE があれば、マイクを使わない模擬入力にする
+    static func makeForApp() -> MokorinVoiceController {
+        #if DEBUG
+        if let scripted = MokorinScriptedSpeechInput.fromEnvironment() { return MokorinVoiceController(input: scripted) }
+        #endif
+        return MokorinVoiceController()
+    }
+
     var isListening: Bool { if case .listening = state { return true } else { return false } }
     var partialTranscript: String { if case .listening(let t) = state { return t } else { return "" } }
 
@@ -91,9 +104,9 @@ final class MokorinVoiceController: ObservableObject {
     func micTapped() async {
         switch state {
         case .listening:
-            input.stop()          // 確定した文字は onFinal で届く
+            input.stop()          // 結果は onFinish で届く
         case .processing, .preparing:
-            return
+            return                // 多重に開始しない
         case .speaking:
             output.stop()
             finishSpeaking()
@@ -103,8 +116,9 @@ final class MokorinVoiceController: ObservableObject {
         }
     }
 
-    /// 録音中の取り消し（画面を閉じる・アプリが背面に回るとき）
+    /// 録音中の取り消し（画面を閉じる・アプリが背面に回るとき）。エラーは表示しない
     func cancelAll() {
+        listenToken = UUID()      // 以降に届く今の録音の結果は捨てる
         if isListening || state == .preparing { input.cancel() }
         if output.isSpeaking { output.stop() }
         setSpeaking(false)
@@ -129,50 +143,61 @@ final class MokorinVoiceController: ObservableObject {
 
     private func startListening() async {
         problem = nil
+        lastFailure = nil
+        let token = UUID()
+        listenToken = token
         state = .preparing
         let availability = await input.requestAvailability()
-        switch availability {
-        case .available:
-            break
-        case .denied(let message), .unavailable(let message):
-            problem = message
-            state = .idle
-            MindWaveDebugLogger.log(.insight, "mokorin voice unavailable")
+        // 許可の確認中に取り消された（画面を閉じた等）
+        guard listenToken == token, state == .preparing else { return }
+        if case .unavailable(let failure) = availability {
+            fail(failure)
             return
         }
         // 初めて声で話したら、返答も読み上げる
         speaksReplies = true
         do {
-            state = .listening("")
             try input.start(
                 onPartial: { [weak self] text in
                     Task { @MainActor in
-                        guard let self, self.isListening else { return }
+                        guard let self, self.listenToken == token, self.isListening else { return }
                         self.state = .listening(text)
                     }
                 },
-                onFinal: { [weak self] text in
-                    Task { @MainActor in await self?.deliver(text) }
-                },
-                onError: { [weak self] message in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        self.problem = message
-                        self.state = .idle
-                    }
+                onFinish: { [weak self] outcome in
+                    Task { @MainActor in await self?.handle(outcome, token: token) }
                 })
-            MindWaveDebugLogger.log(.insight, "mokorin voice listening")
+            // start が成功した（録音が始まった）ときだけ「聞いています」にする
+            if listenToken == token, state == .preparing { state = .listening("") }
         } catch {
-            problem = "音声入力を開始できませんでした。文字入力か選択肢で答えてね。"
+            fail(.engineStartFailed)
+        }
+    }
+
+    private func handle(_ outcome: MokorinRecognitionOutcome, token: UUID) async {
+        // 古い録音の結果は捨てる（新しい録音・取り消しのあとに遅れて届いたもの）
+        guard listenToken == token, isListening || state == .preparing else { return }
+        switch outcome {
+        case .transcript(let text):
+            await deliver(text)
+        case .failure(let failure):
+            fail(failure)
+        case .cancelled:
             state = .idle
         }
+    }
+
+    private func fail(_ failure: MokorinVoiceFailure) {
+        lastFailure = failure
+        problem = failure.message
+        state = .idle
+        MindWaveDebugLogger.log(.insight, "mokorin voice failure=\(failure.rawValue)")
     }
 
     private func deliver(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            problem = "うまく聞き取れなかったよ。もう一度マイクを押すか、文字で教えてね。"
-            state = .idle
+            fail(.noSpeech)
             return
         }
         state = .processing
@@ -193,52 +218,93 @@ final class MokorinVoiceController: ObservableObject {
 
 // MARK: - 実装: 音声認識（Speech）
 
-/// SFSpeechRecognizer（日本語）＋ AVAudioEngine。話し終えて約1.8秒無音なら自動で終了する。
-/// 録音を始めて8秒間何も聞き取れなければ終了する（押したまま話さなかった場合に録音を続けないため）。最長30秒
-/// 音声・認識のコールバックは別スレッドで届くため nonisolated とし、状態の更新はメインスレッドで行う
+/// 録音を始められなかった段階（診断用）
+nonisolated enum MokorinVoiceStartError: Error, Equatable {
+    case recognizerMissing
+    case audioSession(code: Int)
+    case noInput
+    case invalidFormat
+    case engineStart(code: Int)
+}
+
+/// 最初の音声バッファを 1 回だけ知らせる（音声スレッドから呼ばれる）
+nonisolated final class MokorinFirstBufferFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    /// 初回だけ true
+    func fire() -> Bool { lock.lock(); defer { lock.unlock() }; if fired { return false }; fired = true; return true }
+}
+
+/// SFSpeechRecognizer（日本語）＋ AVAudioEngine。判断（無発話 8 秒・話し終え 1.8 秒・最長 30 秒・エラーの分類）は
+/// MokorinRecognitionSession が行う。音声・認識のコールバックは別スレッドで届くため nonisolated とし、
+/// 状態の更新はすべてメインスレッドで行う。各コールバックはセッション ID を持ち、今のセッション以外のものは捨てる
 nonisolated final class SpeechRecognizerInput: NSObject, MokorinSpeechInput, @unchecked Sendable {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "ja-JP"))
     private let audioEngine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
-    private var silenceTimer: Timer?
-    private var limitTimer: Timer?
-    private var latestText = ""
-    private var finished = false
-    private var onFinal: ((String) -> Void)?
+    private var timer: Timer?
+    private var session: MokorinRecognitionSession?
+    private var onPartial: ((String) -> Void)?
+    private var onFinish: ((MokorinRecognitionOutcome) -> Void)?
+    private var tapInstalled = false
 
-    /// 話し終えたと判断する無音の長さ（日本語の言いよどみで途中送信しないよう 1.8 秒）
-    static let silenceSeconds: TimeInterval = 1.8
-    static let noSpeechSeconds: TimeInterval = 8
-    static let maxSeconds: TimeInterval = 30
+    /// 話し終えたと判断する無音の長さ（MokorinRecognitionSession.Timing と同じ値）
+    static let silenceSeconds: TimeInterval = MokorinRecognitionSession.Timing().silence
+    static let noSpeechSeconds: TimeInterval = MokorinRecognitionSession.Timing().noSpeech
+    static let maxSeconds: TimeInterval = MokorinRecognitionSession.Timing().maximum
+
+    private static func now() -> TimeInterval { ProcessInfo.processInfo.systemUptime }
 
     func requestAvailability() async -> MokorinVoiceAvailability {
-        guard let recognizer, recognizer.isAvailable else {
-            return .unavailable("この端末では今は音声認識を使えません。文字入力か選択肢で答えてね。")
-        }
+        // 1) 音声認識の許可（確認が終わるまで録音しない）
         let speech = await withCheckedContinuation { (c: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
             SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) }
         }
-        guard speech == .authorized else {
-            return .denied("音声認識が許可されていません（設定アプリ → Mind Wave で変更できます）。文字入力か選択肢で答えてね。")
-        }
+        // 2) マイクの許可
         let mic = await AVAudioApplication.requestRecordPermission()
-        guard mic else {
-            return .denied("マイクが許可されていません（設定アプリ → Mind Wave で変更できます）。文字入力か選択肢で答えてね。")
-        }
+        // 3) 認識サービスの利用可否（許可のあとに確認する）
+        let available = recognizer?.isAvailable ?? false
+        MindWaveDebugLogger.log(.insight, "mokorin voice availability speechAuth=\(speech.rawValue) mic=\(mic) recognizer=\(recognizer != nil) available=\(available) onDevice=\(recognizer?.supportsOnDeviceRecognition ?? false)")
+        guard speech == .authorized else { return .unavailable(.speechDenied) }
+        guard mic else { return .unavailable(.microphoneDenied) }
+        guard available else { return .unavailable(.recognizerUnavailable) }
         return .available
     }
 
-    func start(onPartial: @escaping (String) -> Void, onFinal: @escaping (String) -> Void, onError: @escaping (String) -> Void) throws {
-        cancel()
-        guard let recognizer else { throw NSError(domain: "MokorinVoice", code: 1) }
-        finished = false
-        latestText = ""
-        self.onFinal = onFinal
+    func start(onPartial: @escaping (String) -> Void, onFinish: @escaping (MokorinRecognitionOutcome) -> Void) throws {
+        cancel()   // 前の録音を片付ける（前のセッションの結果は ID が違うので捨てられる）
+        guard let recognizer else { throw MokorinVoiceStartError.recognizerMissing }
+        var newSession = MokorinRecognitionSession(now: Self.now())
+        let id = newSession.id
+        let tag = String(id.uuidString.prefix(8))
+        self.onPartial = onPartial
+        self.onFinish = onFinish
 
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-        try session.setActive(true, options: .notifyOthersOnDeactivation)
+        // オーディオセッション
+        let audio = AVAudioSession.sharedInstance()
+        do {
+            try audio.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try audio.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            log(tag, "stage=audio_session failed code=\((error as NSError).code)")
+            teardown(deactivate: true)
+            throw MokorinVoiceStartError.audioSession(code: (error as NSError).code)
+        }
+        guard audio.isInputAvailable else {
+            log(tag, "stage=input failed no_input")
+            teardown(deactivate: true)
+            throw MokorinVoiceStartError.noInput
+        }
+
+        // 入力の形式（サンプルレート 0 などでは録音できない）
+        let inputNode = audioEngine.inputNode
+        let format = inputNode.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else {
+            log(tag, "stage=format failed rate=\(format.sampleRate) ch=\(format.channelCount)")
+            teardown(deactivate: true)
+            throw MokorinVoiceStartError.invalidFormat
+        }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -246,82 +312,113 @@ nonisolated final class SpeechRecognizerInput: NSObject, MokorinSpeechInput, @un
         if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
         self.request = request
 
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        inputNode.removeTap(onBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak request] buffer, _ in
+        let first = MokorinFirstBufferFlag()
+        if tapInstalled { inputNode.removeTap(onBus: 0) }
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self, weak request] buffer, _ in
             request?.append(buffer)
+            if first.fire() {
+                DispatchQueue.main.async { self?.event(id) { s in s.audioReceived(); return nil } }
+            }
         }
+        tapInstalled = true
+
         audioEngine.prepare()
-        try audioEngine.start()
+        do {
+            try audioEngine.start()
+        } catch {
+            log(tag, "stage=engine_start failed code=\((error as NSError).code)")
+            teardown(deactivate: true)
+            throw MokorinVoiceStartError.engineStart(code: (error as NSError).code)
+        }
+        newSession.engineStarted(at: Self.now())
+        session = newSession
+        log(tag, "stage=listening rate=\(Int(format.sampleRate)) onDevice=\(request.requiresOnDeviceRecognition)")
 
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            guard let self else { return }
-            if let result {
-                let text = result.bestTranscription.formattedString
-                DispatchQueue.main.async {
-                    self.latestText = text
-                    onPartial(text)
-                    self.restartSilenceTimer()
-                    if result.isFinal { self.finish() }
+            let text = result?.bestTranscription.formattedString
+            let isFinal = result?.isFinal ?? false
+            let nsError = error as NSError?
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let text {
+                    self.event(id) { s in s.result(text, isFinal: isFinal, at: Self.now()) }
+                    if self.session?.id == id { self.onPartial?(text) }
                 }
-            }
-            if error != nil {
-                DispatchQueue.main.async {
-                    if self.latestText.isEmpty && !self.finished {
-                        self.teardown()
-                        self.finished = true
-                        onError("うまく聞き取れなかったよ。もう一度マイクを押すか、文字で教えてね。")
-                    } else {
-                        self.finish()
-                    }
+                if let nsError {
+                    self.event(id) { s in s.error(domain: nsError.domain, code: nsError.code) }
                 }
             }
         }
-        DispatchQueue.main.async {
-            self.limitTimer = Timer.scheduledTimer(withTimeInterval: Self.maxSeconds, repeats: false) { [weak self] _ in self?.finish() }
-            // 話し始めるまでの待ち時間（話し始めると無音判定の 1.5 秒に置き換わる）
-            self.restartSilenceTimer(interval: Self.noSpeechSeconds)
-        }
+        scheduleTimer()
     }
 
     func stop() {
-        DispatchQueue.main.async { self.finish() }
+        DispatchQueue.main.async {
+            guard let id = self.session?.id else { return }
+            self.event(id) { s in s.stopRequested() }
+        }
     }
 
     func cancel() {
-        finished = true
-        onFinal = nil
-        task?.cancel()
-        teardown()
+        if let id = session?.id {
+            event(id) { s in s.cancelRequested() }
+        } else {
+            teardown(deactivate: false)
+        }
     }
 
-    private func restartSilenceTimer(interval: TimeInterval = SpeechRecognizerInput.silenceSeconds) {
-        silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in self?.finish() }
+    // MARK: - 内部（メインスレッド）
+
+    /// 今のセッションへの出来事。終わったら片付けて onFinish を 1 回だけ呼ぶ
+    private func event(_ id: UUID, _ change: (inout MokorinRecognitionSession) -> MokorinRecognitionOutcome?) {
+        guard var current = session, current.id == id else { return }   // 古いセッションのコールバックは捨てる
+        let outcome = change(&current)
+        session = current
+        if let outcome {
+            finish(current, outcome)
+        } else {
+            scheduleTimer()
+        }
     }
 
-    /// 録音を止めて、確定した文字を1回だけ返す
-    private func finish() {
-        guard !finished else { return }
-        finished = true
-        request?.endAudio()
-        task?.finish()
-        let text = latestText
-        let callback = onFinal
-        onFinal = nil
-        teardown()
-        callback?(text)
+    private func scheduleTimer() {
+        timer?.invalidate(); timer = nil
+        guard let current = session, let deadline = current.nextDeadline else { return }
+        let id = current.id
+        timer = Timer.scheduledTimer(withTimeInterval: max(0.05, deadline - Self.now()), repeats: false) { [weak self] _ in
+            self?.event(id) { s in s.tick(at: Self.now()) }
+        }
     }
 
-    private func teardown() {
-        silenceTimer?.invalidate(); silenceTimer = nil
-        limitTimer?.invalidate(); limitTimer = nil
+    private func finish(_ ended: MokorinRecognitionSession, _ outcome: MokorinRecognitionOutcome) {
+        let tag = String(ended.id.uuidString.prefix(8))
+        let elapsed = Int((Self.now() - ended.createdAt) * 1000)
+        let err = ended.lastError.map { "\($0.domain)/\($0.code)" } ?? "-"
+        log(tag, "end reason=\(ended.endReason ?? "-") audio=\(ended.receivedAudio) results=\(ended.resultCount) speech=\(ended.hasSpeech) error=\(err) elapsedMs=\(elapsed)")
+        session = nil
+        switch outcome {
+        case .transcript: request?.endAudio(); task?.finish()
+        case .failure, .cancelled: request?.endAudio(); task?.cancel()
+        }
+        let callback = onFinish
+        onFinish = nil
+        onPartial = nil
+        teardown(deactivate: true)
+        callback?(outcome)
+    }
+
+    private func teardown(deactivate: Bool) {
+        timer?.invalidate(); timer = nil
         if audioEngine.isRunning { audioEngine.stop() }
-        audioEngine.inputNode.removeTap(onBus: 0)
+        if tapInstalled { audioEngine.inputNode.removeTap(onBus: 0); tapInstalled = false }
         request = nil
         task = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        if deactivate { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+    }
+
+    /// 診断ログ（DEBUG のみ）。音声・認識した文字・トークンは記録しない
+    private func log(_ tag: String, _ message: String) {
+        MindWaveDebugLogger.log(.insight, "mokorin voice session=\(tag) \(message)")
     }
 }
 

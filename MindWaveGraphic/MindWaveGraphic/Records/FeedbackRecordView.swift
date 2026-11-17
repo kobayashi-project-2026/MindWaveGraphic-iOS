@@ -128,7 +128,7 @@ struct FeedbackRecordView: View {
                                     }
 
                                 HStack {
-                                    Text("体感や気持ちをメモ（未記入でも保存できます）")
+                                    Text("体感や気持ちをメモ（未記入でも保存できます）\n例）数値上は改善が見られていても、集中しにくかった")
                                         .font(.system(size: 10, weight: .light))
                                         .foregroundStyle(MindWaveCyberTheme.textTertiary)
                                     Spacer()
