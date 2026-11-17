@@ -206,3 +206,66 @@ nonisolated enum ChatHistoryPolicy {
         return result
     }
 }
+
+// MARK: - 会話から分かったこと（2026-11-17）
+
+/// AI 相談で使う「会話から分かったこと」の表示・送信用の変換
+nonisolated enum ChatCheckInSummary {
+
+    struct Item: Equatable, Hashable, Sendable {
+        let slot: CheckInSlot
+        let value: String
+    }
+
+    static func hasAnyInfo(_ c: MokorinCheckIn) -> Bool {
+        CheckInSlot.allCases.contains(where: c.isKnown)
+    }
+
+    /// 画面に出す項目（会話の流れに近い順）
+    static func items(_ c: MokorinCheckIn) -> [Item] {
+        var items: [Item] = []
+        func add(_ slot: CheckInSlot, _ value: String?) { if let value { items.append(Item(slot: slot, value: value)) } }
+        add(.situation, c.situation?.value.label)
+        add(.timing, c.timing?.value.label)
+        add(.emotion, c.emotion?.value.label)
+        add(.tension, c.tension.map { "\($0.value)" })
+        add(.cause, c.causes?.value.map(\.label).sorted().first)
+        add(.body, c.body?.value.filter { !$0.isExclusive }.map(\.label).sorted().first)
+        add(.condition, c.condition?.value.label)
+        add(.sleep, c.sleep?.value.label)
+        add(.activity, c.activity?.value.label)
+        add(.support, c.support?.value.label)
+        return items
+    }
+
+    /// 外部AIへ送る補足（列挙値のみ。自由文・計測値は含めない）。分かっている項目も答えたくない項目もなければ nil
+    static func contractValue(_ c: MokorinCheckIn) -> ContextAssistCheckInDTO? {
+        guard hasAnyInfo(c) || !c.declined.isEmpty else { return nil }
+        var dto = ContextAssistCheckInDTO(c)
+        // AI 相談では質問の順番を指示しない（状況確認の会話の項目）
+        dto.asked = []
+        dto.remainingSlots = []
+        return dto
+    }
+}
+
+/// 入力欄の上に出す「話しかけの例」。タップでそのまま送る（固定の候補。AI の生成ではない）
+nonisolated enum ChatQuickReplies {
+
+    static func make(learned c: MokorinCheckIn, hasReply: Bool) -> [String] {
+        if hasReply {
+            return ["もう少し詳しく教えて", "ほかの方法はある？", "うまく言葉にできない"]
+        }
+        var replies: [String] = []
+        switch c.situation?.value {
+        case .presentation?:  replies.append("発表の前にできることは？")
+        case .interviewExam?: replies.append("面接や試験の前にできることは？")
+        case .some(let s) where s.isEvent: replies.append("大事な予定の前にできることは？")
+        default: replies.append("面接前で緊張しています")
+        }
+        if c.sleep?.value.isShort == true { replies.append("あまり眠れていなくて不安") }
+        replies.append("落ち着く呼吸を知りたい")
+        replies.append("何が不安なのか分からない")
+        return Array(replies.prefix(3))
+    }
+}

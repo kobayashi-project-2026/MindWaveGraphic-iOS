@@ -60,7 +60,118 @@ enum ChatTests {
         await remote()
         T.suite("Chat / ChatViewModel（複数往復・リセット・連打・フォールバック）")
         await viewModel()
+        T.suite("Chat / 会話から分かったこと（STEP 0〜6 の引き継ぎ・訂正・取り消し・推薦）")
+        await conversationContext()
         await e2e()
+    }
+
+    // MARK: - 会話から分かったこと（2026-11-17）
+
+    /// 測定前の会話（STEP 0〜6）で分かったことの例: 明日の面接・睡眠 3〜5 時間・不安
+    static func sampleCheckIn() -> MokorinCheckIn {
+        var c = MokorinCheckIn()
+        var e = CheckInExtraction()
+        e.situation = .interviewExam
+        e.timing = .tomorrowOrLater
+        e.sleep = .h3to5
+        e.emotion = .anxious
+        e.tension = 70
+        c.apply(e, at: Date())
+        c.declined = [.activity]
+        c.asked = [.condition, .situation]
+        return c
+    }
+
+    static func conversationContext() async {
+        T.test("契約: check_in は分かっている内容があるときだけ出力し、質問の順番（asked・remaining_slots）は送らない") {
+            let without = String(data: try MindWaveContract.makeEncoder().encode(ChatContextDTO(scene: nil, measurement: nil)), encoding: .utf8)!
+            T.expect(!without.contains("check_in"), "no check_in key: \(without)")
+            let dto = ChatCheckInSummary.contractValue(sampleCheckIn())
+            T.expect(dto != nil, "dto")
+            let json = String(data: try MindWaveContract.makeEncoder().encode(ChatContextDTO(scene: "interview", measurement: nil, checkIn: dto)), encoding: .utf8)!
+            for key in ["\"check_in\"", "\"sleep\":\"3_5h\"", "\"situation\":\"interview_exam\"", "\"tension_level\":70",
+                        "\"declined\":[\"activity\"]", "\"asked\":[]", "\"remaining_slots\":[]"] {
+                T.expect(json.contains(key), "json contains \(key): \(json)")
+            }
+            T.expect(ChatCheckInSummary.contractValue(MokorinCheckIn()) == nil, "empty -> nil")
+        }
+
+        await T.test("送信: 測定前の会話の内容を context.check_in に含める。会話がなければ含めない") {
+            let client = FakeChatClient.echo()
+            let vm = makeVM(client: client)
+            vm.configureContext(scene: { .interview }, measurement: { nil }, biometricConsent: { false }, checkIn: { sampleCheckIn() })
+            await vm.submit("どんな準備をしたらいい？")
+            T.expectEqual(client.requests.last?.context.checkIn?.situation, "interview_exam")
+            T.expectEqual(client.requests.last?.context.checkIn?.sleep, "3_5h")
+            T.expectEqual(client.requests.last?.context.measurement, nil, "計測データは送らない")
+
+            let client2 = FakeChatClient.echo()
+            let vm2 = makeVM(client: client2, name: "no-checkin")
+            await vm2.submit("こんにちは")
+            T.expect(client2.requests.last?.context.checkIn == nil, "no check_in without info")
+        }
+
+        await T.test("この画面の発言から分かったことを加える（測定前の会話の答えは上書きしない・緊張の強さは決めない）") {
+            let client = FakeChatClient.echo()
+            let vm = makeVM(client: client)
+            vm.configureContext(scene: { .interview }, measurement: { nil }, biometricConsent: { false }, checkIn: { sampleCheckIn() })
+            await vm.submit("発表のことでかなり緊張していて、息が浅い感じがする")
+            T.expectEqual(vm.learned.situation?.value, .interviewExam, "base situation kept")
+            T.expectEqual(vm.learned.tension?.value, 70, "tension kept from base")
+            T.expect(vm.learned.body?.value.contains(.shallowBreath) == true, "body from chat")
+            T.expect(client.requests.last?.context.checkIn?.bodySignals.contains("shallow_breath") == true, "sent with this turn")
+            // 息苦しさがあるときは息を長く止める呼吸法を推薦しない
+            T.expect(!vm.recommendations.isEmpty, "has recommendations")
+            T.expect(vm.recommendations.allSatisfy { !$0.method.hasLongBreathHold }, "no long breath hold")
+
+            let vm2 = makeVM(client: FakeChatClient.echo(), name: "fresh-learned")
+            await vm2.submit("明日の発表がかなり緊張する")
+            T.expectEqual(vm2.learned.situation?.value, .presentation)
+            T.expectEqual(vm2.learned.timing?.value, .tomorrowOrLater)
+            T.expect(vm2.learned.tension == nil, "tension not inferred in chat")
+        }
+
+        await T.test("訂正・取り消し: 直前の発言と返答を消し、分かったことも戻す。直すときは入力欄へ戻す") {
+            let vm = makeVM(client: FakeChatClient.echo())
+            await vm.submit("面接前で緊張しています")
+            await vm.submit("息が浅い感じがする")
+            T.expectEqual(vm.messages.count, 4)
+            T.expect(vm.learned.body?.value.contains(.shallowBreath) == true, "learned body")
+            T.expectEqual(vm.lastUserMessage?.text, "息が浅い感じがする")
+            let removed = vm.undoLastExchange()
+            T.expectEqual(removed, "息が浅い感じがする")
+            T.expectEqual(vm.messages.count, 2)
+            T.expect(vm.learned.body == nil, "learned body removed with the message")
+            vm.editLastUserMessage()
+            T.expectEqual(vm.messages.count, 0)
+            T.expectEqual(vm.draft, "面接前で緊張しています")
+            T.expect(vm.undoLastExchange() == nil, "nothing to undo")
+        }
+
+        await T.test("取り消しは端末内の説明（もこりんの結果の説明など）を対象にしない") {
+            let vm = makeVM(client: FakeChatClient.echo())
+            vm.appendLocalExchange(userText: "結果の意味は？", reply: "説明", reason: "端末内")
+            T.expect(vm.lastUserMessage == nil, "local exchange is not editable")
+        }
+
+        T.test("改善方法へ引き継ぐ会話の記録: 会話がなければそのまま、あれば分かったことを加える") {
+            let vm = makeVM(client: FakeChatClient.echo())
+            T.expect(vm.memoryForImprovement(base: nil, context: .default) == nil, "nothing learned -> nil")
+            vm.configureContext(scene: { nil }, measurement: { nil }, biometricConsent: { false }, checkIn: { sampleCheckIn() })
+            let m = vm.memoryForImprovement(base: nil, context: .default)
+            T.expectEqual(m?.checkIn?.situation?.value, .interviewExam)
+            T.expectEqual(m?.scene, .calm, "scene from current context")
+        }
+
+        T.test("表示: 分かったことの一覧・話しかけの例・吹き出しの最初の一文") {
+            let items = ChatCheckInSummary.items(sampleCheckIn())
+            T.expectEqual(items.first?.slot, .situation)
+            T.expect(items.contains(ChatCheckInSummary.Item(slot: .sleep, value: "3〜5時間")), "sleep item")
+            T.expectEqual(ChatQuickReplies.make(learned: sampleCheckIn(), hasReply: false).first, "面接や試験の前にできることは？")
+            T.expect(ChatQuickReplies.make(learned: MokorinCheckIn(), hasReply: true).contains("うまく言葉にできない"), "skip-like reply")
+            T.expectEqual(AIChatView.firstSentence(of: "まずは深呼吸。次に肩を回します。"), "まずは深呼吸。")
+            T.expectEqual(AIChatView.firstSentence(of: "短い"), "短い")
+        }
     }
 
     // MARK: - 契約
@@ -349,6 +460,17 @@ enum ChatTests {
             T.expect(replies[1].text.contains("面接前で緊張しています"), "2nd turn refers to 1st topic")
             T.expect(replies[2].text.contains("利用者 3 件・AI 2 件"), "3rd turn history")
             T.expect(replies[2].text.contains("場面"), "scene passed")
+        }
+        await T.test("会話の情報: 測定前の会話の内容がサーバー（スタブ）に届き、返答で確認できる") {
+            let store = ChatTextConsentStore(defaults: T.freshDefaults("chat-e2e-checkin"))
+            store.setConsented(true)
+            let vm = ChatViewModel(consentStore: store, configurationProvider: { cfg },
+                                   clientFactory: { RemoteChatClient(configuration: $0, session: URLSession(configuration: .ephemeral)) },
+                                   sceneProvider: { .interview }, checkInProvider: { sampleCheckIn() })
+            await vm.submit("どんな準備をしたらいい？")
+            let reply = vm.messages.last { $0.role == .assistant }
+            T.expect(reply.map { if case .stub = $0.origin { return true }; return false } == true, "stub reply")
+            T.expect(reply?.text.contains("会話の情報") == true && reply?.text.contains("3_5h") == true, "check_in reached server: \(reply?.text ?? "")")
         }
     }
 }

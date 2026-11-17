@@ -9,19 +9,25 @@ import SwiftUI
 
 struct AIChatView: View {
     @ObservedObject var chat: ChatViewModel
+    /// 改善方法の画面を開く（推薦のカードから。nil のときはボタンを出さない）
+    var onOpenImprovement: (() -> Void)? = nil
     let onClose: () -> Void
 
     @State private var isResetConfirmationPresented = false
     @FocusState private var isInputFocused: Bool
     /// もこりんの表情・動作（固定の規則。返答の文章は変更しない）
     @State private var mokorinPose = MokorinPose()
+    /// 音声入力（状況確認の会話と同じ仕組み。DEBUG では MW_MOKORIN_FAKE_VOICE でマイクを使わない模擬入力）
+    @StateObject private var voice = MokorinVoiceController.makeForApp()
+    @Environment(\.scenePhase) private var scenePhase
 
     private let bottomAnchorID = "chat_bottom_anchor"
 
     var body: some View {
         NavigationStack {
             GeometryReader { geo in
-                let mokorinStageHeight = max(150, geo.size.height * 0.25)
+                // キーボード表示中・小さい画面（iPhone SE など）で会話が始まったら、もこりんを横並びにして会話の表示を広くとる
+                let compactHero = isInputFocused || geo.size.height < 560 || (!chat.messages.isEmpty && geo.size.height < 700)
 
                 ZStack {
                     // 背景：コックピットグラフィック画面と全く同じ宇宙・星雲グラフィック
@@ -36,16 +42,14 @@ struct AIChatView: View {
                         .ignoresSafeArea()
 
                     VStack(spacing: 0) {
-                        // 上部 3/4：ステータス＆会話リスト
                         statusBanner
+                        // 全体UI 13・17・21: もこりんを会話の中心に大きく置く
+                        mokorinHero(compact: compactHero, availableHeight: geo.size.height)
+                        learnedStrip
                         messageList
                             .frame(maxHeight: .infinity)
-
-                        // パターンA：会話リストの下に入力バー
+                        quickReplyRow
                         inputBar
-
-                        // 下部 1/4：もこりん専用ステージ（大きく動いてしゃべるスペース）
-                        mokorinStage(height: mokorinStageHeight)
                     }
                 }
             }
@@ -54,10 +58,18 @@ struct AIChatView: View {
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("閉じる", action: onClose)
+                    Button("閉じる") { voice.cancelAll(); onClose() }
                         .accessibilityIdentifier("chat_close_button")
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        voice.speaksReplies.toggle()
+                        if !voice.speaksReplies { voice.stopSpeaking() }
+                    } label: {
+                        Image(systemName: voice.speaksReplies ? "speaker.wave.2.fill" : "speaker.slash")
+                    }
+                    .accessibilityLabel(voice.speaksReplies ? "返答の読み上げをやめる" : "返答を読み上げる")
+                    .accessibilityIdentifier("chat_speak_toggle")
                     Button {
                         isResetConfirmationPresented = true
                     } label: {
@@ -69,7 +81,7 @@ struct AIChatView: View {
                 }
             }
             .confirmationDialog("会話をリセットしますか？", isPresented: $isResetConfirmationPresented, titleVisibility: .visible) {
-                Button("リセットする", role: .destructive) { chat.reset() }
+                Button("リセットする", role: .destructive) { voice.cancelAll(); chat.reset() }
                 Button("キャンセル", role: .cancel) {}
             } message: {
                 Text("この画面の会話はすべて消去されます（端末にもサーバーにも保存していません）。")
@@ -79,6 +91,12 @@ struct AIChatView: View {
         .onAppear {
             chat.refreshConsent()
             mokorinPose = mokorinPose.with(.happy, .wave)
+            voice.onUtterance = { text in await chat.submit(text) }
+            voice.onSpeakingChanged = { speaking in mokorinPose.speaking = speaking }
+        }
+        .onDisappear { voice.cancelAll() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { voice.cancelAll() }   // 背面に回ったら録音・読み上げを止める
         }
         // もこりんの表情・動作: 考え中は calm、返答が届いたら jump / nod、失敗は sad、リセットで手をふる
         .onChange(of: chat.isSending) { _, sending in
@@ -97,71 +115,94 @@ struct AIChatView: View {
                 } else {
                     mokorinPose = mokorinPose.with(.sad, .nod)
                 }
+                // 声で話したあとは返答も読み上げる（画面右上で切り替え）
+                voice.speakReply(last.text)
             }
         }
     }
 
-    // MARK: - 下部 1/4：もこりん専用ステージ
+    // MARK: - もこりん（会話の中心）
 
-    private func mokorinStage(height: CGFloat) -> some View {
-        let avatarSize = min(height * 0.88, 148)
+    private func mokorinHero(compact: Bool, availableHeight: CGFloat) -> some View {
+        let avatarSize: CGFloat = compact ? 64 : min(150, max(104, availableHeight * 0.19))
 
-        return HStack(alignment: .center, spacing: 12) {
-            MokorinAvatarView(size: avatarSize, pose: mokorinPose)
-                .frame(width: avatarSize, height: avatarSize)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 5) {
-                    Circle()
-                        .fill(chat.isSending ? MindWaveCyberTheme.orange : MindWaveCyberTheme.cyan)
-                        .frame(width: 6, height: 6)
-                    Text("MOKORIN")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(MindWaveCyberTheme.cyan.opacity(0.85))
-                        .tracking(1.2)
+        return Group {
+            if compact {
+                HStack(alignment: .center, spacing: 10) {
+                    MokorinAvatarView(size: avatarSize, pose: mokorinPose)
+                        .frame(width: avatarSize, height: avatarSize)
+                    heroBubble(lineLimit: 3)
                 }
-
-                Text(mokorinSpeechText)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(MindWaveCyberTheme.textPrimary)
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                VStack(spacing: 6) {
+                    heroBubble(lineLimit: 4)
+                        .frame(maxWidth: 340)
+                    MokorinAvatarView(size: avatarSize, pose: mokorinPose)
+                        .frame(width: avatarSize, height: avatarSize)
+                }
+                .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(red: 0.03, green: 0.07, blue: 0.18).opacity(0.82))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(MindWaveCyberTheme.cyan.opacity(0.32), lineWidth: 1)
-            )
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+        .animation(.easeInOut(duration: 0.25), value: compact)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("もこりん：\(mokorinSpeechText)")
+        .accessibilityIdentifier("chat_mokorin_hero")
+    }
+
+    private func heroBubble(lineLimit: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(activityColor)
+                    .frame(width: 6, height: 6)
+                Text(activityLabel)
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(activityColor.opacity(0.9))
+                    .tracking(1.2)
+            }
+            Text(mokorinSpeechText)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(MindWaveCyberTheme.textPrimary)
+                .lineLimit(lineLimit)
+                .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .padding(.bottom, 10)
-        .frame(height: height)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.15),
-                    Color(red: 0.02, green: 0.05, blue: 0.14).opacity(0.75)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(red: 0.03, green: 0.07, blue: 0.18).opacity(0.85))
         )
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(MindWaveCyberTheme.cyan.opacity(0.18))
-                .frame(height: 0.5)
-        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(activityColor.opacity(0.4), lineWidth: 1)
+        )
     }
 
-    /// 現在の状況に応じたもこりんのセリフ
+    private var activityLabel: String {
+        if voice.isListening || voice.state == .preparing { return "LISTENING" }
+        if chat.isSending || voice.state == .processing { return "THINKING" }
+        if voice.state == .speaking { return "SPEAKING" }
+        return "MOKORIN"
+    }
+
+    private var activityColor: Color {
+        if voice.isListening || voice.state == .preparing { return .red }
+        if chat.isSending || voice.state == .processing { return MindWaveCyberTheme.orange }
+        return MindWaveCyberTheme.cyan
+    }
+
+    /// 現在の状況に応じたもこりんのセリフ（返答の全文は会話の履歴に表示する）
     private var mokorinSpeechText: String {
+        if voice.isListening {
+            return voice.partialTranscript.isEmpty ? "聞いてるよ。話し終えたら自動で送るね。" : "「\(voice.partialTranscript)」"
+        }
+        if voice.state == .preparing { return "マイクを準備しているよ…" }
+        if let problem = voice.problem { return problem }
         if chat.isSending {
             return "うーん、どうやって整理しようかな…ちょっと待ってね！"
         }
@@ -169,12 +210,88 @@ struct AIChatView: View {
             return "あれれ、うまく届かなかったみたい…もう一回送ってみようか？"
         }
         if let lastAssistant = chat.messages.last(where: { $0.role == .assistant }) {
-            return lastAssistant.text
+            return Self.firstSentence(of: lastAssistant.text)
         }
-        if chat.messages.isEmpty {
-            return "今の緊張や気になっていること、なんでも話してね。一緒に整理しよう！"
+        if let situation = chat.learned.situation?.value, situation.isEvent {
+            return "さっき「\(situation.label)」のことを話してくれたね。気になっていること、なんでも聞いてね。"
         }
-        return "うんうん、聞いてるよ！"
+        return "今の緊張や気になっていること、なんでも話してね。一緒に整理しよう！"
+    }
+
+    /// 返答の最初の一文（もこりんの吹き出し用。全文は履歴にある）
+    static func firstSentence(of text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let end = trimmed.firstIndex(where: { "。！？!?\n".contains($0) }) {
+            let sentence = String(trimmed[...end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if sentence.count >= 4 { return sentence }
+        }
+        return trimmed
+    }
+
+    // MARK: - 会話から分かったこと
+
+    @ViewBuilder
+    private var learnedStrip: some View {
+        let items = ChatCheckInSummary.items(chat.learned)
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(chat.remoteUnavailableReason == nil ? "会話から分かったこと（外部AIにも伝えます）" : "会話から分かったこと（端末内で使います）")
+                    .font(.system(size: 9))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(items, id: \.self) { item in
+                            HStack(spacing: 4) {
+                                Text(item.slot.shortLabel)
+                                    .foregroundStyle(MindWaveCyberTheme.cyan)
+                                Text(item.value)
+                                    .foregroundStyle(MindWaveCyberTheme.textPrimary)
+                            }
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color.black.opacity(0.5)))
+                            .overlay(Capsule().strokeBorder(MindWaveCyberTheme.cyan.opacity(0.3)))
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("chat_learned_strip")
+        }
+    }
+
+    // MARK: - 話しかけの例
+
+    @ViewBuilder
+    private var quickReplyRow: some View {
+        if !chat.isSending, !voice.isListening, chat.draft.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(chat.quickReplies, id: \.self) { reply in
+                        Button {
+                            Task { await chat.submit(reply) }
+                        } label: {
+                            Text(reply)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(MindWaveCyberTheme.textPrimary)
+                                .lineLimit(1)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(MindWaveCyberTheme.cyan.opacity(0.16)))
+                                .overlay(Capsule().strokeBorder(MindWaveCyberTheme.cyan.opacity(0.45)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            }
+            .accessibilityIdentifier("chat_quick_replies")
+        }
     }
 
     // MARK: - 状態の表示
@@ -243,13 +360,18 @@ struct AIChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    if chat.messages.isEmpty { emptyState }
                     ForEach(chat.messages) { message in
                         ChatBubble(message: message)
                             .id(message.id)
+                        if message.id == chat.lastUserMessage?.id {
+                            editRow
+                        }
                     }
                     if chat.isSending { typingIndicator }
                     if let failure = chat.lastFailureMessage, !chat.isSending { failureRow(failure) }
+                    if !chat.messages.isEmpty, !chat.isSending, let top = chat.recommendations.first {
+                        recommendationCard(top, others: Array(chat.recommendations.dropFirst()))
+                    }
                     Text("AIの回答は医療的な診断ではありません。体調が心配なときは医師などの専門家に相談してください。")
                         .font(.system(size: 9))
                         .foregroundStyle(MindWaveCyberTheme.textTertiary)
@@ -267,25 +389,83 @@ struct AIChatView: View {
         }
     }
 
-    private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomAnchorID, anchor: .bottom) }
+    /// 直前の発言の訂正・取り消し（一つ前へ戻る）
+    private var editRow: some View {
+        HStack(spacing: 14) {
+            Spacer(minLength: 0)
+            Button {
+                voice.cancelAll()
+                chat.editLastUserMessage()
+                isInputFocused = true
+            } label: {
+                Label("直す", systemImage: "pencil")
+            }
+            .accessibilityHint("直前の発言を入力欄に戻して、言い直せます")
+            .accessibilityIdentifier("chat_edit_last")
+            Button {
+                voice.cancelAll()
+                chat.undoLastExchange()
+            } label: {
+                Label("取り消す", systemImage: "arrow.uturn.backward")
+            }
+            .accessibilityHint("直前の発言ともこりんの返答を消して、一つ前に戻ります")
+            .accessibilityIdentifier("chat_undo_last")
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundStyle(MindWaveCyberTheme.textSecondary)
+        .buttonStyle(.plain)
+        .padding(.top, -6)
     }
 
-    private var emptyState: some View {
+    /// 会話の内容からのおすすめ（端末内の決まった規則。MokorinMethodAdvisor）
+    private func recommendationCard(_ top: MethodRecommendation, others: [MethodRecommendation]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("緊張や不安について、気軽に相談してください。")
-                .font(.system(size: 14, weight: .medium))
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                Text("もこりんのおすすめ")
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(MindWaveCyberTheme.cyan)
+            Text(top.method.title)
+                .font(.system(size: 16, weight: .bold))
                 .foregroundStyle(MindWaveCyberTheme.textPrimary)
-            Text("例:「面接前で緊張しています」「明日のプレゼンが不安です」")
+            Text(top.reason)
                 .font(.system(size: 12))
                 .foregroundStyle(MindWaveCyberTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let next = others.first {
+                Text("ほかに: \(next.method.title)")
+                    .font(.system(size: 11))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+            }
+            if let onOpenImprovement {
+                Button {
+                    voice.cancelAll()
+                    onOpenImprovement()
+                } label: {
+                    Label("改善方法を見る", systemImage: "arrow.right.circle.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(MindWaveCyberTheme.cyan)
+                .accessibilityIdentifier("chat_open_improvement")
+            }
+            Text("会話の内容から端末内の決まった規則で選んでいます（AIの判断ではありません）。ほかの方法も自由に選べます。")
+                .font(.system(size: 9))
+                .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(0.45)))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(0.12)))
-        .padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color(red: 0.03, green: 0.09, blue: 0.2).opacity(0.85)))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(MindWaveCyberTheme.cyan.opacity(0.45)))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("chat_recommendation_card")
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomAnchorID, anchor: .bottom) }
     }
 
     private var typingIndicator: some View {
@@ -326,7 +506,8 @@ struct AIChatView: View {
     private var inputBar: some View {
         VStack(spacing: 4) {
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("メッセージを入力", text: $chat.draft, axis: .vertical)
+                micButton
+                TextField(voice.isListening ? "聞いています…" : "メッセージを入力", text: $chat.draft, axis: .vertical)
                     .lineLimit(1...4)
                     .focused($isInputFocused)
                     .font(.system(size: 15))
@@ -348,7 +529,7 @@ struct AIChatView: View {
                         .font(.system(size: 32))
                         .foregroundStyle(chat.canSend ? MindWaveCyberTheme.cyan : Color.white.opacity(0.2))
                 }
-                .disabled(!chat.canSend)
+                .disabled(!chat.canSend || voice.isListening)
                 .accessibilityLabel("送信")
                 .accessibilityIdentifier("chat_send_button")
             }
@@ -365,6 +546,27 @@ struct AIChatView: View {
         .padding(.bottom, 6)
         .background(.ultraThinMaterial)
     }
+
+    /// 声で話す（押すと録音、話し終えると自動で送信。録音中にもう一度押すと終えて送る）
+    private var micButton: some View {
+        let listening = voice.isListening
+        return Button {
+            isInputFocused = false
+            Task { await voice.micTapped() }
+        } label: {
+            Image(systemName: listening ? "stop.fill" : "mic.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(listening ? Color.white : MindWaveCyberTheme.cyan)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(listening ? Color.red.opacity(0.85) : MindWaveCyberTheme.cyan.opacity(0.16)))
+                .overlay(Circle().strokeBorder(listening ? Color.clear : MindWaveCyberTheme.cyan.opacity(0.55)))
+        }
+        .buttonStyle(.plain)
+        .disabled(chat.isSending || voice.state == .preparing || voice.state == .processing)
+        .accessibilityLabel(listening ? "録音を終えて送る" : "声で話す")
+        .accessibilityHint("押すと録音を始めます。話し終えると自動で送信します")
+        .accessibilityIdentifier("chat_mic_button")
+    }
 }
 
 /// 1 件の発言
@@ -374,8 +576,15 @@ private struct ChatBubble: View {
     private var isUser: Bool { message.role == .user }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top, spacing: 6) {
             if isUser { Spacer(minLength: 40) }
+            if !isUser {
+                // もこりんの発言だと分かるように小さな顔を添える
+                MokorinAvatarView(size: 26, pose: MokorinPose(emotion: .happy))
+                    .frame(width: 26, height: 26)
+                    .padding(.top, 12)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
                 if !isUser { originBadge }
                 Text(message.text)
@@ -402,7 +611,7 @@ private struct ChatBubble: View {
                 }
                 statusLabel
             }
-            if !isUser { Spacer(minLength: 40) }
+            if !isUser { Spacer(minLength: 24) }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)

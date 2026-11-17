@@ -8,6 +8,7 @@
 //
 // iOS 側の正本: MindWaveGraphic/MindWaveGraphic/Contracts/ChatContracts.swift
 
+import { validateCheckInRequest } from "./checkin.ts";
 import { SCHEMA_VERSION, type Validation } from "./contract.ts";
 import { UpstreamError, upstreamErrorFromResponse } from "./openai.ts";
 
@@ -60,6 +61,8 @@ export interface ChatRequest {
   context: {
     scene: (typeof CHAT_SCENES)[number] | null;
     measurement: ChatMeasurementContext | null;
+    /** 測定前の会話（STEP 0〜6）と AI 相談で本人が答えた内容（列挙値のみ。計測値ではない）。2026-11-17 追加・省略可能 */
+    check_in?: Record<string, unknown>;
   };
   consent: { biometric_context_consented: boolean; consent_version: number };
 }
@@ -152,13 +155,15 @@ export function validateChatRequest(body: unknown, limits: ChatLimits): Validati
 
   const context = body.context;
   if (!isObject(context)) return fail("context がない");
-  const cExtra = extraKeys(context, ["scene", "measurement"], "context");
+  const cExtra = extraKeys(context, ["scene", "measurement", "check_in"], "context");
   if (cExtra) return fail(cExtra);
   if (!(context.scene === null || isOneOf(context.scene, CHAT_SCENES))) return fail("context.scene が不正");
   if (context.measurement !== null) {
     const err = validateMeasurement(context.measurement);
     if (err) return fail(err);
   }
+  const checkInError = validateCheckInRequest(context.check_in);
+  if (checkInError) return fail(checkInError.replace("current.check_in", "context.check_in"));
 
   const consent = body.consent;
   if (!isObject(consent)) return fail("consent がない");
@@ -187,12 +192,39 @@ export const CHAT_INSTRUCTIONS = [
   "- 入力にない事実や計測値を作らない。計測情報が渡されていない場合は、心拍などの数値に触れない。",
   "- 敬体（です・ます）で、400文字程度までに簡潔にまとめる。箇条書きは必要なときだけ使う。",
   "- アプリはそのまま文字を表示するため、Markdown の記号（** や # など）は使わない。箇条書きは「1.」「・」で書く。",
+  "会話の進め方:",
+  "- 「本人が答えた内容」が渡されたら、それを覚えている前提で自然に触れる（例: 睡眠が短い→無理をしない提案）。すでに分かっていることを聞き直さない。",
+  "- 「答えたくない項目」には触れない・尋ねない。",
+  "- 本人の状況がまだよく分からないときは、最後に質問を1つだけする。一度に複数の質問をしない。",
+  "- 方法を勧めるときは、アプリにある方法（4-7-8 呼吸・ボックス呼吸・2-1-4 呼吸・筋弛緩・肩や首のストレッチ・グラウンディング・小休憩・心配ごとの整理・冒頭の練習・できたことの振り返り）を優先する。",
 ].join("\n");
 
-/** 場面・計測の補足（会話の先頭に developer メッセージとして添える） */
+const CHECK_IN_LABELS: Record<string, string> = {
+  sleep: "昨夜の睡眠", activity: "今日の活動", condition: "体調", situation: "場面", timing: "出来事の時期",
+  emotion: "気持ち", tension_level: "緊張の強さ（本人の評価 0〜100）", causes: "気になること", body_signals: "体の変化", support: "してみたいこと",
+};
+
+/** 本人が答えた内容（列挙値）を 1 行にする。分かっている項目がなければ null */
+export function buildChatCheckInNote(checkIn: Record<string, unknown> | undefined): string | null {
+  if (!checkIn) return null;
+  const known: string[] = [];
+  for (const [key, label] of Object.entries(CHECK_IN_LABELS)) {
+    const v = checkIn[key];
+    if (typeof v === "string" || typeof v === "number") known.push(`${label}=${v}`);
+    else if (Array.isArray(v) && v.length > 0) known.push(`${label}=${v.join("/")}`);
+  }
+  const declined = Array.isArray(checkIn.declined) ? (checkIn.declined as string[]) : [];
+  if (known.length === 0 && declined.length === 0) return null;
+  return `本人が答えた内容（本人の言葉・選択から。計測値ではない）: ${known.join("、") || "なし"}` +
+    (declined.length > 0 ? `。答えたくない項目: ${declined.join(",")}` : "");
+}
+
+/** 場面・会話の情報・計測の補足（会話の先頭に developer メッセージとして添える） */
 export function buildContextNote(req: ChatRequest): string | null {
   const parts: string[] = [];
   if (req.context.scene) parts.push(`利用者が選んだ場面: ${SCENE_LABELS[req.context.scene]}`);
+  const checkInNote = buildChatCheckInNote(req.context.check_in);
+  if (checkInNote) parts.push(checkInNote);
   const m = req.context.measurement;
   if (m) {
     parts.push(
