@@ -222,3 +222,47 @@ test("Markdown 除去: 箇条書きの * は「・」、3行以上の空行は1�
   assert.equal(sanitizeChatText(long).length, 1200, "長文を切り捨てない");
   assert.equal(sanitizeChatText("掛け算 2*3 と *強調* はそのまま"), "掛け算 2*3 と *強調* はそのまま");
 });
+
+// ── 会話の情報（STEP 0〜6・AI 相談で本人が答えた内容。2026-11-17） ─────────────
+
+const CHECK_IN = {
+  sleep: "3_5h", activity: null, condition: null, situation: "interview_exam", timing: "tomorrow_or_later", emotion: "anxious",
+  tension_level: 70, causes: ["failure"], body_signals: [], support: null, declined: ["activity"], asked: [], remaining_slots: [],
+};
+
+test("chat 契約: context.check_in は省略可能で、列挙値以外は拒否する", () => {
+  assert.equal(validateChatRequest(chatRequest(TURN1, { context: { scene: "interview", measurement: null, check_in: CHECK_IN } }), LIMITS).ok, true);
+  const bad = validateChatRequest(chatRequest(TURN1, { context: { scene: null, measurement: null, check_in: { ...CHECK_IN, sleep: "8時間" } } }), LIMITS);
+  assert.equal(bad.ok, false);
+  if (!bad.ok) assert.match(bad.message, /context\.check_in\.sleep/);
+  assert.equal(validateChatRequest(chatRequest(TURN1, { context: { scene: null, measurement: null, check_in: { memo: "x" } } }), LIMITS).ok, false);
+});
+
+test("chat: 本人が答えた内容を developer メッセージに含め、答えたくない項目も伝える", () => {
+  const body = buildChatResponsesRequest(chatRequest(TURN2, { context: { scene: "interview", measurement: null, check_in: CHECK_IN } }), { model: "m", maxOutputTokens: 100 });
+  const input = body.input as Array<{ role: string; content: string }>;
+  assert.equal(input[0]?.role, "developer");
+  assert.match(input[0]!.content, /利用者が選んだ場面: 面接・発表前/);
+  assert.match(input[0]!.content, /昨夜の睡眠=3_5h/);
+  assert.match(input[0]!.content, /緊張の強さ（本人の評価 0〜100）=70/);
+  assert.match(input[0]!.content, /答えたくない項目: activity/);
+  // 会話の履歴は developer の後ろに順番どおり
+  assert.deepEqual(input.slice(1).map((m) => m.role), ["user", "assistant", "user"]);
+  assert.match(String(body.instructions), /聞き直さない/);
+});
+
+test("chat: 分かっている内容がない check_in は補足に入れない", () => {
+  const empty = { ...CHECK_IN, sleep: null, situation: null, timing: null, emotion: null, tension_level: null, causes: [], declined: [] };
+  const body = buildChatResponsesRequest(chatRequest(TURN1, { context: { scene: null, measurement: null, check_in: empty } }), { model: "m", maxOutputTokens: 100 });
+  assert.equal((body.input as Array<{ role: string }>)[0]?.role, "user");
+});
+
+test("chat（スタブ）: 会話の情報が届いたことを返答で確認できる", async () => {
+  const { handler, calls } = setup();
+  const res = await handler(post(chatRequest(TURN1, { context: { scene: null, measurement: null, check_in: CHECK_IN } })), ENV);
+  assert.equal(res.status, 200);
+  const json = (await res.json()) as { reply: { text: string } };
+  assert.ok(json.reply.text.startsWith(STUB_CHAT_PREFIX));
+  assert.match(json.reply.text, /会話の情報: 昨夜の睡眠=3_5h/);
+  assert.equal(calls.length, 1);
+});

@@ -55,11 +55,20 @@ nonisolated struct ChatContextDTO: Codable, Equatable, Sendable {
     /// 状況確認で選んだ場面（ContextScene.rawValue）。未選択は null
     var scene: String?
     var measurement: ChatMeasurementContextDTO?
+    /// 測定前の会話（STEP 0〜6）と AI 相談で本人が答えた内容（列挙値のみ。計測値ではない）。
+    /// 分かっている項目がないときは送らない（2026-11-17 追加。古いサーバーとの互換のため省略可能）
+    var checkIn: ContextAssistCheckInDTO? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case scene, measurement
+        case checkIn = "check_in"
+    }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(scene, forKey: .scene)
         try c.encode(measurement, forKey: .measurement)
+        try c.encodeIfPresent(checkIn, forKey: .checkIn)
     }
 }
 

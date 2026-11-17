@@ -136,15 +136,43 @@ struct HomeView: View {
             if !hasDisplayData { return ("未計測", Color.white.opacity(0.5)) }
             return viewModel.isMockMode ? ("デモ値", .orange) : ("実測", .green)
         }()
-        return VStack(alignment: .leading, spacing: 2) {
+        let hasValue = hasDisplayData || prototypeLive != nil
+        // 全体UI 8 ページ: もこりんが今の評価を伝える（計測データがあるときは PR #5 のポップアップが出るため、ここには出さない）
+        let mokorinLine: String = {
+            guard hasValue else { return "計測すると様子が分かるよ" }
+            switch displayState {
+            case .underAroused: return "落ち着いているね"
+            case .optimalTension: return "いい集中だね"
+            case .overTense: return "「改善」で一緒に整えよう"
+            }
+        }()
+        return HStack(alignment: .center, spacing: 8) {
+            if !edgeGuideActive {
+                MokorinAvatarView(size: 46, pose: MokorinPose(emotion: hasValue && displayState == .overTense ? .calm : .happy))
+                    .frame(width: 46, height: 46)
+                    .accessibilityHidden(true)
+            }
+            statusHeroText(score: score, label: label, source: source, hasValue: hasValue,
+                           mokorinLine: edgeGuideActive ? nil : mokorinLine)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.45))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(accentColor.opacity(0.35), lineWidth: 0.8)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("今の状態 \(hasValue ? "\(score) \(label)" : "計測前")。\(source.text)\(edgeGuideActive ? "" : "。もこりん：\(mokorinLine)")")
+        .accessibilityIdentifier("home_status_hero")
+    }
+
+    private func statusHeroText(score: Int, label: String, source: (text: String, color: Color), hasValue: Bool, mokorinLine: String?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             Text("今の状態")
                 .font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.55))
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(hasDisplayData || prototypeLive != nil ? "\(score)" : "--")
+                Text(hasValue ? "\(score)" : "--")
                     .font(.system(size: 34, weight: .thin, design: .rounded))
                     .foregroundStyle(accentColor)
                     .contentTransition(.numericText())
-                Text(hasDisplayData || prototypeLive != nil ? label : "計測前")
+                Text(hasValue ? label : "計測前")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.9))
             }
             Text(source.text)
@@ -152,13 +180,13 @@ struct HomeView: View {
                 .foregroundStyle(source.color)
                 .padding(.horizontal, 6).padding(.vertical, 2)
                 .background(Capsule().fill(source.color.opacity(0.15)))
+            if let mokorinLine {
+                Text(mokorinLine)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+                    .padding(.top, 2)
+            }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.45))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(accentColor.opacity(0.35), lineWidth: 0.8)))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("今の状態 \(hasDisplayData || prototypeLive != nil ? "\(score) \(label)" : "計測前")。\(source.text)")
-        .accessibilityIdentifier("home_status_hero")
     }
 
     /// 表示中のスコアから決めた状態（グラフィックの色と一致させる）

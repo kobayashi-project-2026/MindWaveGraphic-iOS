@@ -137,7 +137,14 @@ export function stubChatReply(body: Record<string, unknown>): string {
     users.length > 1 ? `最初のご相談「${clip(first, 30)}」の続きとして受け付けました。` : `ご相談「${clip(first, 30)}」を受け付けました。`,
     `直前の質問:「${clip(last, 40)}」`,
   ];
-  if (scene) lines.push(`補足情報: ${clip(scene.split("\n")[0] ?? "", 40)}`);
+  if (scene) {
+    const noteLines = scene.split("\n");
+    const sceneLine = noteLines.find((l) => !l.startsWith("本人が答えた内容"));
+    if (sceneLine) lines.push(`補足情報: ${clip(sceneLine, 40)}`);
+    // 会話の情報が届いているかを確認できるように引用する（AI の解釈ではない）
+    const checkIn = noteLines.find((l) => l.startsWith("本人が答えた内容"));
+    if (checkIn) lines.push(`会話の情報: ${clip(checkIn.replace(/^本人が答えた内容（[^）]*）: /, ""), 60)}`);
+  }
   return lines.join("\n");
 }
 

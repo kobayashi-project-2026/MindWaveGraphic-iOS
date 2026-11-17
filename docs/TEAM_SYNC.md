@@ -6,7 +6,7 @@
 |---|---|
 | リポジトリ | https://github.com/kobayashi-project-2026/MindWaveGraphic-iOS |
 | 共有開発ブランチ | `feature/mokorin-voice-ui-20261028` |
-| 2026-11-17 の統合 | PR #8（`integration/team-sync-20261117`）で共有開発ブランチへマージ済み。検証での修正は `fix/team-sync-verification-20261117` の PR |
+| 2026-11-17 の統合 | PR #8（`integration/team-sync-20261117`）で共有開発ブランチへマージ済み。検証での修正は `fix/team-sync-verification-20261117` の PR #9。STEP 4 は `feature/mokorin-ai-ui-step4-20261117` の PR |
 | main | 保護ブランチ。直接 push・force push はしない。PR とレビューで更新する |
 
 最新のコミット SHA は GitHub のブランチ画面か `git log -1 origin/feature/mokorin-voice-ui-20261028` で確認する。
@@ -86,3 +86,14 @@ git merge origin/feature/mokorin-voice-ui-20261028
 - 「改善」の強調が、本人の評価（試作スコア）で緊張が高いときに出なくなっていた → 元の条件に戻す
 - 使わなくなった `MokorinEdgeGuide.swift` を削除
 - サーバー（スタブ）を使う E2E テストを追加・更新（`MW_E2E_BASE_URL` を設定したときだけ実行）
+
+## 2026-11-17 STEP 4（もこりんの AI 相談・UI）
+
+ブランチ `feature/mokorin-ai-ui-step4-20261117` → 共有開発ブランチへの PR。
+
+- AI相談: もこりんを上部中央に大きく・音声入力・会話から分かったこと・話しかけの例・直前の発言の「直す」「取り消す」・会話の内容からのおすすめと「改善方法を見る」（docs/OPENAI_CHAT_ARCHITECTURE.md）
+- `/v1/chat` に `context.check_in`（省略可能・列挙値のみ）を追加。測定前の会話（STEP 0〜6）とこの画面で本人が話したことを AI への補足に含める。スタブは届いた内容を返答で引用する（実際の OpenAI では未確認）
+- ホーム: 状態のカードにもこりんと一言（計測データがあるときは PR #5 のポップアップ）
+- 改善の方法選び: 見出しの呼吸法と違う方法（小休憩など）の理由を、その呼吸法の理由として表示していた → 方法名を添えて表示
+- 改善ガイド: 開始前に「再開」と表示していた → 「START」。一時停止中の表示を追加。iPhone SE で START・一時停止が画面の下にはみ出していた → 収まる大きさに
+- シミュレーター検証用（DEBUG）: `MW_CHAT_AUTO_OPEN_IMPROVEMENT=1`（AI相談 → 改善）、`MW_GUIDE_PAUSE_TEST=1`（`MW_FLOW_AUTOPILOT=1` と併用で 一時停止 → 再開）

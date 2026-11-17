@@ -761,7 +761,7 @@ struct GuideFlowView: View {
                         Text("「\((recommendedExercise.map { ImprovementMethod.from($0).title }) ?? methodRecommendations.first?.method.title ?? "呼吸法")」がおすすめ")
                             .font(.system(size: 19, weight: .bold)).foregroundStyle(.white)
                             .fixedSize(horizontal: false, vertical: true)
-                        if let reason = methodRecommendations.first(where: { $0.method.guideExercise != nil })?.reason ?? methodRecommendations.first?.reason {
+                        if let reason = recommendationReason {
                             Text(reason).font(.system(size: 12)).foregroundStyle(Color.cyan.opacity(0.85))
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -833,10 +833,16 @@ struct GuideFlowView: View {
             }
             #if DEBUG
             // MW_FLOW_AUTOPILOT=1: 一連の画面遷移の検証用（開始 → 数秒実施 → STOP。押した場合と同じ処理を呼ぶ）
+            // MW_GUIDE_PAUSE_TEST=1 を併用すると、実施中に 一時停止 → 再開 を挟む（それぞれのボタンと同じ処理）
             if ProcessInfo.processInfo.environment["MW_FLOW_AUTOPILOT"] == "1" {
+                let pauseTest = ProcessInfo.processInfo.environment["MW_GUIDE_PAUSE_TEST"] == "1"
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) { if step == .exerciseSelection { startSession() } }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 4.5) { if step == .session { sessionIsRunning = true } }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 10) { if step == .session { finishSession(early: true) } }
+                if pauseTest {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 10) { if step == .session { sessionIsRunning = false } }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 18) { if step == .session, isSessionPaused { sessionIsRunning = true } }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + (pauseTest ? 26 : 10)) { if step == .session { finishSession(early: true) } }
             }
             #endif
         }
@@ -1085,17 +1091,29 @@ struct GuideFlowView: View {
                 sessionDurationPicker.padding(.vertical, isCompactHeight ? 6 : 12)
             }
 
-            Spacer(minLength: 14)
+            Spacer(minLength: isCompactHeight ? 6 : 14)
 
             // ── BIG セッションボタン（コックピット緊急停止風）
             if !sessionIsFinished {
+                // 一時停止中の表示（ボタンの上。iPhone SE でも画面内に収まる位置）
+                if isSessionPaused {
+                    Label("一時停止中 — 「再開」で続きから", systemImage: "pause.circle")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.cyan.opacity(0.85))
+                        .padding(.bottom, 8)
+                        .accessibilityIdentifier("guide_paused_label")
+                }
                 bigSessionButton.padding(.horizontal, 20)
                 // 一時停止（STOP は終了して結果へ。途中で休みたいときはこちら）
                 if sessionIsRunning {
                     HStack(spacing: 24) {
                         Button { sessionIsRunning = false } label: {
                             Label("一時停止", systemImage: "pause.fill")
-                                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
+                                .padding(.horizontal, 16).padding(.vertical, 8)
+                                .background(Capsule().fill(Color.white.opacity(0.08)))
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.3), lineWidth: 1))
+                                .contentShape(Capsule())
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("ガイドを止めて、あとで再開できます")
@@ -1114,7 +1132,7 @@ struct GuideFlowView: View {
                 }
             }
 
-            Spacer(minLength: 24)
+            Spacer(minLength: isCompactHeight ? 10 : 24)
         }
         .sheet(isPresented: $showMokorinTalk) {
             ContextCalibrationView(flowState: flowState) { showMokorinTalk = false }
@@ -1175,9 +1193,10 @@ struct GuideFlowView: View {
                 }
             }
             // 改善資料 3 ページ: グラフィックを大きく表示する（実施中はさらに大きく）
-            .scaleEffect(isCompactHeight ? (sessionIsRunning || sessionIsFinished ? 0.9 : 0.68) : (sessionIsRunning || sessionIsFinished ? 1.3 : 1.05))
+            // iPhone SE では実施中も STOP の下の「一時停止」まで画面内に収まる大きさにする
+            .scaleEffect(isCompactHeight ? (sessionIsRunning || sessionIsFinished ? 0.76 : 0.68) : (sessionIsRunning || sessionIsFinished ? 1.3 : 1.05))
             // scaleEffect はレイアウトの大きさを変えないため、拡大・縮小した分の高さに合わせる（実施前は小さめにして START まで収める）
-            .frame(height: isCompactHeight ? (sessionIsRunning || sessionIsFinished ? 280 : 200) : (sessionIsRunning || sessionIsFinished ? 400 : 330))
+            .frame(height: isCompactHeight ? (sessionIsRunning || sessionIsFinished ? 228 : 176) : (sessionIsRunning || sessionIsFinished ? 400 : 330))
             .animation(.easeInOut(duration: 0.5), value: sessionIsRunning)
             .frame(maxWidth: .infinity)
         }
@@ -1581,7 +1600,7 @@ struct GuideFlowView: View {
                 HStack(spacing: 12) {
                     Image(systemName: isStop ? "stop.fill" : "play.fill")
                         .font(.system(size: 22, weight: .bold))
-                    Text(isStop ? "STOP" : (sessionElapsed < sessionDurationSeconds && !sessionIsFinished ? "再開" : "START"))
+                    Text(isStop ? "STOP" : (isSessionPaused ? "再開" : "START"))
                         .font(.system(size: 22, weight: .bold, design: .monospaced))
                         .tracking(4.0)
                 }
@@ -1589,12 +1608,18 @@ struct GuideFlowView: View {
                 .shadow(color: isStop ? Color.orange.opacity(0.45) : Color.cyan.opacity(0.45), radius: 8)
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 76)
+            .frame(height: isCompactHeight ? 62 : 76)
         }
         .buttonStyle(.plain)
         .shadow(color: isStop ? Color.orange.opacity(0.50) : Color.cyan.opacity(0.38), radius: 24, y: 4)
-        .accessibilityLabel(isStop ? "停止する" : "開始する")
+        .accessibilityLabel(isStop ? "停止する" : (isSessionPaused ? "再開する" : "開始する"))
+        .accessibilityIdentifier("guide_session_button")
         .animation(.easeInOut(duration: 0.22), value: isStop)
+    }
+
+    /// 途中で一時停止している（開始前は含めない。以前は開始前も「再開」と表示していた）
+    private var isSessionPaused: Bool {
+        !sessionIsRunning && !sessionIsFinished && sessionElapsed > 0 && sessionElapsed < sessionDurationSeconds
     }
 
     // MARK: - ▼ STEP 4: Remeasurement
@@ -2002,6 +2027,21 @@ struct GuideFlowView: View {
             return .box
         }
         return selectedScene?.recommendedExercise
+    }
+
+    /// 見出しのおすすめに対応する理由。見出しの呼吸法と違う方法の理由を、その呼吸法の理由として出さない
+    private var recommendationReason: String? {
+        if let ex = recommendedExercise, let rec = methodRecommendations.first(where: { $0.method.guideExercise == ex }) {
+            return rec.reason
+        }
+        if recommendedExercise == .breathing214, recentMemory?.checkIn?.body?.value.contains(.shallowBreath) == true {
+            return "息苦しさがあると話していたから、息を長く止めない呼吸にしたよ"
+        }
+        // 推薦の先頭がガイドのない方法（小休憩など）のときは、その方法名を添えて理由を出す
+        if let first = methodRecommendations.first, first.method.guideExercise == nil {
+            return "「\(first.method.title)」もおすすめ: \(first.reason)"
+        }
+        return methodRecommendations.first?.reason
     }
 
     /// 次に試す方法: 推薦のうち今回と違うガイド、なければ今回と違う呼吸法

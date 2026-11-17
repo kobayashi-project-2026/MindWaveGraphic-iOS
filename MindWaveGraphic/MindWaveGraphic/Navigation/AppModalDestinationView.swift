@@ -25,7 +25,7 @@ struct AppModalDestinationView: View {
             SettingsView()
 
         case .aiChat:
-            AIChatView(chat: chatViewModel) { navManager.dismissModal() }
+            AIChatView(chat: chatViewModel, onOpenImprovement: openImprovementFromChat) { navManager.dismissModal() }
                 .onAppear { connectChatContext() }
                 #if DEBUG
                 .task { await runChatDebugHooks() }
@@ -89,14 +89,29 @@ extension AppModalDestinationView {
                 ChatBiometricPolicy.measurementContext(from: viewModel.lastAnalysisResult, now: Date(),
                                                        consented: InsightConsentStore().isConsented)
             },
-            biometricConsent: { InsightConsentStore().isConsented }
+            biometricConsent: { InsightConsentStore().isConsented },
+            // 測定前の会話（STEP 0〜6）で分かったこと（6 時間以内。改善方法の推薦と同じ扱い）
+            checkIn: {
+                guard let m = flowState.mokorinMemory, Date().timeIntervalSince(m.capturedAt) <= 6 * 3600 else { return nil }
+                return m.checkIn
+            }
         )
+    }
+
+    /// AI相談の推薦から改善方法の画面へ。この画面で分かったことを会話の記録に加えて、推薦をそろえる
+    private func openImprovementFromChat() {
+        let recent = flowState.mokorinMemory.flatMap { Date().timeIntervalSince($0.capturedAt) <= 6 * 3600 ? $0 : nil }
+        if let memory = chatViewModel.memoryForImprovement(base: recent, context: flowState.measurementContext) {
+            flowState.mokorinMemory = memory
+        }
+        navManager.navigate(to: .improvement)
     }
 
     #if DEBUG
     /// シミュレーター検証用（DEBUG のみ）:
     /// - MW_CHAT_TEST_CONSENT=1 / 0 : 外部AIへの文章送信に同意した／していない状態にする
     /// - MW_CHAT_AUTOPLAY="文1||文2||…" : 画面表示後に順番に送信し、各返答を待つ（実際の送信経路・画面をそのまま使う）
+    /// - MW_CHAT_AUTO_OPEN_IMPROVEMENT=1 : 送信のあと、推薦のカードの「改善方法を見る」と同じ処理を呼ぶ
     private func runChatDebugHooks() async {
         let env = ProcessInfo.processInfo.environment
         if env["MW_CHAT_TEST_CONSENT"] == "1" { chatViewModel.setTextConsent(true) }
@@ -105,6 +120,10 @@ extension AppModalDestinationView {
         for line in script.components(separatedBy: "||") where !line.isEmpty {
             try? await Task.sleep(for: .seconds(1))
             await chatViewModel.submit(line)
+        }
+        if env["MW_CHAT_AUTO_OPEN_IMPROVEMENT"] == "1", !chatViewModel.recommendations.isEmpty {
+            try? await Task.sleep(for: .seconds(5))
+            openImprovementFromChat()
         }
     }
     #endif
