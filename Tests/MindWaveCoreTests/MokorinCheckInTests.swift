@@ -18,6 +18,13 @@ enum MokorinCheckInTests {
 
     static func run() {
         T.suite("もこりん / 会話の情報（STEP 0〜6）")
+        T.test("アプリ内から開いたあいさつ: 場面が未設定なら「安静」などと断定せず、質問も重ねない") {
+            let fresh = MokorinScript.greetingForEdit(current: .default)
+            T.expect(!fresh.contains("安静") && !fresh.contains("？"), "未設定の場面に触れない・質問はこの後の 1 つだけ")
+            var ctx = MeasurementContext()
+            ctx.scene = .interview
+            T.expect(MokorinScript.greetingForEdit(current: ctx).contains(ContextScene.interview.displayName), "設定済みの場面は伝える")
+        }
         T.test("1 つの発言から複数の項目を取り出す: 明日・面接・不安・睡眠不足（推定）・動悸") {
             let e = CheckInExtractor.extract("明日面接があって、不安であまり寝られなかった。今は心臓がドキドキしてる。", asked: nil)
             T.expectEqual(e.situation, .interviewExam)

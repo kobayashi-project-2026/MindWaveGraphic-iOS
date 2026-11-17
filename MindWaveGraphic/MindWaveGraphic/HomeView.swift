@@ -432,7 +432,7 @@ struct HomeView: View {
             VStack(spacing: 0) {
                 panelTopRip
                 CockpitLeverNav(selectedTab: $selectedTab, accentColor: accentColor,
-                                highlightImprove: isHyperTensionState || flowState.pendingImprovement != nil) { navManager.navigate(to: .dialogue) }
+                                highlightImprove: displayState == .overTense || flowState.pendingImprovement != nil) { navManager.navigate(to: .dialogue) }
                     .padding(.horizontal, 14)
                     .frame(height: 42)
                     .padding(.top, 4)
@@ -546,6 +546,13 @@ struct HomeView: View {
                         .font(.system(size: 7, weight: .bold, design: .monospaced))
                         .foregroundStyle(ac.opacity(0.62))
                         .tracking(1.5)
+                    // 実測がないときの "72" は固定のデモ値。実測と混同しないよう明示する
+                    if !hasData && isDemoMode {
+                        Text("DEMO")
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Color.orange)
+                            .accessibilityLabel("デモ値")
+                    }
                     Spacer()
                     Image(systemName: "heart.fill")
                         .font(.system(size: 7))

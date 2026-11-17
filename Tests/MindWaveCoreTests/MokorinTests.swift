@@ -384,10 +384,46 @@ enum MokorinTests {
             T.expectEqual(vm.selectedScene, .interview)
             await vm.submit("さっき階段を上ってきました")
             T.expectEqual(vm.selectedConditions, [.stairs])
-            T.expectEqual(vm.step, .review)
+            // STEP 0〜6 の会話（2026-11-11）では、場面と体の状態だけでは終わらず、足りない項目（気持ち・緊張など）を続けて尋ねる
+            T.expect(vm.step != .review && vm.askedSlot != nil, "足りない項目を尋ねる: \(vm.step)")
             T.expect(vm.messages.contains { if case .stub = $0.origin { return true }; return false }, "stub labelled")
             T.expect(vm.notice == nil, "no fallback: \(vm.notice ?? "")")
             T.expectEqual(vm.pose.action, .nod, "サーバーの action を反映")
+        }
+        // 2026-11-17 チーム統合後の検証: 明日の面接・睡眠不足・訂正・質問・スキップ・途中で測定・推薦への引き継ぎ
+        await T.test("統合後の会話（スタブ）: 複数情報・訂正・改善方法の質問・スキップ・途中で測定 → 推薦と結果へ引き継ぐ") {
+            let store = ChatTextConsentStore(defaults: T.freshDefaults("moko-e2e-sync"))
+            store.setConsented(true)
+            let vm = MokorinContextViewModel(consentStore: store, configurationProvider: { cfg },
+                                             clientFactory: { RemoteContextAssistClient(configuration: $0, session: URLSession(configuration: .ephemeral)) })
+            await vm.submit("明日面接があって、3時間しか寝られなかった")
+            T.expectEqual(vm.checkIn.situation?.value, .interviewExam)
+            T.expectEqual(vm.checkIn.timing?.value, .tomorrowOrLater)
+            T.expect(vm.checkIn.sleep?.value.isShort == true, "睡眠が短い")
+            T.expect(![.situation, .timing, .sleep].contains(vm.askedSlot!), "答え済みは尋ねない: \(String(describing: vm.askedSlot))")
+            await vm.submit("ごめん、面接じゃなくて発表だった")
+            T.expectEqual(vm.checkIn.situation?.value, .presentation)
+            let asked = vm.askedSlot
+            await vm.submit("どんな方法がある？")   // スタブはキーワードで判定するため、場面・緊張の言葉を含まない質問にする
+            T.expectEqual(vm.askedSlot, asked, "質問に答えたあとは同じ質問に戻る")
+            vm.skipQuestion()
+            T.expect(asked.map { vm.checkIn.declined.contains($0) } == true, "スキップした項目は二度と尋ねない")
+            T.expect(vm.askedSlot != asked, "次の質問へ")
+            await vm.submit("もう測りたい")
+            T.expectEqual(vm.step, .review)
+            T.expect(!vm.recommendations.isEmpty, "推薦がある")
+            let m = vm.sessionMemory
+            T.expectEqual(m.checkIn?.situation?.value, .presentation, "訂正後の場面が結果・提案へ渡る")
+            T.expect(vm.notice == nil, "フォールバックなし: \(vm.notice ?? "")")
+        }
+        await T.test("統合後の会話（スタブ）: 緊張していないときは行動を求めない") {
+            let store = ChatTextConsentStore(defaults: T.freshDefaults("moko-e2e-calm"))
+            store.setConsented(true)
+            let vm = MokorinContextViewModel(consentStore: store, configurationProvider: { cfg },
+                                             clientFactory: { RemoteContextAssistClient(configuration: $0, session: URLSession(configuration: .ephemeral)) })
+            await vm.submit("今は落ち着いてる。特に予定はない")
+            T.expectEqual(vm.checkIn.tension?.value, 0)
+            T.expect(vm.recommendations.allSatisfy { $0.method != .muscleRelaxation }, "緊張していないのに緊張を下げる方法を勧めない: \(vm.recommendations.map(\.method))")
         }
     }
 }

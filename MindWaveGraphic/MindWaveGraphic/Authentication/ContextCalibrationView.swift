@@ -217,7 +217,7 @@ struct ContextCalibrationView: View {
     }
 
     private func bubbleHeight(for height: CGFloat) -> CGFloat {
-        isInputFocused ? 92 : min(176, max(112, height * 0.19))
+        isInputFocused ? 104 : min(176, max(128, height * 0.19))
     }
 
     /// もこりん（大きく中央）と、その発言の吹き出し（高さ固定・長い文は中でスクロール）。返答の長さでもこりんや入力欄が動かない
@@ -327,6 +327,9 @@ struct ContextCalibrationView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    // 小さい画面で収まらないときは、末尾（今の質問）が見える位置から表示する。前のあいさつは上へスクロールで読める
+                    .defaultScrollAnchor(.top, for: .alignment)
+                    .defaultScrollAnchor(.bottom, for: .initialOffset)
                     Text(originLabel(message.origin) + (message.hasFixedFollowUp ? "・質問の一部は端末内の定型文" : ""))
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(isStub(message.origin) ? Color.orange : Color(red: 0.3, green: 0.4, blue: 0.55))
@@ -503,11 +506,6 @@ struct ContextCalibrationView: View {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { isInputFocused = true }
                         }
                         .accessibilityIdentifier("mokorin_own_words")
-                        Button("この質問は答えない") {
-                            isAllOptionsPresented = false
-                            mokorin.skipQuestion()
-                        }
-                        .accessibilityIdentifier("mokorin_skip_question")
                     }
                 }
             }
@@ -515,6 +513,14 @@ struct ContextCalibrationView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("閉じる") { isAllOptionsPresented = false } }
+                // 小さい画面でも一覧をスクロールせずに押せるよう、下部に常に表示する
+                ToolbarItem(placement: .bottomBar) {
+                    Button("この質問は答えない") {
+                        isAllOptionsPresented = false
+                        mokorin.skipQuestion()
+                    }
+                    .accessibilityIdentifier("mokorin_skip_question")
+                }
                 if mokorin.askedSlot?.allowsMultiple == true {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("決定") {
