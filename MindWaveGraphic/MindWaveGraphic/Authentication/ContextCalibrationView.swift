@@ -980,39 +980,31 @@ struct ContextCalibrationView: View {
     }
 }
 
-// MARK: - LaunchStarfieldBG (shared between AccountGuidanceView and ContextCalibrationView)
+// MARK: - LaunchStarfieldBG（スプラッシュ・タイトル・会話・ギャラリーで共通。PR #7 の最終デザイン）
 
 /// 軽量静的星背景。ContextCalibrationとAccountGuidanceで共有できる簡略版。
 struct LaunchStarfieldBG: View {
     var body: some View {
-        TimelineView(.animation) { tl in
-            Canvas { ctx, size in
-                let t  = tl.date.timeIntervalSinceReferenceDate
-                let cx = size.width  * 0.5
-                let cy = size.height * 0.45
-                for i in 0..<200 {
-                    let s     = Double(i)
-                    let sx    = sin(s * 12.9898 + 0.73) * 0.88
-                    let sy    = cos(s * 78.233  + 0.31) * 0.88
-                    let phase = abs(sin(s * 7.13 + 2.1)) * 0.5 + 0.5
-                    let szd   = max(0.012, abs(sin(s * 43.71)) * 0.95 + 0.012)
-                    var rawZ  = szd - t * 0.032 * (0.5 + phase * 0.5)
-                    rawZ = rawZ.truncatingRemainder(dividingBy: 1.0)
-                    if rawZ <= 0 { rawZ += 1.0 }
-                    let z  = max(0.008, rawZ)
-                    let sc = 1.0 / z
-                    let px = sx * sc * size.width  * 0.52 + cx
-                    let py = sy * sc * size.height * 0.52 + cy
-                    guard px > -20, px < size.width  + 20,
-                          py > -20, py < size.height + 20 else { continue }
-                    let near   = max(0, 1.0 - z)
-                    let radius = max(0.18, near * 1.6)
-                    let op     = min(0.70, near * 1.4)
-                    ctx.fill(
-                        Path(ellipseIn: CGRect(x: px - radius, y: py - radius,
-                                               width: radius * 2, height: radius * 2)),
-                        with: .color(Color(red: 0.60 + near * 0.28, green: 0.78, blue: 1.0).opacity(op))
-                    )
+        ZStack {
+            LinearGradient(
+                colors: [
+                    Color(red: 0.015, green: 0.025, blue: 0.12),
+                    Color(red: 0.06, green: 0.04, blue: 0.25),
+                    Color(red: 0.12, green: 0.07, blue: 0.32)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            GeometryReader { geo in
+                ForEach(0..<45, id: \.self) { i in
+                    Circle()
+                        .fill(Color.white.opacity(i % 3 == 0 ? 0.85 : 0.35))
+                        .frame(width: i % 4 == 0 ? 2.5 : 1.5, height: i % 4 == 0 ? 2.5 : 1.5)
+                        .position(
+                            x: geo.size.width * CGFloat((i * 37) % 97) / 100.0,
+                            y: geo.size.height * CGFloat((i * 61) % 97) / 100.0
+                        )
                 }
             }
         }

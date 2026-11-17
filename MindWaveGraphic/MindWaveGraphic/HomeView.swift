@@ -23,7 +23,6 @@ struct HomeView: View {
 
     @State private var showStatusDetail     = false
     /// 緊張の高まりの知らせ（状態が高い緊張に変わったときだけ数秒表示）
-    @State private var showTensionBanner    = false
     @State private var buttonPulse: Bool    = false
     #if DEBUG
     @State private var showDebugDiagnostics = false
@@ -110,6 +109,16 @@ struct HomeView: View {
         return GraphicInput(score: correctedScore, confidence: base.confidence, state: base.state)
     }
 
+    // 過緊張状態かどうか（コックピットの赤アラート閾値 scoreIntensity > 0.66 と連動）
+    /// 実測値のときだけ（未計測・デモ値では出さない。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ値でも出す）
+    private var isHyperTensionState: Bool {
+        guard displayInput.score >= 66.0, hasDisplayData else { return false }
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["MW_EDGE_GUIDE_DEMO"] == "1" { return true }
+        #endif
+        return !viewModel.isMockMode
+    }
+
     private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
 
     /// 現在の状態のカード（2026-11-11 改修: 状態・大きな数値・データの種類を一目で）
@@ -155,7 +164,7 @@ struct HomeView: View {
     /// 表示中のスコアから決めた状態（グラフィックの色と一致させる）
     private var displayState: MindState { MindState.from(score: displayInput.score) }
 
-    /// 小さなもこりんを出すか（計測データがあるときだけ。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ表示でも出す）
+    /// もこりんのポップアップを出すか（計測データがあるときだけ。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ表示でも出す）
     private var edgeGuideActive: Bool {
         #if DEBUG
         if ProcessInfo.processInfo.environment["MW_EDGE_GUIDE_DEMO"] == "1" { return true }
@@ -233,19 +242,6 @@ struct HomeView: View {
                 .ignoresSafeArea(edges: .top)
                 .allowsHitTesting(false)
 
-                // 5b. 小さなもこりん（現在の評価に合わせて画面の端に現れる。押すと改善へ）
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        MokorinEdgeGuide(state: displayState, isActive: true, hasData: edgeGuideActive) { selectedTab = 1 }
-                            .padding(.trailing, 10)
-                            .padding(.bottom, 12)
-                    }
-                }
-                .frame(height: graphicH)
-                .zIndex(40)
-
                 // 5c'. 現在の状態（大きな数値・状態・データの種類）。グラフィックの中央を隠さないよう左上に置く
                 HStack {
                     statusHero
@@ -255,17 +251,15 @@ struct HomeView: View {
                 .padding(.horizontal, 16)
                 .zIndex(44)
 
-                // 5c. 緊張の高まりの知らせ（全体UI 10 ページ）と改善途中（24〜25 ページ）。医学的な警告ではない
-                VStack(spacing: 6) {
-                    if showTensionBanner {
-                        Text("緊張の高まりを検知しました")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color(red: 0.55, green: 0.08, blue: 0.08).opacity(0.9)))
-                            .transition(.move(edge: .top).combined(with: .opacity))
-                            .accessibilityIdentifier("tension_banner")
+                // 6. ヘッダー ＋ 過緊張時の上部通知バナー（PR #5）＋ 改善途中（全体UI 24〜25 ページ）。医学的な警告ではない
+                VStack(spacing: 10) {
+                    headerBar
+                    HyperTensionTopBanner(isVisible: isHyperTensionState) {
+                        withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
+                            selectedTab = 1
+                        }
                     }
+                    .accessibilityIdentifier("tension_banner")
                     if let p = flowState.pendingImprovement {
                         Button { selectedTab = 1 } label: {
                             Text("改善途中（\(p.exercise.title)・残り\(p.remainingSeconds / 60):\(String(format: "%02d", p.remainingSeconds % 60))）  再開 ›")
@@ -278,17 +272,30 @@ struct HomeView: View {
                         .accessibilityIdentifier("pending_improvement")
                     }
                 }
-                .padding(.top, 60)
-                .zIndex(45)
-                .animation(.easeInOut(duration: 0.3), value: showTensionBanner)
+                .padding(.top, 8)
+                .padding(.horizontal, 18)
+                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: isHyperTensionState)
+                .zIndex(50)
 
-                // 6. ヘッダー
-                headerBar
-                    .padding(.top, 8)
-                    .padding(.horizontal, 18)
-                    .zIndex(50)
+                // 7. コックピット計器パネルの右端から横スライドでひょこっと登場するもこりん（計測データがあるときだけ）
+                VStack(spacing: 0) {
+                    Spacer()
+                    if edgeGuideActive {
+                    MokorinCockpitPopupView(
+                        isHyperTension: isHyperTensionState,
+                        score: displayInput.score,
+                        onTapNavigateToGuide: {
+                            withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
+                                selectedTab = 1
+                            }
+                        }
+                    )
+                    .padding(.bottom, dashH + 2)
+                    }
+                }
+                .zIndex(40)
 
-                // 7. コックピット下部
+                // 8. コックピット下部
                 VStack(spacing: 0) {
                     Spacer()
                     cockpitConsole(dashH: dashH)
@@ -303,12 +310,6 @@ struct HomeView: View {
         .onAppear { captureBaselineIfNeeded() }
         .onChange(of: viewModel.snapshotHeartRate) { _, _ in captureBaselineIfNeeded() }
         .onChange(of: viewModel.snapshotHRV) { _, _ in captureBaselineIfNeeded() }
-        .onChange(of: displayState) { old, new in
-            // 実測値のときだけ（デモ値・未計測では出さない）
-            guard new == .overTense, old != .overTense, hasDisplayData, !viewModel.isMockMode else { return }
-            showTensionBanner = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { showTensionBanner = false }
-        }
         #if DEBUG
         .sheet(isPresented: $showDebugDiagnostics) {
             NavigationStack {
@@ -431,7 +432,7 @@ struct HomeView: View {
             VStack(spacing: 0) {
                 panelTopRip
                 CockpitLeverNav(selectedTab: $selectedTab, accentColor: accentColor,
-                                highlightImprove: displayState == .overTense || flowState.pendingImprovement != nil) { navManager.navigate(to: .dialogue) }
+                                highlightImprove: isHyperTensionState || flowState.pendingImprovement != nil) { navManager.navigate(to: .dialogue) }
                     .padding(.horizontal, 14)
                     .frame(height: 42)
                     .padding(.top, 4)
@@ -1204,6 +1205,8 @@ struct CockpitLeverNav: View {
     /// 「対話」（もこりんとの会話を開く）。2026-11-11 改善資料 2 ページ: 下部メニューを「対話」「改善」に変更。
     /// 履歴は共通メニューの「履歴」から開ける
     var onDialogue: () -> Void = {}
+    /// PR #5: 「改善」の位置を点滅させる
+    @State private var glowPulse = false
 
     /// 対話はタブではなく会話の画面を開くため、レバーは改善（0）とホーム（1）の位置だけを示す
     private var leverPos: Int {
@@ -1223,6 +1226,8 @@ struct CockpitLeverNav: View {
                 ForEach(navItems.indices, id: \.self) { i in
                     let item = navItems[i]
                     let active = selectedTab == item.tab
+                    let isGuideGlowing = (highlightImprove && item.tab == 1 && !active)
+
                     Button {
                         if item.tab < 0 { onDialogue(); return }
                         withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
@@ -1231,26 +1236,52 @@ struct CockpitLeverNav: View {
                     } label: {
                         VStack(spacing: 2) {
                             Image(systemName: item.icon)
-                                .font(.system(size: 15, weight: active ? .semibold : .light))
-                                .foregroundStyle(active ? accentColor : Color.white.opacity(0.22))
-                                .shadow(color: active ? accentColor.opacity(0.65) : .clear, radius: 4)
+                                .font(.system(size: 15, weight: (active || isGuideGlowing) ? .semibold : .light))
+                                .foregroundStyle(
+                                    active ? accentColor :
+                                    isGuideGlowing ? MindWaveCyberTheme.cyan :
+                                    Color.white.opacity(0.22)
+                                )
+                                .shadow(
+                                    color: active ? accentColor.opacity(0.65) :
+                                           isGuideGlowing ? MindWaveCyberTheme.cyan.opacity(glowPulse ? 0.95 : 0.35) :
+                                           .clear,
+                                    radius: isGuideGlowing ? 8 : 4
+                                )
                             Text(item.label)
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(active ? accentColor : Color.white.opacity(0.62))
+                                .foregroundStyle(
+                                    active ? accentColor :
+                                    isGuideGlowing ? MindWaveCyberTheme.cyan.opacity(glowPulse ? 1.0 : 0.7) :
+                                    Color.white.opacity(0.62)
+                                )
                         }
                         .frame(maxWidth: .infinity).frame(height: 36)
-                        .overlay {
-                            if item.tab == 1 && highlightImprove && !active {
-                                RoundedRectangle(cornerRadius: 6).strokeBorder(Color.yellow.opacity(0.85), lineWidth: 1.2)
-                                    .padding(.horizontal, 18)
-                                    .shadow(color: .yellow.opacity(0.6), radius: 4)
+                        // 緊張が高いとき・改善途中のとき「改善」を光らせる（全体UI 9・11 ページ、PR #5 の点滅）
+                        .background(
+                            Group {
+                                if isGuideGlowing {
+                                    Capsule()
+                                        .fill(MindWaveCyberTheme.cyan.opacity(glowPulse ? 0.18 : 0.05))
+                                        .overlay(
+                                            Capsule()
+                                                .strokeBorder(MindWaveCyberTheme.cyan.opacity(glowPulse ? 0.75 : 0.25), lineWidth: 0.8)
+                                        )
+                                        .padding(.horizontal, 12)
+                                }
                             }
-                        }
+                        )
+                        .scaleEffect(isGuideGlowing && glowPulse ? 1.06 : 1.0)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .animation(.easeInOut(duration: 0.18), value: active)
                     .accessibilityIdentifier(item.tab == 1 ? "nav_calm" : item.tab == 0 ? "nav_home" : "nav_dialogue")
+                }
+            }
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.85).repeatForever(autoreverses: true)) {
+                    glowPulse = true
                 }
             }
 

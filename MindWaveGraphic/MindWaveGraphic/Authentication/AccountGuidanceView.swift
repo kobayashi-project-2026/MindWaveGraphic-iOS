@@ -1,183 +1,306 @@
 // AccountGuidanceView.swift
 // Authentication
 //
-// アプリ起動直後のファーストビュー。
-// Mind Wave Graphicの世界観（宇宙・コックピット・呼吸）を即伝える。
+// アプリ起動直後のタイトル画面（UI最終版）。
 
 import SwiftUI
 
-// MARK: - AccountGuidanceView
-
 struct AccountGuidanceView: View {
-
     var flowState: AppFlowState
 
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
+    // 既存の本物のもこりん用ポーズ状態
+    @State private var mokorinPose = MokorinPose(emotion: .happy, action: .wave, actionID: 1)
 
-            // 背景星アニメーション
-            LaunchStarfieldBG()
-                .ignoresSafeArea()
+    // アニメーション状態
+    @State private var floating = false
+    @State private var orbit = false
+    @State private var pulse = false
+    @State private var starsOn = false
+    @State private var logoGlow = false
 
-            // コックピットHUDフレーム
-            LaunchHUDFrame()
-                .ignoresSafeArea()
-
-            // コンテンツ
-            VStack(spacing: 0) {
-                Spacer()
-                    .frame(minHeight: 60)
-
-                // タイトルブロック
-                VStack(spacing: 8) {
-                    // ステータスライン
-                    HStack(spacing: 6) {
-                        Rectangle()
-                            .fill(AuthDesign.accent)
-                            .frame(width: 20, height: 1)
-                        Text("BIOMETRIC NAVIGATION SYSTEM")
-                            .font(.system(size: 9, weight: .medium, design: .monospaced))
-                            .foregroundStyle(AuthDesign.accent.opacity(0.7))
-                            .tracking(1.5)
-                        Rectangle()
-                            .fill(AuthDesign.accent)
-                            .frame(width: 20, height: 1)
-                    }
-                    .padding(.bottom, 16)
-
-                    Text("MIND WAVE")
-                        .font(.system(size: 38, weight: .ultraLight, design: .monospaced))
-                        .foregroundStyle(Color.white)
-                        .tracking(8)
-
-                    Text("GRAPHIC")
-                        .font(.system(size: 15, weight: .light, design: .monospaced))
-                        .foregroundStyle(AuthDesign.accent)
-                        .tracking(10)
-                }
-
-                // キャッチコピー
-                VStack(spacing: 6) {
-                    Text("今の揺らぎを、航路に変える")
-                        .font(.system(size: 15, weight: .light))
-                        .foregroundStyle(Color.white.opacity(0.75))
-                        .tracking(1)
-
-                    HStack(spacing: 12) {
-                        Text("● HealthKit")
-                        Text("● Apple Watch")
-                        Text("● Real-time Pulse")
-                    }
-                    .font(.system(size: 10, weight: .light, design: .monospaced))
-                    .foregroundStyle(Color.white.opacity(0.28))
-                }
-                .padding(.top, 28)
-                .padding(.bottom, 52)
-
-                // ボタン群
-                VStack(spacing: 12) {
-                    // ゲスト利用（主CTA）
-                    Button {
-                        flowState.isGuestUser = true
-                        flowState.authStatus  = .contextCalibration
-                        print("[Navigation] guest -> contextCalibration")
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: "arrow.right.circle")
-                                .font(.system(size: 16, weight: .light))
-                            Text("計測をはじめる")
-                                .font(.system(size: 16, weight: .medium))
-                        }
-                        .foregroundStyle(.black)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: AuthDesign.buttonHeight)
-                        .background(
-                            RoundedRectangle(cornerRadius: AuthDesign.cornerRadius)
-                                .fill(AuthDesign.accent)
-                                .shadow(color: AuthDesign.accent.opacity(0.45), radius: 16, y: 4)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("launch_primary_start_button")
-
-                    // ログイン（セカンダリ）
-                    Button {
-                        flowState.authStatus = .topMenu
-                        print("[Navigation] accountGuidance -> topMenu")
-                    } label: {
-                        Text("ログイン / アカウント登録")
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Color.white.opacity(0.55))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: AuthDesign.buttonHeight)
-                            .background(
-                                RoundedRectangle(cornerRadius: AuthDesign.cornerRadius)
-                                    .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("launch_login_button")
-                }
-                .padding(.horizontal, AuthDesign.horizontalPadding)
-
-                Spacer()
-
-                // フッター注記
-                Text("医療診断ではありません。数値は参考値です。")
-                    .font(.system(size: 10, weight: .light))
-                    .foregroundStyle(Color.white.opacity(0.22))
-                    .padding(.bottom, 24)
-            }
-        }
-    }
-}
-
-// MARK: - LaunchHUDFrame
-
-/// コックピット風HUDフレーム装飾。四隅と上下バー。
-private struct LaunchHUDFrame: View {
     var body: some View {
         GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            Canvas { ctx, size in
-                let accent = GraphicsContext.Shading.color(
-                    Color(red: 0.35, green: 0.75, blue: 0.95).opacity(0.25)
+            ZStack {
+                // 宇宙グラデーション背景
+                LinearGradient(
+                    colors: [
+                        Color(titleHex: "03051C"),
+                        Color(titleHex: "10134C"),
+                        Color(titleHex: "292A80"),
+                        Color(titleHex: "050820")
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
                 )
-                let lineW: CGFloat = 0.7
+                .ignoresSafeArea()
 
-                // 上部水平ライン
-                var topLine = Path()
-                topLine.move(to:    CGPoint(x: w * 0.08, y: 44))
-                topLine.addLine(to: CGPoint(x: w * 0.92, y: 44))
-                ctx.stroke(topLine, with: accent, lineWidth: lineW)
+                // 星雲グロー
+                Circle()
+                    .fill(Color.blue.opacity(0.35))
+                    .frame(width: 260)
+                    .blur(radius: 100)
+                    .offset(x: -130, y: 180)
 
-                // 下部水平ライン
-                var botLine = Path()
-                botLine.move(to:    CGPoint(x: w * 0.08, y: h - 44))
-                botLine.addLine(to: CGPoint(x: w * 0.92, y: h - 44))
-                ctx.stroke(botLine, with: accent, lineWidth: lineW)
+                Circle()
+                    .fill(Color.purple.opacity(0.4))
+                    .frame(width: 230)
+                    .blur(radius: 90)
+                    .offset(x: 140, y: -180)
 
-                // 四隅ブラケット（左上）
-                func corner(_ ox: CGFloat, _ oy: CGFloat, _ sx: CGFloat, _ sy: CGFloat) {
-                    var p = Path()
-                    p.move(to:    CGPoint(x: ox,          y: oy + 16 * sy))
-                    p.addLine(to: CGPoint(x: ox,          y: oy))
-                    p.addLine(to: CGPoint(x: ox + 16 * sx, y: oy))
-                    ctx.stroke(p, with: accent, lineWidth: 1.2)
+                // きらめく星空
+                ForEach(0..<55, id: \.self) { i in
+                    Circle()
+                        .fill(.white)
+                        .frame(width: i % 4 == 0 ? 3 : 1.5)
+                        .opacity((i % 2 == 0) == starsOn ? 0.9 : 0.25)
+                        .position(
+                            x: geo.size.width * CGFloat(i * 37 % 97) / 100,
+                            y: geo.size.height * CGFloat(i * 61 % 97) / 100
+                        )
                 }
-                corner(18, 58, 1, 1)
-                corner(w - 18, 58, -1, 1)
-                corner(18, h - 58, 1, -1)
-                corner(w - 18, h - 58, -1, -1)
+
+                VStack(spacing: 10) {
+                    Spacer()
+
+                    // 心拍波形
+                    TitleHeartbeatShape()
+                        .stroke(
+                            LinearGradient(
+                                colors: [.cyan, .white, .purple],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            style: StrokeStyle(
+                                lineWidth: 3,
+                                lineCap: .round,
+                                lineJoin: .round
+                            )
+                        )
+                        .frame(width: 130, height: 42)
+                        .shadow(color: .cyan, radius: 12)
+                        .scaleEffect(pulse ? 1.08 : 0.92)
+                        .opacity(pulse ? 1 : 0.55)
+
+                    // もこりん（既存の本物 MokorinAvatarView をそのまま使用）
+                    ZStack {
+                        // 惑星の軌道リング
+                        ZStack {
+                            Ellipse()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [.clear, .cyan, .white, .purple, .clear],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    ),
+                                    lineWidth: 2
+                                )
+                                .frame(width: 290, height: 65)
+
+                            Circle()
+                                .fill(Color.cyan)
+                                .frame(width: 9, height: 9)
+                                .shadow(color: .cyan, radius: 10)
+                                .offset(x: 145)
+                        }
+                        .rotationEffect(.degrees(orbit ? 15 : -15))
+                        .offset(y: 45)
+
+                        MokorinAvatarView(size: 175, pose: mokorinPose)
+                            .frame(width: 175, height: 175)
+                            .offset(y: floating ? -10 : 10)
+                            .shadow(color: .purple.opacity(0.65), radius: 22)
+                            .onTapGesture {
+                                mokorinPose = MokorinPose(
+                                    emotion: .happy,
+                                    action: .jump,
+                                    actionID: mokorinPose.actionID + 1
+                                )
+                            }
+                    }
+                    .frame(height: 195)
+
+                    // タイトルロゴ（MindWaveGraphic）
+                    ZStack {
+                        Text("MindWaveGraphic")
+                            .font(.system(size: 34, weight: .black, design: .rounded))
+                            .tracking(-1.2)
+                            .foregroundColor(.cyan)
+                            .blur(radius: logoGlow ? 22 : 8)
+                            .opacity(0.8)
+
+                        Text("MindWaveGraphic")
+                            .font(.system(size: 34, weight: .black, design: .rounded))
+                            .tracking(-1.2)
+                            .minimumScaleFactor(0.65)
+                            .lineLimit(1)
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [
+                                        .white,
+                                        Color(titleHex: "A8F5FF"),
+                                        Color(titleHex: "B4A4FF"),
+                                        Color(titleHex: "F0D9FF")
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .shadow(color: .cyan.opacity(0.8), radius: 12)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 54)
+
+                    Text("YOUR MIND, YOUR UNIVERSE")
+                        .font(.system(size: 9, weight: .medium))
+                        .tracking(4)
+                        .foregroundColor(.white.opacity(0.65))
+
+                    Text("今の揺らぎを、宇宙に変える")
+                        .font(.system(size: 13, weight: .light))
+                        .tracking(1.5)
+                        .foregroundColor(.white.opacity(0.82))
+                        .padding(.top, 2)
+
+                    Spacer()
+
+                    // ステータス表示
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(.cyan)
+                            .frame(width: 5, height: 5)
+
+                        Text("CONNECTING TO YOUR UNIVERSE")
+                            .font(.system(size: 8))
+                            .tracking(2)
+                            .foregroundColor(.white.opacity(0.65))
+                    }
+
+                    // ボタン群（既存の画面遷移・機能はそのまま維持）
+                    VStack(spacing: 12) {
+                        // ゲスト利用（主CTA：状況確認画面へ）
+                        Button {
+                            flowState.isGuestUser = true
+                            flowState.authStatus = .contextCalibration
+                            print("[Navigation] guest -> contextCalibration")
+                        } label: {
+                            HStack(spacing: 12) {
+                                Text("はじめる")
+                                    .font(.title3)
+                                    .bold()
+
+                                Image(systemName: "arrow.right")
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 15)
+                            .frame(maxWidth: 270)
+                            .background(
+                                LinearGradient(
+                                    colors: [
+                                        Color(titleHex: "5959FF"),
+                                        Color(titleHex: "A659FF")
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .clipShape(Capsule())
+                            .shadow(color: .purple.opacity(0.8), radius: 20)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("launch_primary_start_button")
+
+                        // ログイン（セカンダリ）
+                        Button {
+                            flowState.authStatus = .topMenu
+                            print("[Navigation] accountGuidance -> topMenu")
+                        } label: {
+                            Text("ログイン / アカウント登録")
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(Color.white.opacity(0.65))
+                                .padding(.vertical, 10)
+                                .frame(maxWidth: 270)
+                                .background(
+                                    Capsule()
+                                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("launch_login_button")
+                    }
+                    .padding(.top, 6)
+
+                    // フッター注記
+                    Text("医療診断ではありません。数値は参考値です。")
+                        .font(.system(size: 10, weight: .light))
+                        .foregroundStyle(Color.white.opacity(0.3))
+                        .padding(.top, 8)
+                        .padding(.bottom, 16)
+                }
+                .frame(maxWidth: .infinity)
             }
-            .frame(width: w, height: h)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
+                floating = true
+                logoGlow = true
+            }
+            withAnimation(.easeInOut(duration: 1).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+            withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) {
+                orbit = true
+            }
+            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) {
+                starsOn = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                mokorinPose = MokorinPose(emotion: .happy, action: .wave, actionID: 2)
+            }
         }
     }
 }
 
-// MARK: - Preview
+// MARK: - 心拍波形シェイプ
+
+private struct TitleHeartbeatShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+
+        let points: [CGPoint] = [
+            CGPoint(x: 0.00, y: 0.55),
+            CGPoint(x: 0.18, y: 0.55),
+            CGPoint(x: 0.27, y: 0.48),
+            CGPoint(x: 0.35, y: 0.62),
+            CGPoint(x: 0.45, y: 0.10),
+            CGPoint(x: 0.55, y: 0.90),
+            CGPoint(x: 0.65, y: 0.43),
+            CGPoint(x: 0.75, y: 0.55),
+            CGPoint(x: 1.00, y: 0.55)
+        ]
+
+        let converted = points.map {
+            CGPoint(x: rect.width * $0.x, y: rect.height * $0.y)
+        }
+
+        path.move(to: converted[0])
+        path.addLines(Array(converted.dropFirst()))
+        return path
+    }
+}
+
+private extension Color {
+    init(titleHex: String) {
+        let hex = titleHex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+
+        let red = Double((int >> 16) & 0xFF) / 255
+        let green = Double((int >> 8) & 0xFF) / 255
+        let blue = Double(int & 0xFF) / 255
+
+        self.init(red: red, green: green, blue: blue)
+    }
+}
 
 #Preview {
     AccountGuidanceView(flowState: AppFlowState())

@@ -28,10 +28,11 @@ struct ContentView: View {
                 .tabItem { Label("ホーム", systemImage: "house.fill") }
                 .tag(0)
 
-            // ガイド（シーン選択 → ガイド → 再測定 → 結果）
-            GuideView(selectedTab: $selectedTab)
+            // ガイド（呼吸法選択 → セッション → 再測定 → 結果）
+            GuideFlowView(selectedTab: $selectedTab, initialScene: .other)
                 .tabItem { Label("ガイド", systemImage: "wind") }
                 .tag(1)
+
 
             // 履歴（過去セッション記録）
             HistoryView()

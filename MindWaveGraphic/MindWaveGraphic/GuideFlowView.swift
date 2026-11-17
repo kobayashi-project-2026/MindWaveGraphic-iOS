@@ -81,6 +81,8 @@ struct GuideFlowView: View {
     @State private var showDurationPicker                      = false
     @State private var customMinutes                           = 2
     @State private var didApplyResume                          = false
+    /// タブに常駐した状態で、ホームから「途中の改善」を再開するとき（init の resume を使えないため）
+    @State private var adoptedResume: PendingImprovement?       = nil
 
     // Session
     @State private var sessionElapsed:    Int  = 0
@@ -108,21 +110,21 @@ struct GuideFlowView: View {
     var body: some View {
         ZStack {
             flowBackground
-
+            
             VStack(spacing: 0) {
                 // ── 固定トップバー
                 flowTopBar
                     .padding(.horizontal, 20)
                     .padding(.top, 10)
                     .padding(.bottom, 8)
-
+                
                 // ── ステッププログレス（選択フローのみ）
                 if step == .sceneSelection || step == .exerciseSelection {
                     stepProgressIndicator
                         .padding(.horizontal, 24)
                         .padding(.bottom, 10)
                 }
-
+                
                 // セッション時: コックピットHUDセパレーター
                 if step == .session {
                     Canvas { ctx, sz in
@@ -137,7 +139,7 @@ struct GuideFlowView: View {
                     .padding(.horizontal, 10)
                     .padding(.bottom, 6)
                 }
-
+                
                 // ── スクロール可能なコンテンツ（CTA は下部固定に移動）
                 Group {
                     switch step {
@@ -211,12 +213,12 @@ struct GuideFlowView: View {
                             endRadius: 120
                         )
                     }
-                    .ignoresSafeArea(edges: .bottom)
+                        .ignoresSafeArea(edges: .bottom)
                 )
             }
         }
         .onReceive(flowTimer) { _ in tickTimer() }
-        #if DEBUG
+#if DEBUG
         .onAppear {
             // シミュレーター撮影補助: GUIDE_AUTOSTART=1 で session を自動開始
             if ProcessInfo.processInfo.environment["GUIDE_AUTOSTART"] == "1",
@@ -281,6 +283,10 @@ struct GuideFlowView: View {
         .alert("ガイドを中断しますか？", isPresented: $showAbandonAlert) {
             Button("中断する", role: .destructive) {
                 MindWaveDebugLogger.log(.flow, "flow cancelled step=\(step)")
+                // ① 次回「整える」を開いたときのために状態を初期リセット
+                step = .exerciseSelection
+                selectedExercise = nil
+                // ② ホーム（グラフィック画面）へ戻る
                 dismiss()
                 Task { @MainActor in selectedTab = 0 }
             }
@@ -289,7 +295,6 @@ struct GuideFlowView: View {
             Text("現在のガイドを中断すると記録は保存されません。")
         }
     }
-
     // MARK: - Background
 
     // 表示に使う心拍数値（Simulator demo override → DEMO_HEART_RATE → 実データ）
@@ -811,6 +816,12 @@ struct GuideFlowView: View {
             .padding(.bottom, 8)
         }
         .onAppear {
+            // 改善タブに常駐するため、開くたびに途中の改善・会話の場面を引き継ぐ
+            if resume == nil, let p = flowState.pendingImprovement {
+                adoptPendingImprovement(p)
+                return
+            }
+            if selectedScene == nil || selectedScene == .other { selectedScene = sceneFromConversation }
             // おすすめを最初から選んでおく（本人は自由に変えられる）
             if selectedExercise == nil, let ex = recommendedExercise { selectedExercise = ex }
             if let d = recommendedDuration?.seconds, sessionElapsed == sessionDurationSeconds {
@@ -829,6 +840,37 @@ struct GuideFlowView: View {
         .sheet(isPresented: $showMokorinTalk) {
             ContextCalibrationView(flowState: flowState) { showMokorinTalk = false }
         }
+    }
+
+    /// 会話（測定前）の場面から、ガイドの場面（MeasurementScene）を決める
+    private var sceneFromConversation: MeasurementScene {
+        if let s = flowState.mokorinMemory?.checkIn?.situation?.value {
+            switch s {
+            case .presentation: return .speech
+            case .interviewExam: return .interview
+            case .communication, .importantEvent: return .social
+            case .restless: return .daily
+            case .other: return .other
+            }
+        }
+        switch flowState.measurementContext.scene {
+        case .interview: return .interview
+        case .sports: return .sports
+        case .important: return .social
+        case .work: return .study
+        case .calm: return .daily
+        case .other: return .other
+        }
+    }
+
+    /// 途中でやめた改善を、残り時間から再開する（全体UI 25 ページ）
+    private func adoptPendingImprovement(_ p: PendingImprovement) {
+        adoptedResume          = p
+        didApplyResume         = false
+        selectedScene          = p.scene
+        selectedExercise       = p.exercise
+        sessionDurationSeconds = p.durationSeconds
+        step                   = .session
     }
 
     /// ガイドのない方法の一覧（推薦されたものを先に）
@@ -1076,7 +1118,12 @@ struct GuideFlowView: View {
         }
         .onAppear {
             // 改善途中からの再開: 新しい「前」の計測で始め、残り時間から続ける
-            guard let r = resume, !didApplyResume else { return }
+            // タブに常駐していて実施画面がそのまま残っている場合は、残り時間もそのまま。再開の印だけ消す
+            if adoptedResume == nil, resume == nil, flowState.pendingImprovement != nil {
+                flowState.pendingImprovement = nil
+                return
+            }
+            guard let r = adoptedResume ?? resume, !didApplyResume else { return }
             didApplyResume = true
             startSession()
             sessionElapsed = r.remainingSeconds
@@ -1942,6 +1989,13 @@ struct GuideFlowView: View {
     private var recommendedExercise: GuideExercise? {
         if let ex = methodRecommendations.compactMap({ $0.method.guideExercise }).first { return ex }
         if recentMemory?.checkIn?.body?.value.contains(.shallowBreath) == true { return .breathing214 }
+        // 会話がなく測定値があるときは、緊張スコア・状態から選ぶ（PR #5 の判定）
+        if guideHeartRateNumeric > 0 {
+            let score = sessionScoreIntensity * 100.0
+            if score >= 66 || viewModel.graphicInput.state == .overTense { return .breathing214 }
+            if score >= 33 || viewModel.graphicInput.state == .optimalTension { return .breathing478 }
+            return .box
+        }
         return selectedScene?.recommendedExercise
     }
 
@@ -2256,9 +2310,12 @@ private struct ExerciseDetailPanel: View {
 // MARK: - LargeExerciseCard（大型呼吸法選択カード）
 
 private struct LargeExerciseCard: View {
-    let exercise:   GuideExercise
-    let isSelected: Bool
-    let action:     () -> Void
+    let exercise:      GuideExercise
+    let isSelected:    Bool
+    var isRecommended: Bool = false
+    let action:        () -> Void
+
+    @State private var blinkPulse = false
 
     var body: some View {
         Button(action: action) {
@@ -2266,34 +2323,59 @@ private struct LargeExerciseCard: View {
                 // アイコン円
                 ZStack {
                     Circle()
-                        .fill(isSelected ? Color.cyan.opacity(0.20) : Color.white.opacity(0.06))
+                        .fill(
+                            isSelected ? Color.cyan.opacity(0.20) :
+                            isRecommended ? Color.cyan.opacity(blinkPulse ? 0.22 : 0.08) :
+                            Color.white.opacity(0.06)
+                        )
                         .frame(width: 54, height: 54)
                     Circle()
-                        .stroke(isSelected ? Color.cyan.opacity(0.40) : Color.clear, lineWidth: 1.0)
+                        .stroke(
+                            isSelected ? Color.cyan.opacity(0.40) :
+                            isRecommended ? Color.cyan.opacity(blinkPulse ? 0.65 : 0.15) :
+                            Color.clear,
+                            lineWidth: 1.0
+                        )
                         .frame(width: 54, height: 54)
                     Image(systemName: exercise.icon)
                         .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(isSelected ? Color.cyan.opacity(0.95) : Color.white.opacity(0.50))
+                        .foregroundStyle(
+                            isSelected ? Color.cyan.opacity(0.95) :
+                            isRecommended ? Color.cyan.opacity(blinkPulse ? 0.95 : 0.55) :
+                            Color.white.opacity(0.50)
+                        )
                 }
 
                 // テキスト
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .lastTextBaseline, spacing: 8) {
+                    HStack(alignment: .center, spacing: 8) {
                         Text(exercise.title)
                             .font(.system(size: 20, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(isSelected ? .white : .white.opacity(0.75))
+                            .foregroundStyle(isSelected || isRecommended ? .white : .white.opacity(0.75))
                             .tracking(0.5)
                         Text(exercise.subtitle)
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(isSelected ? Color.cyan.opacity(0.75) : Color.white.opacity(0.28))
+                            .foregroundStyle(isSelected || isRecommended ? Color.cyan.opacity(0.85) : Color.white.opacity(0.28))
+
+                        if isRecommended {
+                            Text("おすすめ")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.cyan.opacity(blinkPulse ? 0.98 : 0.55))
+                                )
+                        }
                     }
                     Text(exercise.timingLabel)
                         .font(.system(size: 11, weight: .light, design: .monospaced))
-                        .foregroundStyle(isSelected ? Color.cyan.opacity(0.60) : Color.white.opacity(0.24))
+                        .foregroundStyle(isSelected || isRecommended ? Color.cyan.opacity(0.68) : Color.white.opacity(0.24))
                         .tracking(1.5)
                     Text(exercise.description)
                         .font(.system(size: 11, weight: .light))
-                        .foregroundStyle(.white.opacity(isSelected ? 0.55 : 0.28))
+                        .foregroundStyle(.white.opacity(isSelected || isRecommended ? 0.62 : 0.28))
                         .lineLimit(1)
                 }
 
@@ -2302,21 +2384,29 @@ private struct LargeExerciseCard: View {
                 // 選択インジケーター
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 22))
-                    .foregroundStyle(isSelected ? Color.cyan.opacity(0.90) : .white.opacity(0.15))
+                    .foregroundStyle(
+                        isSelected ? Color.cyan.opacity(0.90) :
+                        isRecommended ? Color.cyan.opacity(blinkPulse ? 0.70 : 0.22) :
+                        .white.opacity(0.15)
+                    )
             }
             .padding(.vertical, 16)
             .padding(.horizontal, 16)
             .background(
                 ZStack {
                     RoundedRectangle(cornerRadius: 16)
-                        .fill(isSelected
-                              ? Color(red: 0.02, green: 0.18, blue: 0.30)
-                              : Color.white.opacity(0.04))
+                        .fill(
+                            isSelected ? Color(red: 0.02, green: 0.18, blue: 0.30) :
+                            isRecommended ? Color(red: 0.02, green: 0.14, blue: 0.26).opacity(blinkPulse ? 0.95 : 0.55) :
+                            Color.white.opacity(0.04)
+                        )
                     // 上端アクセントライン
                     VStack(spacing: 0) {
                         LinearGradient(
                             colors: [
-                                isSelected ? Color.cyan.opacity(0.75) : Color.white.opacity(0.08),
+                                isSelected ? Color.cyan.opacity(0.75) :
+                                isRecommended ? Color.cyan.opacity(blinkPulse ? 0.85 : 0.20) :
+                                Color.white.opacity(0.08),
                                 .clear
                             ],
                             startPoint: .leading, endPoint: .trailing
@@ -2328,19 +2418,30 @@ private struct LargeExerciseCard: View {
                     // ボーダー
                     RoundedRectangle(cornerRadius: 16)
                         .strokeBorder(
-                            isSelected ? Color.cyan.opacity(0.52) : Color.white.opacity(0.08),
-                            lineWidth: isSelected ? 1.1 : 0.7
+                            isSelected ? Color.cyan.opacity(0.52) :
+                            isRecommended ? Color.cyan.opacity(blinkPulse ? 0.85 : 0.20) :
+                            Color.white.opacity(0.08),
+                            lineWidth: (isSelected || isRecommended) ? 1.3 : 0.7
                         )
-                    // 選択時グロー
+                    // 選択時またはおすすめ点滅時の外周グロー
                     if isSelected {
                         RoundedRectangle(cornerRadius: 16)
                             .stroke(Color.cyan.opacity(0.30), lineWidth: 3)
                             .blur(radius: 6)
+                    } else if isRecommended {
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(Color.cyan.opacity(blinkPulse ? 0.55 : 0.05), lineWidth: 4)
+                            .blur(radius: 7)
                     }
                 }
             )
         }
         .buttonStyle(.plain)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
+                blinkPulse = true
+            }
+        }
         .accessibilityLabel(exercise.title)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }

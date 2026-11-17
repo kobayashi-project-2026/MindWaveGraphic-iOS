@@ -399,7 +399,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 4D5EC0DE0000000000000001 /* DevServer.xcconfig */;
 			buildSettings = {
-				INFOPLIST_FILE = DebugInfo.plist;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = MindWaveGraphic/MindWaveGraphic.entitlements;
@@ -408,6 +407,7 @@
 				DEVELOPMENT_TEAM = V39W86Q4G8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = DebugInfo.plist;
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "心拍数と心拍変動を読み取り、心理状態のゆらぎを可視化するために使用します。";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "もこりんと声で話すときに、マイクボタンを押してから話し終えるまでの間だけ音声を聞き取るために使用します。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "もこりんに話しかけた声を文字に変換するために使用します。変換した文字は会話にのみ使います。";
