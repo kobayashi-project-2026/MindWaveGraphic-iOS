@@ -6,7 +6,7 @@
 |---|---|
 | リポジトリ | https://github.com/kobayashi-project-2026/MindWaveGraphic-iOS |
 | 共有開発ブランチ | `feature/mokorin-voice-ui-20261028` |
-| 統合ブランチ（2026-11-17） | `integration/team-sync-20261117`（共有開発ブランチへの PR で取り込む） |
+| 2026-11-17 の統合 | PR #8（`integration/team-sync-20261117`）で共有開発ブランチへマージ済み。検証での修正は `fix/team-sync-verification-20261117` の PR |
 | main | 保護ブランチ。直接 push・force push はしない。PR とレビューで更新する |
 
 最新のコミット SHA は GitHub のブランチ画面か `git log -1 origin/feature/mokorin-voice-ui-20261028` で確認する。
@@ -73,4 +73,16 @@ git merge origin/feature/mokorin-voice-ui-20261028
 ### 取り込まなかったもの
 - `feature/HarukaSasaki-bit-space`（5ad5b65・0ff855c）: 本番のグラフィック `SpaceshipStateGraphicView` / `StarfieldGraphicView` を、名前の異なる試作（`ContentView`・`StarfildView`・`StarfieldView`）に置き換える内容。`ContentView` が重複してビルドできず、計測値（`GraphicInput`）との接続も失われる。画像アセット（ship / cockpit / inseki）も含まれていない。ブランチはそのまま残し、本番のグラフィックに接続する形で改めて取り込む
 - PR #1〜#3（6 月）: 内容はすでに共有ブランチに含まれている（未統合のコミットなし）。PR 自体は開いたまま
-- `MokorinEdgeGuide.swift`: ホームで使わなくなったが、ファイルは残している
+- `MokorinEdgeGuide.swift`: ホームで使わなくなったため 2026-11-17 に削除（参照なし・同期フォルダのため Xcode 設定の変更不要）
+
+## 2026-11-17 統合後の検証で直したこと
+
+- アプリ内から会話を開いたとき、場面が未設定でも「いまは『安静』」と言っていた → 未設定なら場面に触れない自然なあいさつに。質問も重ねない
+- AI（サーバー）経由で、会話の途中の質問（例「どんな方法がある？」）に答えると次の項目へ進み、聞いていた項目が抜けていた → 同じ質問に戻る（端末内の判定と同じ）。スタブも同じ動きに
+- 改善タブで共通メニュー（≡）が浮いて内容（結果の「デモ値」など）と重なる → 改善タブでは上部バーの右端に置く
+- 実施画面の内容が画面より高く、上部バー（×）がステータスバー・Dynamic Island の下に押し出される（iPhone SE・iPhone 17 Pro）→ 収まらないときだけスクロール、グラフィックの大きさを調整
+- iPhone SE で吹き出しの末尾（今の質問）が切れる → 末尾から表示（前のあいさつは上へスクロール）。「この質問は答えない」をシートの下部に常に表示
+- ホームの PULSE の固定値「72」がデモ値だと分からない → 実測がないときは「DEMO」と表示
+- 「改善」の強調が、本人の評価（試作スコア）で緊張が高いときに出なくなっていた → 元の条件に戻す
+- 使わなくなった `MokorinEdgeGuide.swift` を削除
+- サーバー（スタブ）を使う E2E テストを追加・更新（`MW_E2E_BASE_URL` を設定したときだけ実行）

@@ -762,7 +762,10 @@ final class MokorinContextViewModel: ObservableObject {
             let intent = response.result.typedIntent
             if intent == .declineMeasurement { declinedMeasurement = true }
             if intent == .ready { markReadyWithCurrentSelection(); askedSlot = nil }
-            if intent != .ready {
+            if intent == .question, !changed, let slot = askedBefore {
+                // 質問に答えたあとは同じ質問に戻る（端末内の判定と同じ）。次へ進めると、その項目が聞かれないまま残る
+                askedSlot = slot
+            } else if intent != .ready {
                 if let slot = askedBefore, !checkInChanged.contains(slot), intent == .answer { checkIn.declined.insert(slot) }
                 askedSlot = checkIn.nextSlot()
                 if let slot = askedSlot { checkIn.asked.append(slot) }

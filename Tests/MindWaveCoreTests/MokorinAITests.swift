@@ -265,5 +265,21 @@ enum MokorinAITests {
             T.expectEqual(dto.typedIntent, .answer, "未知の値で止まらない")
             T.expect(dto.situationNote == nil, "欠落は nil")
         }
+        await T.test("外部AI: 質問（user_intent=question）に答えたあとは同じ質問に戻り、その項目を飛ばさない") {
+            let client = FakeContextClient { req in
+                ContextAssistResponseDTO(schemaVersion: 1, requestId: req.requestId, conversationId: req.conversationId, provider: "openai",
+                                         model: "test-model", generatedAt: Date(),
+                                         result: ContextAssistResultDTO(reply: "呼吸法やストレッチがあるよ。", sceneCandidate: nil,
+                                                                        conditionCandidates: [], needsClarification: false, clarificationQuestion: nil,
+                                                                        situationNote: nil, userIntent: "question"),
+                                         usage: nil)
+            }
+            let vm = MokorinTests.remoteVM(client: client)
+            let asked = vm.askedSlot
+            await vm.submit("どんな方法がある？")
+            T.expectEqual(vm.askedSlot, asked, "同じ質問に戻る")
+            T.expect(asked.map { !vm.checkIn.declined.contains($0) } == true, "答えていない項目をスキップ扱いにしない")
+            T.expect(vm.messages.last?.text == asked?.question, "定型の質問を添える: \(vm.messages.last?.text ?? "")")
+        }
     }
 }

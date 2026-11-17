@@ -91,7 +91,11 @@ export function stubContextResult(body: Record<string, unknown>): Record<string,
   // 会話の情報（STEP 0〜6）を使う新しいアプリには、次に尋ねる候補の質問を返す（機械的な決め方）
   const remaining = /次に尋ねる候補（優先順）: ([a-z_,]+)/.exec(note)?.[1]?.split(",") ?? null;
   const asking = /今尋ねている項目: ([a-z_]+)/.exec(note)?.[1];
-  if (remaining) {
+  const asksQuestion = /[？?]$/.test(said.trim()) && scene === null && conds.length === 0 && tension === null;
+  if (remaining && asksQuestion && asking) {
+    // 質問には答えられないので、今尋ねている項目をもう一度聞く（次の項目へ進めない）
+    reply = `（スタブなので質問には答えられないよ）${SLOT_QUESTIONS[asking] ?? ""}`;
+  } else if (remaining) {
     const next = remaining.find((slot) => slot !== asking);
     reply = next ? `${scene || conds.length || tension ? "教えてくれてありがとう。" : "そっか。"}${SLOT_QUESTIONS[next] ?? ""}` : "教えてくれてありがとう。この状況で測定してみようか？";
   }
@@ -106,7 +110,7 @@ export function stubContextResult(body: Record<string, unknown>): Record<string,
     situation_note: /試験|テスト|初対面|はじめて会う|初めて会う|ゼミ/.test(last) ? clip(last, 40) : null,
     user_intent: /測りたくない|測定しない|やめておく|今日はいい/.test(said) ? "decline_measurement"
       : /測りたい|始めて|測って/.test(said) ? "ready"
-      : /[？?]$/.test(said.trim()) && scene === null && conds.length === 0 && tension === null ? "question" : "answer",
+      : asksQuestion ? "question" : "answer",
     tension_candidate: tension,
     // 機械的な決め方（AI の判断ではない）: 追加質問なら calm/nod、候補ありなら happy/nod、睡眠不足なら sleepy
     emotion: conds.includes("sleep_lack") ? "sleepy" : needs ? "calm" : "happy",

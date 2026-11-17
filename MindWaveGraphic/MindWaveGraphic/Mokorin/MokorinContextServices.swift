@@ -249,8 +249,13 @@ nonisolated enum MokorinScript {
         return head + "おすすめは「\(first.method.title)」だよ。測定するか、改善方法を見てみよう。"
     }
 
+    /// アプリ内から会話を開いたときのあいさつ。続けて最初の質問を出すため、ここでは質問しない。
+    /// 場面が未設定（既定値）のときは触れない（未計測を「安静」と断定しない）
     static func greetingForEdit(current: MeasurementContext) -> String {
-        "今の状況を教えてね。いまは「\(current.scene.displayName)」になっているよ。今、緊張してる？"
+        guard current != .default else {
+            return "こんにちは！今の様子を一緒に確認しよう。"
+        }
+        return "こんにちは！前に聞いた場面は「\(current.scene.displayName)」だったね。変わったことがあれば教えてね。"
     }
 
     static let askTensionAgain = "教えてくれてありがとう。今の気持ちに近いのはどれかな？話しても、下から選んでも大丈夫だよ。"

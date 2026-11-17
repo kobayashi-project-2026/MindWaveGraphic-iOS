@@ -150,8 +150,12 @@ struct GuideFlowView: View {
                         exerciseListContent
                             .transition(stepTransition(insertion: .trailing))
                     case .session:
-                        sessionContent
-                            .transition(.opacity)
+                        // 内容が画面より高いと上部バー（×・共通メニュー）が押し出されるため、収まらないときだけスクロールにする
+                        ViewThatFits(in: .vertical) {
+                            sessionContent
+                            ScrollView(showsIndicators: false) { sessionContent }
+                        }
+                        .transition(.opacity)
                     case .remeasurement:
                         remeasurementContent
                             .transition(.opacity)
@@ -444,9 +448,8 @@ struct GuideFlowView: View {
 
             Spacer()
 
-            // バランス用
-            Circle()
-                .fill(.clear)
+            // 共通メニュー（改善タブでは浮かせず上部バーに置き、小さい画面でも内容と重ねない）
+            GlobalMenuButton(iconSize: 26)
                 .frame(width: 32, height: 32)
         }
     }
@@ -1053,7 +1056,7 @@ struct GuideFlowView: View {
 
             // ── 呼吸ビジュアル（大型・邪魔なし）。拡大した分（scaleEffect はレイアウトの大きさを変えない）を下に確保し、残り時間と重ねない
             sessionVisual
-                .padding(.bottom, isCompactHeight ? 36 : (sessionIsRunning ? 52 : 30))
+                .padding(.bottom, isCompactHeight ? 14 : 16)
 
             // ── 残り時間表示
             VStack(spacing: 2) {
@@ -1079,7 +1082,7 @@ struct GuideFlowView: View {
             .padding(.top, 2)
 
             if !sessionIsRunning && !sessionIsFinished {
-                sessionDurationPicker.padding(.vertical, 12)
+                sessionDurationPicker.padding(.vertical, isCompactHeight ? 6 : 12)
             }
 
             Spacer(minLength: 14)
@@ -1153,7 +1156,7 @@ struct GuideFlowView: View {
                     center: .center, startRadius: 0, endRadius: 90
                 )
             }
-            .frame(width: isCompactHeight ? 300 : 400, height: isCompactHeight ? 300 : 400)
+            .frame(width: isCompactHeight ? 220 : 340, height: isCompactHeight ? 220 : 340)
             .frame(maxWidth: .infinity)
             .allowsHitTesting(false)
 
@@ -1172,7 +1175,9 @@ struct GuideFlowView: View {
                 }
             }
             // 改善資料 3 ページ: グラフィックを大きく表示する（実施中はさらに大きく）
-            .scaleEffect(isCompactHeight ? (sessionIsRunning ? 1.0 : 0.92) : (sessionIsRunning ? 1.38 : 1.2))
+            .scaleEffect(isCompactHeight ? (sessionIsRunning || sessionIsFinished ? 0.9 : 0.68) : (sessionIsRunning || sessionIsFinished ? 1.3 : 1.05))
+            // scaleEffect はレイアウトの大きさを変えないため、拡大・縮小した分の高さに合わせる（実施前は小さめにして START まで収める）
+            .frame(height: isCompactHeight ? (sessionIsRunning || sessionIsFinished ? 280 : 200) : (sessionIsRunning || sessionIsFinished ? 400 : 330))
             .animation(.easeInOut(duration: 0.5), value: sessionIsRunning)
             .frame(maxWidth: .infinity)
         }
@@ -1184,7 +1189,7 @@ struct GuideFlowView: View {
                 .animation(.easeInOut(duration: 0.4), value: sessionElapsed)
         }
         .padding(.horizontal, 8)
-        .frame(minHeight: isCompactHeight ? 250 : 340)
+        .frame(minHeight: isCompactHeight ? 200 : 300)
         // ── 左右コックピットサイドフレーム（リベット付き）
         .overlay(alignment: .leading) {
             Canvas { ctx, size in
