@@ -147,7 +147,7 @@ struct HomeView: View {
             }
         }()
         return HStack(alignment: .center, spacing: 8) {
-            if !edgeGuideActive {
+            if !edgeGuideActive, GraphicStyle.current != .haruka {
                 MokorinAvatarView(size: 46, pose: MokorinPose(emotion: hasValue && displayState == .overTense ? .calm : .happy))
                     .frame(width: 46, height: 46)
                     .accessibilityHidden(true)
@@ -187,6 +187,16 @@ struct HomeView: View {
                     .padding(.top, 2)
             }
         }
+    }
+
+    /// グラフィックに渡す値の出どころ（未計測は待機の表示にする。GraphicInput は変えない）
+    private var graphicDataStatus: GraphicDataStatus {
+        #if DEBUG && targetEnvironment(simulator)
+        if simDemoOverrideEnabled { return .demo }
+        #endif
+        if prototypeLive != nil { return .prototype }
+        if !hasDisplayData { return .unmeasured }
+        return viewModel.isMockMode ? .demo : .measured
     }
 
     /// 表示中のスコアから決めた状態（グラフィックの色と一致させる）
@@ -230,6 +240,7 @@ struct HomeView: View {
 
                 // 2. 星グラフィック (主役)
                 GraphicHostView(input: displayInput)
+                    .environment(\.graphicDataStatus, graphicDataStatus)
                     .frame(maxWidth: .infinity)
                     .frame(height: graphicH)
                     .ignoresSafeArea(edges: .top)

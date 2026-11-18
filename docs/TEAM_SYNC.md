@@ -97,3 +97,9 @@ git merge origin/feature/mokorin-voice-ui-20261028
 - 改善の方法選び: 見出しの呼吸法と違う方法（小休憩など）の理由を、その呼吸法の理由として表示していた → 方法名を添えて表示
 - 改善ガイド: 開始前に「再開」と表示していた → 「START」。一時停止中の表示を追加。iPhone SE で START・一時停止が画面の下にはみ出していた → 収まる大きさに
 - シミュレーター検証用（DEBUG）: `MW_CHAT_AUTO_OPEN_IMPROVEMENT=1`（AI相談 → 改善）、`MW_GUIDE_PAUSE_TEST=1`（`MW_FLOW_AUTOPILOT=1` と併用で 一時停止 → 再開）
+
+## 2026-11-18 宇宙グラフィック（HarukaSasaki-bit さん）の採用
+
+ブランチ `feature/haruka-graphic-demo-20261118`（安定版 1a4645b から）。HarukaSasaki-bit さんの星空・隕石・雷・もこりんの座席を
+`Graphics/HarukaSpaceGraphicView.swift` に移植し、ホームの既定にした（GraphicInput で動く。従来のグラフィックにも切り替え可能）。
+詳細・採用できなかった要素は docs/HARUKA_GRAPHIC.md。`feature/HarukaSasaki-bit-space` 自体はマージしていない（ContentView の重複などのため、グラフィックの部分だけを移植）。
