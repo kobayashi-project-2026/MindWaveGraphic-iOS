@@ -33,13 +33,17 @@ import SwiftUI
 //   - Graphicsフォルダ内への追加ファイル
 //   - GraphicPlugin.swift の登録1行
 /// GraphicPlugin から呼ばれる最終グラフィックView。
-/// SpaceshipStateGraphicView へ GraphicInput を渡す。
+/// GraphicStyle に応じて HarukaSpaceGraphicView（既定）または SpaceshipStateGraphicView へ GraphicInput を渡す。
 /// score / confidence / state は GraphicInput から取得し、ViewModel には依存しない。
 struct TeamGraphicView: View {
     let input: GraphicInput
+    var style: GraphicStyle = .current
 
     var body: some View {
-        SpaceshipStateGraphicView(input: input)
+        switch style {
+        case .haruka:  HarukaSpaceGraphicView(input: input)
+        case .classic: SpaceshipStateGraphicView(input: input)
+        }
     }
 }
 

@@ -1,5 +1,7 @@
 # グラフィックチーム向け実装ガイド
 
+> 2026-11-18: ホームの既定は HarukaSasaki-bit さんの宇宙グラフィック（`HarukaSpaceGraphicView`）。従来の `SpaceshipStateGraphicView` へは `mw_graphic_style=classic` で切り替えられる（docs/HARUKA_GRAPHIC.md）。
+
 ## 1. グラフィックチームが編集するファイル
 
 | ファイル | 操作 |

@@ -8,6 +8,7 @@ print("MindWave core tests")
 ContractTests.run()
 HistoryStoreTests.run()
 NavigationTests.run()
+GraphicStyleTests.run()
 await runExtendedSuites()
 
 print("\n----------------------------------------")
