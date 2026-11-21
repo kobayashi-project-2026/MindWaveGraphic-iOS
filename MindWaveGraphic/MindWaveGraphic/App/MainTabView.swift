@@ -50,16 +50,16 @@ struct MainTabView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: selectedTabBinding) {
-                HomeView(selectedTab: selectedTabBinding)
-                    .tag(0)
-                    .toolbar(.hidden, for: .tabBar)
-                GuideFlowView(selectedTab: selectedTabBinding, initialScene: .other)
-                    .tag(1)
-                    .toolbar(.hidden, for: .tabBar)
-                HistoryView()
-                    .tag(2)
-                    .toolbar(.hidden, for: .tabBar)
-            }
+                            HomeView(selectedTab: selectedTabBinding)
+                                .tag(0)
+                                .toolbar(.hidden, for: .tabBar)
+                            GuideFlowView(selectedTab: selectedTabBinding, initialScene: .other)
+                                .tag(1)
+                                .toolbar(.hidden, for: .tabBar)
+                            HistoryView()
+                                .tag(2)
+                                .toolbar(.hidden, for: .tabBar)
+                        }
             .safeAreaInset(edge: .bottom) {
                 // HomeView (tab 0) と GuideFlowView (tab 1) は下部バーを非表示にするため余白を 0 にする
                 Color.clear
