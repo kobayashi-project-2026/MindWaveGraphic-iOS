@@ -2,6 +2,25 @@
 import SwiftUI
 
 struct ContentView: View {
+    // MARK: - 赤色の演出の強さ
+
+    private var redOverlayOpacity: Double {
+        if score <= 60 {
+            return 0
+        } else {
+            return min((score - 60) / 40 * 0.3, 0.3)
+        }
+    }
+    
+    private var backgroundColor: Color {
+        if score <= 30 {
+            return Color.blue
+        } else if score <= 60 {
+            return Color.black
+        } else {
+            return Color.red
+        }
+    }
 
     @State private var score: Double = 0
 
@@ -12,30 +31,41 @@ struct ContentView: View {
             ZStack {
 
                 // MARK: - 背景
-                Color.black
+                backgroundColor
                     .ignoresSafeArea()
-
+                    .animation(.easeInOut(duration: 1.0), value: score)
                 // MARK: - 星空・隕石
                 StarfieldView(score: score)
 
                 // MARK: - 雷
                 LightningView(score: score)
 
-                // MARK: - コックピット
-                Image("cockpit")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(
-                        width: geometry.size.width,
-                        height: geometry.size.height
-                    )
-                    .offset(x: 0, y: 40)
-                    .scaleEffect(x: 1.20, y: 1.4)
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: score < 80)) { timeline in
+                    
+                    let shakeX: CGFloat = score >= 80
+                    ? CGFloat(sin(timeline.date.timeIntervalSinceReferenceDate * 35) * 8)
+                    : 0
+                    
+                    Image("cockpit")
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .offset(x: shakeX, y: 40)
+                        .scaleEffect(x: 1.30, y: 1.4)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                }
+                
                 // MARK: - もこりん用の椅子
-                MocorinSeatView()
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: score < 80)) { timeline in
+
+                    let shakeX: CGFloat = score >= 80
+                        ? CGFloat(sin(timeline.date.timeIntervalSinceReferenceDate * 35) * 4)
+                        : 0
+
+                    MocorinSeatView()
+                        .offset(x: shakeX)
+                }
                     .position(
                         x: geometry.size.width * 0.7,
                         y: geometry.size.height * 0.8
@@ -87,6 +117,12 @@ struct ContentView: View {
                     Spacer()
                         .frame(height: 50)
                 }
+            // ★ここに追加する！
+                Color.red
+                    .opacity(redOverlayOpacity)
+                        .ignoresSafeArea()
+                        .allowsHitTesting(false)
+                        .animation(.easeInOut(duration: 1.0), value: score)
             }
         }
     }
