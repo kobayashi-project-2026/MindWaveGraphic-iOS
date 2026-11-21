@@ -29,27 +29,41 @@ struct GuideFlowView: View {
     // MARK: - custom init
 
     init(selectedTab: Binding<Int>, initialScene: MeasurementScene? = nil) {
-        _selectedTab = selectedTab
-        if let scene = initialScene {
-            _step          = State(initialValue: .exerciseSelection)
-            _selectedScene = State(initialValue: scene)
-        }
-        #if DEBUG
+        _selectedTab   = selectedTab
+        _step          = State(initialValue: .exerciseSelection)
+        _selectedScene = State(initialValue: initialScene ?? .other)
+            #if DEBUG
         if ProcessInfo.processInfo.environment["GUIDE_PHASE"] == "session" {
-            _step                   = State(initialValue: .session)
-            _selectedScene          = State(initialValue: .interview)
-            _selectedExercise       = State(initialValue: .breathing478)
-            _sessionElapsed         = State(initialValue: 60)
-            _sessionDurationSeconds = State(initialValue: 60)
+                    _step                   = State(initialValue: .session)
+                    _selectedScene          = State(initialValue: .interview)
+                    _selectedExercise       = State(initialValue: .breathing478)
+                    _sessionElapsed         = State(initialValue: 60)
+                    _sessionDurationSeconds = State(initialValue: 60)
+                }
+            #endif
         }
-        #endif
-    }
+
+        // MARK: - Flow State
 
     // MARK: - Flow State
 
-    @State private var step:                RegulationFlowStep = .sceneSelection
-    @State private var selectedScene:       MeasurementScene?  = nil
-    @State private var selectedExercise:    GuideExercise?     = nil
+        @State private var step:                RegulationFlowStep = .exerciseSelection
+        @State private var selectedScene:       MeasurementScene?  = .other
+        @State private var selectedExercise:    GuideExercise?     = nil
+
+        /// 呼吸後に十分整わなかったかどうかを判定
+        private var needsRetryOptions: Bool {
+            // 1. 体感選択（「呼吸後の体感（任意）」）で下の2つが選ばれた場合
+            if let afterReport = selfReportAfter {
+                let index = SelfReportLevel.allCases.firstIndex(of: afterReport) ?? 0
+                return index >= 2 // 4択のうち後半2つ（「あまり変わらない」「まだ緊張している」側）ならtrue
+            }
+            // 2. 計測スコアがある場合（ガイド後スコアが下がっていない、または過緊張のまま）
+            if let before = beforeSnapshot, let after = afterSnapshot {
+                return after.score >= before.score || after.state == .overTense
+            }
+            return false
+        }
     @State private var sessionDurationSeconds: Int             = 60
     @State private var beforeSnapshot:      GuideSnapshot?     = nil
     @State private var afterSnapshot:       GuideSnapshot?     = nil
@@ -86,53 +100,45 @@ struct GuideFlowView: View {
             
             VStack(spacing: 0) {
                 // ── 固定トップバー
-                flowTopBar
-                    .padding(.horizontal, 20)
-                    .padding(.top, 10)
-                    .padding(.bottom, 8)
-                
-                // ── ステッププログレス（選択フローのみ）
-                if step == .sceneSelection || step == .exerciseSelection {
-                    stepProgressIndicator
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 10)
-                }
-                
-                // セッション時: コックピットHUDセパレーター
-                if step == .session {
-                    Canvas { ctx, sz in
-                        let w = sz.width
-                        var line = Path()
-                        line.move(to: CGPoint(x: w * 0.04, y: 1))
-                        line.addLine(to: CGPoint(x: w * 0.96, y: 1))
-                        ctx.stroke(line, with: .color(Color.cyan.opacity(0.22)), lineWidth: 0.8)
-                        ctx.stroke(line, with: .color(Color.cyan.opacity(0.06)), lineWidth: 5)
-                    }
-                    .frame(height: 4)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 6)
-                }
-                
-                // ── スクロール可能なコンテンツ（CTA は下部固定に移動）
-                Group {
-                    switch step {
-                    case .sceneSelection:
-                        sceneGridContent
-                            .transition(stepTransition(insertion: .trailing))
-                    case .exerciseSelection:
-                        exerciseListContent
-                            .transition(stepTransition(insertion: .trailing))
-                    case .session:
-                        sessionContent
-                            .transition(.opacity)
-                    case .remeasurement:
-                        remeasurementContent
-                            .transition(.opacity)
-                    case .result:
-                        resultContent
-                            .transition(stepTransition(insertion: .trailing))
-                    }
-                }
+                                flowTopBar
+                                    .padding(.horizontal, 20)
+                                    .padding(.top, 10)
+                                    .padding(.bottom, 8)
+                                
+                                // セッション時: コックピットHUDセパレーター
+                                if step == .session {
+                                    Canvas { ctx, sz in
+                                        let w = sz.width
+                                        var line = Path()
+                                        line.move(to: CGPoint(x: w * 0.04, y: 1))
+                                        line.addLine(to: CGPoint(x: w * 0.96, y: 1))
+                                        ctx.stroke(line, with: .color(Color.cyan.opacity(0.22)), lineWidth: 0.8)
+                                        ctx.stroke(line, with: .color(Color.cyan.opacity(0.06)), lineWidth: 5)
+                                    }
+                                    .frame(height: 4)
+                                    .padding(.horizontal, 10)
+                                    .padding(.bottom, 6)
+                                }
+                                
+                                // ── スクロール可能なコンテンツ（CTA は下部固定に移動）
+                                Group {
+                                    switch step {
+                                    case .exerciseSelection:
+                                        exerciseListContent
+                                            .transition(stepTransition(insertion: .trailing))
+                                    case .session:
+                                        sessionContent
+                                            .transition(.opacity)
+                                    case .remeasurement:
+                                        remeasurementContent
+                                            .transition(.opacity)
+                                    case .result:
+                                        resultContent
+                                            .transition(stepTransition(insertion: .trailing))
+                                    default:
+                                        exerciseListContent
+                                    }
+                                }
                 .animation(.easeInOut(duration: reduceMotion ? 0.12 : 0.28), value: step)
             }
         }
@@ -529,33 +535,10 @@ struct GuideFlowView: View {
 
     // MARK: - Fixed Bottom CTA（ボタン本体のみ）
 
-    @ViewBuilder
-    private var fixedBottomCTA: some View {
-        switch step {
-        case .sceneSelection:
-            // シーン選択: 「次へ」のみ
-            Button {
-                withAnimation { step = .exerciseSelection }
-            } label: {
-                ctaLabel(
-                    text: "次へ",
-                    icon: "arrow.right",
-                    enabled: selectedScene != nil
-                )
-            }
-            .buttonStyle(.plain)
-            .disabled(selectedScene == nil)
-
-        case .exerciseSelection:
-            // ガイド選択: 「戻る」+ 「セッション開始」
-            HStack(spacing: 12) {
-                Button {
-                    withAnimation { step = .sceneSelection }
-                } label: {
-                    backLabel
-                }
-                .buttonStyle(.plain)
-
+        @ViewBuilder
+        private var fixedBottomCTA: some View {
+            switch step {
+            case .exerciseSelection:
                 Button {
                     startSession()
                 } label: {
@@ -567,12 +550,88 @@ struct GuideFlowView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(selectedExercise == nil)
-            }
 
-        default:
-            EmptyView()
+            case .result:
+                VStack(spacing: 10) {
+                    // 整わなかった時の選択肢UI（もう一度やる / 別の方法を試す）
+                    if needsRetryOptions {
+                        VStack(spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 10))
+                                Text("まだ緊張が残っているようです。続けますか？")
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .foregroundStyle(Color.cyan.opacity(0.85))
+
+                            HStack(spacing: 10) {
+                                // ① もう一度やる
+                                Button {
+                                    selfReportAfter = nil
+                                    afterSnapshot = nil
+                                    startSession()
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.counterclockwise")
+                                        Text("もう一度やる")
+                                    }
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color.white.opacity(0.08))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12)
+                                                    .strokeBorder(Color.cyan.opacity(0.45), lineWidth: 1)
+                                            )
+                                    )
+                                }
+                                .buttonStyle(.plain)
+
+                                // ② 別の方法を試す（次の方法へ）
+                                Button {
+                                    selfReportAfter = nil
+                                    afterSnapshot = nil
+                                    selectedExercise = nil
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        step = .exerciseSelection
+                                    }
+                                } label: {
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                        Text("別の方法を試す")
+                                    }
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundStyle(.black)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(Color.cyan)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color.cyan.opacity(0.06))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .strokeBorder(Color.cyan.opacity(0.2), lineWidth: 0.8)
+                                )
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+                }
+
+            default:
+                EmptyView()
+            }
         }
-    }
 
     private func ctaLabel(text: String, icon: String, enabled: Bool) -> some View {
         HStack(spacing: 8) {
@@ -1578,9 +1637,10 @@ struct GuideFlowView: View {
         step = .result
     }
 
-    private func saveWithMemo(_ memo: String) {
-        guard let before = beforeSnapshot, let scene = selectedScene,
+private func saveWithMemo(_ memo: String) {
+        guard let before = beforeSnapshot,
               let exercise = selectedExercise else { return }
+        let scene = selectedScene ?? .other
         let record = GuideSessionRecord(
             id: UUID(), startedAt: before.timestamp,
             scene: scene, exercise: exercise,
@@ -1598,7 +1658,7 @@ struct GuideFlowView: View {
         historyStore.add(record)
         showFeedbackView = false
         dismiss()
-        Task { @MainActor in selectedTab = 2 }
+        Task { @MainActor in selectedTab = 0 }
     }
 
     private func regenerateInsightWithAfterReport() {
