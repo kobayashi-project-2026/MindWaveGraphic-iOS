@@ -9,6 +9,10 @@ import SwiftUI
 struct RecordDetailView: View {
 
     let record: GuideSessionRecord
+    @EnvironmentObject private var historyStore: GuideHistoryStore
+    @EnvironmentObject private var flowState: AppFlowState
+    /// もこりんと振り返る（求めたときだけ開く）
+    @State private var showMokorinCompanion = false
 
     // MARK: - Helpers（変更なし）
 
@@ -153,6 +157,21 @@ struct RecordDetailView: View {
                         }
                     }
 
+                    // もこりんと振り返る（同じ場面の過去の記録との比較・次にできること）
+                    Button { showMokorinCompanion = true } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bubble.left.and.text.bubble.right")
+                            Text("もこりんと振り返る")
+                        }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(MindWaveCyberTheme.cyan)
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        .background(Capsule().strokeBorder(MindWaveCyberTheme.cyan.opacity(0.45), lineWidth: 0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("もこりんがこの記録を説明し、同じ場面の過去の記録と比べます")
+                    .accessibilityIdentifier("mokorin_review_button")
+
                     Text("これは医療診断ではありません。\n数値は計測環境により変動します。参考値としてご確認ください。")
                         .font(.system(size: 10, weight: .light))
                         .foregroundStyle(MindWaveCyberTheme.textTertiary.opacity(0.6))
@@ -167,10 +186,30 @@ struct RecordDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             print("[Record] detail opened: \(record.id.uuidString.prefix(8))")
+            #if DEBUG
+            // シミュレーター検証用: MW_COMPANION=review で詳細を開いたときに振り返りを開く
+            if ProcessInfo.processInfo.environment["MW_COMPANION"] == "review" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { showMokorinCompanion = true }
+            }
+            #endif
+        }
+        .sheet(isPresented: $showMokorinCompanion) {
+            MokorinCompanionView(title: "もこりんと振り返る", model: makeMokorinCompanion()) { showMokorinCompanion = false }
         }
     }
 
     // MARK: - Helpers（変更なし）
+
+    /// 振り返りでは測定前の会話の内容は使わない（その記録のときの会話とは限らないため）。自由な質問は POST /v1/chat（同意時のみ）
+    private func makeMokorinCompanion() -> MokorinCompanionViewModel {
+        let input = MokorinResultInput(record: record)
+        let history = historyStore.records
+        let scene = flowState.measurementContext.scene
+        let chat = ChatViewModel(sceneProvider: { scene })
+        return MokorinCompanionViewModel(chat: chat) { recent in
+            MokorinResultExplainer.explain(input, history: history, memory: nil, purpose: .review, recentUserText: recent)
+        }
+    }
 
     private func deltaSummary(_ delta: Double) -> String {
         if delta < -5  { return "（下がりました）" }

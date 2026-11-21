@@ -54,6 +54,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		4D5EC0DE0000000000000001 /* DevServer.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = DevServer.xcconfig; sourceTree = "<group>"; };
 		43BF90722FD280F500607844 /* MindWaveGraphic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MindWaveGraphic.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		43BF91282FD8A08D00607844 /* MindWaveGraphicWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MindWaveGraphicWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		43BF912D2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MindWaveGraphicWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -93,6 +94,7 @@
 		43BF90692FD280F400607844 = {
 			isa = PBXGroup;
 			children = (
+				4D5EC0DE0000000000000001 /* DevServer.xcconfig */,
 				43BF90742FD280F500607844 /* MindWaveGraphic */,
 				43BF91312FD8A08D00607844 /* MindWaveGraphicWatch Watch App */,
 				43BF90732FD280F500607844 /* Products */,
@@ -395,6 +397,7 @@
 		};
 		43BF907E2FD280F600607844 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4D5EC0DE0000000000000001 /* DevServer.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

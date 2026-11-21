@@ -5,12 +5,14 @@
 // STUB_OPENAI_MODE で異常系を再現できる: ok（既定）/ timeout / http_500 / http_429 / http_401 / refusal / invalid_json / prohibited / invalid_candidate
 //
 // もこりんの状況整理（/v1/context-assist）の要求には、最後の発言のキーワードから候補を機械的に作って返す（AI の判断ではない）。
+// 返答文は会話の流れを確認できるよう定型の自然な文にする。アプリは provider=openai-stub を見て「スタブ応答・実際のAIではありません」と表示する。
 //
 // 会話（/v1/chat）の要求には、受け取った履歴の件数・最初の相談・直前の質問を引用した返答を返す。
 // これは「履歴が順番どおり届いているか」を確かめるための機械的な返答で、AI が生成した文章ではない。
 // 返答の先頭には必ず「（スタブ応答…）」と付け、実際の AI の返答と取り違えないようにしている。
 
 import { FIXED_CAUTION } from "../src/contract.ts";
+import { SLOT_QUESTIONS, normalizeCheckIn } from "../src/checkin.ts";
 
 export type StubMode = "ok" | "timeout" | "http_500" | "http_429" | "http_401" | "refusal" | "invalid_json" | "prohibited" | "invalid_candidate";
 
@@ -24,7 +26,7 @@ function clip(s: string, n: number): string {
 
 const STUB_SCENE_WORDS: Array<[string, RegExp]> = [
   ["interview", /面接|面談|発表|プレゼン|スピーチ/], ["sports", /試合|大会|競技|レース/],
-  ["important", /大切な|大事な|デート|約束/], ["work", /作業|仕事|勉強|集中/], ["calm", /安静|リラックス|のんびり/],
+  ["important", /大切な|大事な|デート|約束/], ["work", /作業|仕事|勉強|集中/], ["calm", /安静|リラックス|のんびり|予定はない|予定はなし|特に予定/],
 ];
 const STUB_CONDITION_WORDS: Array<[string, RegExp]> = [
   ["running", /走/], ["stairs", /階段|移動|歩いて/], ["smoking", /たばこ|タバコ|煙草|喫煙/],
@@ -38,10 +40,24 @@ function isContextRequest(body: Record<string, unknown>): boolean {
   return text?.format?.name === "mokorin_context";
 }
 
+const STUB_SCENE_TEXT: Record<string, string> = {
+  interview: "面接や発表の前", sports: "試合や大会の前", important: "大切な予定の前", work: "作業や勉強の前", calm: "特に予定はない",
+};
+const STUB_CONDITION_TEXT: Record<string, string> = {
+  running: "走ってきた", stairs: "階段を上ってきた", smoking: "たばこを吸った", caffeine: "コーヒーを飲んだ",
+  sleep_lack: "寝不足", after_meal: "食後", none: "座って落ち着いている",
+};
+/** 訂正の言い回し（アプリの端末内判定と同じ）。最後の言い回しより後ろを最新の発言として扱う */
+const STUB_CORRECTION = /(じゃなくて|ではなくて|ではなく|じゃなく|って言ったけど|と言ったけど|っていうか|というか|間違えた|訂正|実際は|本当は|やっぱり)/g;
+
 /** 最後の利用者の発言からキーワードで候補を作る（AI の判断ではない） */
 export function stubContextResult(body: Record<string, unknown>): Record<string, unknown> {
   const input = Array.isArray(body.input) ? (body.input as Array<{ role?: string; content?: unknown }>) : [];
-  const last = [...input].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content as string ?? "";
+  const said = [...input].reverse().find((m) => m.role === "user" && typeof m.content === "string")?.content as string ?? "";
+  const parts = said.split(STUB_CORRECTION);
+  const tail = parts[parts.length - 1] ?? "";
+  const hasCandidate = (t: string) => STUB_SCENE_WORDS.some(([, re]) => re.test(t)) || STUB_CONDITION_WORDS.some(([, re]) => re.test(t));
+  const last = parts.length > 1 && hasCandidate(tail) ? tail : said;
   const scene = STUB_SCENE_WORDS.find(([, re]) => re.test(last))?.[0] ?? null;
   let conds = STUB_CONDITION_WORDS.filter(([, re]) => re.test(last)).map(([c]) => c);
   if (conds.includes("none") && conds.length > 1) conds = conds.filter((c) => c !== "none");
@@ -52,12 +68,49 @@ export function stubContextResult(body: Record<string, unknown>): Record<string,
   const note = input.find((m) => m.role === "developer" && typeof m.content === "string")?.content as string ?? "";
   const inTensionStep = note.includes("現在の段階: tension");
   const needs = scene === null && conds.length === 0 && (!inTensionStep || tension === null);
+  // 画面で選択中の場面（developer メッセージの「場面: 面接・発表。」など）
+  const noteScene = /場面: ([^。]+)/.exec(note)?.[1] ?? "";
+  const knownScene = scene ?? STUB_SCENE_WORDS.find(([, re]) => re.test(noteScene))?.[0];
+  let reply: string;
+  if (conds.length > 0) {
+    const where = knownScene && STUB_SCENE_TEXT[knownScene] && knownScene !== "calm" ? `${STUB_SCENE_TEXT[knownScene]}で、` : "";
+    reply = `${where}${conds.map((c) => STUB_CONDITION_TEXT[c] ?? c).join("し、")}んだね。この状況で測定してみようか？`;
+  } else if (scene) {
+    reply = scene === "calm" ? "特に予定はないんだね。今は座って落ち着いてる？それとも動いたあと？"
+      : `${STUB_SCENE_TEXT[scene]}なんだね。今は落ち着いて座ってる？それとも移動してきたところ？`;
+  } else if (tension) {
+    reply = tension === "high" ? "かなり緊張してるんだね。これから何か予定があるの？"
+      : tension === "slight" ? "少し緊張してるんだね。これから何か予定があるの？" : "落ち着いているんだね。何か予定はある？";
+  } else if (/測りたくない|測定しない|やめておく|今日はいい/.test(said)) {
+    reply = "わかった、今は測らなくても大丈夫だよ。気が向いたら声をかけてね。";
+  } else if (/[？?]$/.test(said.trim())) {
+    reply = "（スタブなので質問には答えられないよ）それで、今の気持ちや予定を教えてくれる？";
+  } else {
+    reply = inTensionStep ? "そっか。今の気持ちは、少し緊張・かなり緊張・落ち着いてる のどれに近い？" : "もう少し教えてくれる？これから何か予定があるの？";
+  }
+  // 会話の情報（STEP 0〜6）を使う新しいアプリには、次に尋ねる候補の質問を返す（機械的な決め方）
+  const remaining = /次に尋ねる候補（優先順）: ([a-z_,]+)/.exec(note)?.[1]?.split(",") ?? null;
+  const asking = /今尋ねている項目: ([a-z_]+)/.exec(note)?.[1];
+  const asksQuestion = /[？?]$/.test(said.trim()) && scene === null && conds.length === 0 && tension === null;
+  if (remaining && asksQuestion && asking) {
+    // 質問には答えられないので、今尋ねている項目をもう一度聞く（次の項目へ進めない）
+    reply = `（スタブなので質問には答えられないよ）${SLOT_QUESTIONS[asking] ?? ""}`;
+  } else if (remaining) {
+    const next = remaining.find((slot) => slot !== asking);
+    reply = next ? `${scene || conds.length || tension ? "教えてくれてありがとう。" : "そっか。"}${SLOT_QUESTIONS[next] ?? ""}` : "教えてくれてありがとう。この状況で測定してみようか？";
+  }
   return {
-    reply: `${STUB_CHAT_PREFIX}キーワード判定: 場面=${scene ?? "なし"} / 身体状態=${conds.join(",") || "なし"}`,
+    reply,
+    check_in: normalizeCheckIn({ tension_level: tension === "high" ? 75 : tension === "slight" ? 20 : tension === "calm" ? 0 : null }),
     scene_candidate: scene,
     condition_candidates: conds,
     needs_clarification: needs,
-    clarification_question: needs ? "（スタブ）どんな場面の前か教えてください" : null,
+    clarification_question: null,
+    // 機械的な決め方（AI の判断ではない）: 試験・初対面など場面の候補にない予定は利用者の言葉をそのまま要約として返す
+    situation_note: /試験|テスト|初対面|はじめて会う|初めて会う|ゼミ/.test(last) ? clip(last, 40) : null,
+    user_intent: /測りたくない|測定しない|やめておく|今日はいい/.test(said) ? "decline_measurement"
+      : /測りたい|始めて|測って/.test(said) ? "ready"
+      : asksQuestion ? "question" : "answer",
     tension_candidate: tension,
     // 機械的な決め方（AI の判断ではない）: 追加質問なら calm/nod、候補ありなら happy/nod、睡眠不足なら sleepy
     emotion: conds.includes("sleep_lack") ? "sleepy" : needs ? "calm" : "happy",
@@ -84,7 +137,14 @@ export function stubChatReply(body: Record<string, unknown>): string {
     users.length > 1 ? `最初のご相談「${clip(first, 30)}」の続きとして受け付けました。` : `ご相談「${clip(first, 30)}」を受け付けました。`,
     `直前の質問:「${clip(last, 40)}」`,
   ];
-  if (scene) lines.push(`補足情報: ${clip(scene.split("\n")[0] ?? "", 40)}`);
+  if (scene) {
+    const noteLines = scene.split("\n");
+    const sceneLine = noteLines.find((l) => !l.startsWith("本人が答えた内容"));
+    if (sceneLine) lines.push(`補足情報: ${clip(sceneLine, 40)}`);
+    // 会話の情報が届いているかを確認できるように引用する（AI の解釈ではない）
+    const checkIn = noteLines.find((l) => l.startsWith("本人が答えた内容"));
+    if (checkIn) lines.push(`会話の情報: ${clip(checkIn.replace(/^本人が答えた内容（[^）]*）: /, ""), 60)}`);
+  }
   return lines.join("\n");
 }
 

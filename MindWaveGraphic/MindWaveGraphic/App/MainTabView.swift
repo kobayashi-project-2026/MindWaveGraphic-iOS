@@ -108,6 +108,24 @@ struct MainTabView: View {
         .onAppear {
             viewModel.measurementContext = flowState.measurementContext
             #if DEBUG
+            // シミュレーター検証用: MW_SEED_DEMO_RECORD=1 で、記録が 0 件のときだけデモ（Mock）の記録を 1 件追加する
+            // （もこりんの振り返りの画面確認用。デモと表示され、比較には使われない）
+            if ProcessInfo.processInfo.environment["MW_SEED_DEMO_RECORD"] == "1", historyStore.records.isEmpty {
+                let date = Date().addingTimeInterval(-3600)
+                func demo(_ hr: Double, _ score: Double) -> GuideSnapshot {
+                    GuideSnapshot(timestamp: date, score: score, confidence: 0.8, state: score > 69 ? .overTense : .optimalTension,
+                                  heartRate: hr, hrv: nil, isMockData: true, heartRateSampleDate: date, hrvSampleDate: nil)
+                }
+                historyStore.add(GuideSessionRecord(id: UUID(), startedAt: date, scene: .sports, exercise: .box, durationSeconds: 60,
+                                                    before: demo(98, 74), after: demo(88, 58), hrvUpdated: false))
+            }
+            #endif
+            openImprovementIfRequested()
+            #if DEBUG
+            // MW_FLOW_AUTOPILOT=1: ホーム表示の数秒後に「改善」へ（レバーを動かした場合と同じ）
+            if ProcessInfo.processInfo.environment["MW_FLOW_AUTOPILOT"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { navManager.select(.guide) }
+            }
             // シミュレーター検証用（INITIAL_TAB と同様）: INITIAL_SCREEN=<AppScreen の case 名> で起動直後に遷移する
             if let name = ProcessInfo.processInfo.environment["INITIAL_SCREEN"],
                let screen = AppScreen.allCases.first(where: { "\($0)" == name }) {
@@ -115,6 +133,7 @@ struct MainTabView: View {
             }
             #endif
         }
+        .onChange(of: flowState.requestImprovement) { _, _ in openImprovementIfRequested() }
         .onChange(of: flowState.measurementContext) { _, newCtx in
             viewModel.measurementContext = newCtx
         }
@@ -152,6 +171,14 @@ struct MainTabView: View {
         } message: {
             Text("ライブ計測は停止します。保存済みの履歴は削除されません。")
         }
+    }
+
+    /// 会話のあと「改善方法を見る」を選んだときは、改善（方法の選択）を開く
+    private func openImprovementIfRequested() {
+        guard flowState.requestImprovement else { return }
+        flowState.requestImprovement = false
+        navManager.dismissModal()
+        navManager.select(.guide)
     }
 
     /// タイトル（認証フロー先頭）へ戻る。履歴は保持し、ライブ計測だけ停止する。
@@ -249,7 +276,8 @@ struct MainTabView: View {
                 .animation(.easeInOut(duration: 1.0), value: si)
 
                 // Home / 整える / 履歴 のレバー（HomeView と同一コンポーネント）
-                CockpitLeverNav(selectedTab: selectedTabBinding, accentColor: ac)
+                CockpitLeverNav(selectedTab: selectedTabBinding, accentColor: ac,
+                                highlightImprove: flowState.pendingImprovement != nil) { navManager.navigate(to: .dialogue) }
                     .padding(.horizontal, 12)
                     .frame(height: 44)
             }

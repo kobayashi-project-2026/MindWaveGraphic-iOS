@@ -83,11 +83,12 @@ struct LogInView: View {
                             isSecure: true
                         )
 
-                        if showValidationError {
-                            Text("メールアドレスとパスワードを入力してください")
-                                .font(AuthDesign.captionFont)
-                                .foregroundStyle(Color.red.opacity(0.75))
-                        }
+                        // 全体UI 2〜4 ページ: エラーの文の場所を常に確保し、ボタンの位置をずらさない
+                        Text("メールアドレスとパスワードを入力してください")
+                            .font(AuthDesign.captionFont)
+                            .foregroundStyle(Color.red.opacity(0.75))
+                            .opacity(showValidationError ? 1 : 0)
+                            .accessibilityHidden(!showValidationError)
                     }
                     .padding(.horizontal, AuthDesign.horizontalPadding)
                     .padding(.bottom, 32)

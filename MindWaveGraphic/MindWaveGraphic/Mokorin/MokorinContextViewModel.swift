@@ -4,6 +4,11 @@
 // 測定前の状況選択（ContextCalibrationView）で、もこりんとの会話を管理する。
 // AI 相談（ChatViewModel）とは別の会話状態を持ち、画面を閉じると破棄される（保存しない）。
 //
+// 2026-11-11 改訂: 会話の中心を STEP 0〜6（MokorinCheckIn）にした。あいさつのあと、必要な項目だけを 1 つずつ尋ね
+// （答え済み・答えたくない項目は尋ねない）、そろったらまとめて測定・改善へ。「一つ前の会話へ戻る」で直前の答えを取り消せる。
+// 深刻な体の症状の言葉は外部AIへ送らず、端末内で受診・相談を案内する。以下の段階（Step）は画面の互換のために残し、
+// 尋ねている項目から計算する（sleep/activity/condition/body → condition、situation/timing → scene、ほか → tension）。
+//
 // 進行（2026-10-28 改訂）:
 //   STEP 0 tension   : 「こんにちは。今、緊張してる？」— 本人の主観（自己申告）。計測した緊張スコアではない
 //   STEP 1 scene     : 「何か予定があるの？」— 場面（ContextScene）
@@ -88,6 +93,69 @@ final class MokorinContextViewModel: ObservableObject {
     @Published private(set) var failedText: String? = nil
     /// 今の段階で、はっきりしない答えが続いた回数（一覧を案内する目安）
     @Published private(set) var unclearCountInStep = 0
+    /// 本人が話した予定の短い言葉（既存の場面に分類しきれない内容: 試験・初対面など）。メモリのみ
+    @Published private(set) var situationNote: String? = nil
+    /// 疲れている・しんどいと話した
+    @Published private(set) var mentionedFatigue = false
+    /// 今は測定を望まないと話した（説得せず「測定しないで終える」を出す）
+    @Published private(set) var declinedMeasurement = false
+    /// 会話で集めた情報（STEP 0〜6）。メモリのみ
+    @Published private(set) var checkIn = MokorinCheckIn()
+    /// 今尋ねている項目（nil = あいさつ・まとめ）
+    @Published private(set) var askedSlot: CheckInSlot? = nil
+    /// 深刻な症状の言葉があった（改善の推薦を止め、相談を案内する）
+    @Published private(set) var safetyStop = false
+
+    /// 「一つ前の会話へ戻る」ための、利用者の発言の直前の状態
+    private struct Snapshot {
+        let messages: [Message]
+        let checkIn: MokorinCheckIn
+        let askedSlot: CheckInSlot?
+        let step: Step
+        let selectedScene: ContextScene
+        let selectedConditions: Set<BodyCondition>
+        let hasSceneAnswer: Bool
+        let hasConditionAnswer: Bool
+        let hasTensionAnswer: Bool
+        let subjectiveTension: SubjectiveTension?
+        let situationNote: String?
+        let mentionedFatigue: Bool
+        let declinedMeasurement: Bool
+        let safetyStop: Bool
+        let unclearCountInStep: Int
+    }
+    private var undoStack: [Snapshot] = []
+
+    /// 一つ前の会話へ戻れるか
+    var canGoBack: Bool { !undoStack.isEmpty }
+
+    /// 答えた（またはとばした）項目の順番。タップでその質問へ戻れる（全体UI 5〜7 ページ）
+    var answeredTrail: [CheckInSlot] {
+        undoStack.compactMap(\.askedSlot).reduce(into: [CheckInSlot]()) { if !$0.contains($1) { $0.append($1) } }
+    }
+
+    /// 指定した項目を尋ねていたところまで戻る（その後の答え・推薦も取り消す）
+    func goBack(to slot: CheckInSlot) {
+        guard undoStack.contains(where: { $0.askedSlot == slot }) else { return }
+        while let last = undoStack.last {
+            let target = last.askedSlot == slot
+            goBack()
+            if target { break }
+        }
+    }
+
+    /// 推薦する改善方法（会話の内容から。本人は推薦以外も選べる）
+    var recommendations: [MethodRecommendation] { safetyStop ? [] : MokorinMethodAdvisor.recommend(checkIn) }
+
+    /// 提案・言い回し用の話題（本人の言葉を優先し、なければ既存の場面）
+    var topic: MokorinTopic { MokorinTopic.detect(text: situationNote, scene: hasSceneAnswer ? selectedScene : nil) }
+
+    /// 測定前の会話で理解した内容（結果の説明・提案で使う。メモリのみ・外部へ送らない）
+    var sessionMemory: MokorinSessionMemory {
+        MokorinSessionMemory(tension: subjectiveTension, scene: selectedScene, conditions: selectedConditions,
+                             situationNote: situationNote ?? checkIn.situationNote, mentionedFatigue: mentionedFatigue || checkIn.condition?.value.isTired == true,
+                             declinedMeasurement: declinedMeasurement, capturedAt: Date(), checkIn: checkIn)
+    }
 
     private let initialContext: MeasurementContext
     private let isInAppEdit: Bool
@@ -141,6 +209,28 @@ final class MokorinContextViewModel: ObservableObject {
 
     /// 最新のもこりんの発言（画面中央の吹き出し）
     var latestMokorinMessage: Message? { messages.last { $0.speaker == .mokorin } }
+
+    /// 画面中央に出す「もこりんの今回の発言」。直前の利用者の発言のあとの返答をまとめる
+    /// （AI の返答に端末内の定型の質問を添えた場合も、AI の返答が隠れないように1つの吹き出しにする）
+    struct Turn: Equatable {
+        let id: UUID
+        let text: String
+        /// 最初の発言の出どころ（AI の返答なら openAI / stub）
+        let origin: Origin
+        /// AI の返答のあとに端末内の定型文を添えたか
+        let hasFixedFollowUp: Bool
+    }
+
+    var currentTurn: Turn? {
+        let start = (messages.lastIndex { $0.speaker == .user }).map { $0 + 1 } ?? 0
+        var replies = messages[start...].filter { $0.speaker == .mokorin }
+        if replies.isEmpty, let last = latestMokorinMessage { replies = [last] }
+        guard let first = replies.first, let last = replies.last else { return nil }
+        return Turn(id: last.id,
+                    text: replies.map(\.text).joined(separator: "\n"),
+                    origin: first.origin,
+                    hasFixedFollowUp: first.origin != .fixed && replies.dropFirst().contains { $0.origin == .fixed })
+    }
     /// 最新の利用者の発言（音声認識の結果の確認用）
     var latestUserMessage: Message? { messages.last { $0.speaker == .user } }
 
@@ -148,6 +238,9 @@ final class MokorinContextViewModel: ObservableObject {
     /// 一覧は、外部AIを使わないとき・はっきりしない答えが続いたときだけ案内する
     var quickReplies: [MokorinQuickReply] {
         if failedText != nil { return [.retry, .continueWithoutAI] }
+        if declinedMeasurement { return [.skipMeasurement, .keepTalking] }
+        if safetyStop { return [] }
+        if let slot = askedSlot, step != .review { return Self.chipOptions(for: slot).map { .checkIn($0) } }
         let offerList = !usesRemoteAI || unclearCountInStep >= 1
         switch step {
         case .tension:
@@ -158,6 +251,22 @@ final class MokorinContextViewModel: ObservableObject {
             return [.condition(.none), .condition(.stairs)] + (offerList ? [.showList] : [.condition(.running)])
         case .review:
             return []
+        }
+    }
+
+    /// 質問ごとに画面へ出す選択肢（最大 3 つ。ほかの答えは「ほかの答え」の一覧・音声・文字で）
+    static func chipOptions(for slot: CheckInSlot) -> [CheckInOption] {
+        switch slot {
+        case .sleep:     return [.sleep(.h5to7), .sleep(.h7to9), .sleep(.h3to5)]
+        case .activity:  return [.activity(.usual), .activity(.light), .activity(.exercised)]
+        case .condition: return [.condition(.energetic), .condition(.slightlyTired), .condition(.veryTired)]
+        case .situation: return [.situation(.presentation), .situation(.interviewExam), .situation(.restless)]
+        case .timing:    return [.timing(.soon), .timing(.today), .timing(.tomorrowOrLater)]
+        case .emotion:   return [.emotion(.tense), .emotion(.anxious), .emotion(.unsure)]
+        case .tension:   return [.tension(20), .tension(50), .tension(75)]
+        case .cause:     return [.cause(.failure), .cause(.speaking), .cause(.unknown)]
+        case .body:      return [.body(.heartPounding), .body(.none), .body(.unsure)]
+        case .support:   return [.support(.calmDown), .support(.organize), .support(.refresh)]
         }
     }
 
@@ -179,8 +288,16 @@ final class MokorinContextViewModel: ObservableObject {
         case .continueWithoutAI:
             continueWithoutAI()
             return
-        case .showList:
-            return   // 一覧（編集シート）は画面側で開く
+        case .showList, .skipMeasurement:
+            return   // 一覧（編集シート）・測定しないで終える は画面側で処理する
+        case .checkIn(let option):
+            answer(options: [option])
+            return
+        case .keepTalking:
+            declinedMeasurement = false
+            appendUser(reply.label)
+            advance(userText: nil)
+            return
         default:
             break
         }
@@ -195,6 +312,7 @@ final class MokorinContextViewModel: ObservableObject {
             selectScene(s)
         case .noPlan:
             appendUser(reply.label)
+            situationNote = nil
             selectedScene = .calm
             suggestedScene = nil
             hasSceneAnswer = true
@@ -219,13 +337,76 @@ final class MokorinContextViewModel: ObservableObject {
             advance(userText: reply.label)
         case .confirmConditions:
             confirmConditions()
-        case .retry, .continueWithoutAI, .showList:
+        case .retry, .continueWithoutAI, .showList, .skipMeasurement, .keepTalking, .checkIn:
             break
         }
     }
 
+    /// 選択肢で答える（複数選択の項目は複数可）。外部AIへは送らず、端末内で次の質問へ進む
+    func answer(options: [CheckInOption]) {
+        guard !isSending, !options.isEmpty else { return }
+        pushUndo()
+        failedText = nil
+        var e = CheckInExtraction()
+        for o in options {
+            switch o {
+            case .sleep(let v): e.sleep = v
+            case .activity(let v): e.activity = v
+            case .condition(let v): e.condition = v
+            case .situation(let v): e.situation = v
+            case .timing(let v): e.timing = v
+            case .emotion(let v): e.emotion = v
+            case .tension(let v): e.tension = v
+            case .cause(let v): e.causes.insert(v)
+            case .body(let v): e.body.insert(v)
+            case .support(let v): e.support = v
+            }
+        }
+        e.body = MokorinCheckIn.consistentBody(e.body)
+        appendUser(options.map(\.label).joined(separator: "、"))
+        let changed = checkIn.apply(e, at: Date())
+        syncFromCheckIn()
+        continueCheckIn(changed: changed, userText: nil)
+    }
+
+    /// この質問には答えない（スキップ）
+    func skipQuestion() {
+        guard !isSending, let slot = askedSlot else { return }
+        pushUndo()
+        appendUser("この質問はとばす")
+        checkIn.declined.insert(slot)
+        continueCheckIn(changed: [], userText: nil)
+    }
+
+    /// 一つ前の会話へ戻る（直前の答えを取り消し、その質問からやり直す。集めた情報・推薦も元に戻る）
+    func goBack() {
+        if isSending { cancelPending(silently: true) }
+        guard let s = undoStack.popLast() else { return }
+        messages = s.messages
+        checkIn = s.checkIn
+        askedSlot = s.askedSlot
+        step = s.step
+        selectedScene = s.selectedScene
+        selectedConditions = s.selectedConditions
+        hasSceneAnswer = s.hasSceneAnswer
+        hasConditionAnswer = s.hasConditionAnswer
+        hasTensionAnswer = s.hasTensionAnswer
+        subjectiveTension = s.subjectiveTension
+        situationNote = s.situationNote
+        mentionedFatigue = s.mentionedFatigue
+        declinedMeasurement = s.declinedMeasurement
+        safetyStop = s.safetyStop
+        unclearCountInStep = s.unclearCountInStep
+        failedText = nil
+        notice = nil
+        setPose(.calm, .nod)
+        MindWaveDebugLogger.log(.insight, "mokorin go back remaining=\(undoStack.count)")
+    }
+
     /// 場面（単一選択）
     func selectScene(_ scene: ContextScene) {
+        // ボタンで選び直したら、以前に話した予定の言葉（別の場面かもしれない）は使わない
+        if scene != selectedScene { situationNote = nil }
         selectedScene = scene
         suggestedScene = nil
         hasSceneAnswer = true
@@ -271,6 +452,7 @@ final class MokorinContextViewModel: ObservableObject {
 
     /// 編集画面で場面を選ぶ（会話には発言を追加しない。「完了」で確認へ進む）
     func editScene(_ scene: ContextScene) {
+        if scene != selectedScene { situationNote = nil }
         selectedScene = scene
         suggestedScene = nil
     }
@@ -353,12 +535,13 @@ final class MokorinContextViewModel: ObservableObject {
     }
 
     /// 送信中の要求を取り消す（届いた応答は破棄し、送った発言も会話から外す）
-    func cancelPending() {
+    func cancelPending(silently: Bool = false) {
         guard isSending else { return }
         activeRequestID = nil
         isSending = false
         if let last = messages.last, last.speaker == .user { messages.removeLast() }
-        notice = "送信を取り消したよ。"
+        if !undoStack.isEmpty, !silently { undoStack.removeLast() }
+        if !silently { notice = "送信を取り消したよ。" }
         MindWaveDebugLogger.log(.insight, "mokorin request cancelled")
     }
 
@@ -380,6 +563,13 @@ final class MokorinContextViewModel: ObservableObject {
         tensionRetries = 0
         failedText = nil
         unclearCountInStep = 0
+        situationNote = nil
+        mentionedFatigue = false
+        declinedMeasurement = false
+        checkIn = MokorinCheckIn()
+        askedSlot = nil
+        safetyStop = false
+        undoStack = []
         activeRequestID = nil
         conversationId = UUID()
         start()
@@ -397,9 +587,96 @@ final class MokorinContextViewModel: ObservableObject {
     // MARK: - 内部
 
     private func start() {
-        step = computeStep()
-        appendMokorin(isInAppEdit ? MokorinScript.greetingForEdit(current: initialContext) : MokorinScript.greeting, origin: .fixed)
+        // あいさつ（緊張していると決めつけない）＋最初の質問（STEP 1）。自由に話しても、選択肢で答えてもよい
+        askedSlot = checkIn.nextSlot()
+        if let slot = askedSlot { checkIn.asked.append(slot) }
+        step = stepFor(askedSlot)
+        let greeting = isInAppEdit ? MokorinScript.greetingForEdit(current: initialContext) : MokorinScript.greeting
+        appendMokorin([greeting, askedSlot?.question(variant: 0)].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
         setPose(MokorinExpressionRules.greeting.0, MokorinExpressionRules.greeting.1)
+    }
+
+    /// 尋ねている項目から、画面の段階（互換用）を決める
+    private func stepFor(_ slot: CheckInSlot?) -> Step {
+        guard let slot else { return checkIn.isReadyToSuggest ? .review : .tension }
+        switch slot {
+        case .sleep, .activity, .condition, .body: return .condition
+        case .situation, .timing: return .scene
+        case .emotion, .tension, .cause, .support: return .tension
+        }
+    }
+
+    private func pushUndo() {
+        undoStack.append(Snapshot(messages: messages, checkIn: checkIn, askedSlot: askedSlot, step: step,
+                                  selectedScene: selectedScene, selectedConditions: selectedConditions,
+                                  hasSceneAnswer: hasSceneAnswer, hasConditionAnswer: hasConditionAnswer,
+                                  hasTensionAnswer: hasTensionAnswer, subjectiveTension: subjectiveTension,
+                                  situationNote: situationNote, mentionedFatigue: mentionedFatigue,
+                                  declinedMeasurement: declinedMeasurement, safetyStop: safetyStop,
+                                  unclearCountInStep: unclearCountInStep))
+        if undoStack.count > 30 { undoStack.removeFirst() }
+    }
+
+    /// 会話の情報を、既存の場面・身体状態・主観的な緊張（互換）へ反映する
+    private func syncFromCheckIn() {
+        if let s = checkIn.situation?.value {
+            selectedScene = s.contextScene
+            suggestedScene = s.contextScene
+            hasSceneAnswer = true
+            if let note = checkIn.situationNote { situationNote = note }
+        }
+        let ctx = checkIn.measurementContext(base: MeasurementContext(scene: selectedScene, conditions: [.none]))
+        if ctx.conditions != [.none] {
+            selectedConditions = ctx.conditions
+            suggestedConditions = ctx.conditions
+            conditionsTouched = true
+        }
+        if checkIn.isSettled(.body) || checkIn.isSettled(.condition) || checkIn.isSettled(.activity) { hasConditionAnswer = true }
+        if let t = checkIn.tension?.value {
+            subjectiveTension = t < 10 ? .calm : (t < 62 ? .slight : .high)
+            hasTensionAnswer = true
+        }
+        if checkIn.condition?.value.isTired == true { mentionedFatigue = true }
+    }
+
+    /// 発言・選択のあと: 反応 → 次の質問、またはまとめ（端末内の定型文）
+    private func continueCheckIn(changed: Set<CheckInSlot>, userText: String?, previous: MokorinCheckIn? = nil) {
+        let wasAsked = askedSlot
+        // 尋ねた項目に答えがなかった: ほかの情報を話してくれたなら聞き直さずに先へ（会話を止めない）。
+        // 何も分からなかったときだけ 1 回聞き直し、2 回目はとばす（同じ質問を繰り返さない）
+        let prev = previous ?? undoStack.last?.checkIn ?? MokorinCheckIn()
+        if let slot = wasAsked, !changed.contains(slot), !checkIn.isSettled(slot) {
+            // 前に答えた内容の訂正だけだった: 訂正を受け止めて、同じ質問をもう一度（とばさない）
+            if !changed.isEmpty && changed.allSatisfy({ prev.isKnown($0) }) {
+                let reaction = MokorinScript.composedReaction(changed: changed, checkIn: checkIn, previous: prev)
+                appendMokorin(MokorinScript.join(reaction: reaction, question: slot.question(variant: undoStack.count)), origin: .fixed)
+                setPose(.happy, .nod)
+                return
+            }
+            if changed.isEmpty && unclearCountInStep == 0 {
+                unclearCountInStep = 1
+                appendMokorin(MokorinScript.checkInClarify(slot, gotOther: !changed.isEmpty), origin: .fixed)
+                setPose(.calm, .nod)
+                return
+            }
+            checkIn.declined.insert(slot)
+        }
+        unclearCountInStep = 0
+        let reaction = MokorinScript.composedReaction(changed: changed, checkIn: checkIn, previous: prev)
+            ?? (changed.isEmpty ? nil : ["そっか。", "うん。", "わかった。"][undoStack.count % 3])
+        askedSlot = checkIn.nextSlot()
+        if let slot = askedSlot {
+            checkIn.asked.append(slot)
+            step = stepFor(slot)
+            appendMokorin(MokorinScript.join(reaction: reaction, question: slot.question(variant: undoStack.count)), origin: .fixed)
+            setPose(checkIn.condition?.value.isTired == true ? .sleepy : .calm, .nod)
+        } else {
+            markReadyWithCurrentSelection()
+            step = .review
+            // まとめは短く（反応は重ねない。推薦の理由は改善の画面で表示する）
+            appendMokorin(MokorinScript.checkInSummary(checkIn, recommendations: recommendations), origin: .fixed)
+            setPose(checkIn.needsRestFirst ? .sad : .happy, .nod)
+        }
     }
 
     private func setPose(_ emotion: MokorinEmotion, _ action: MokorinAction?) {
@@ -426,8 +703,21 @@ final class MokorinContextViewModel: ObservableObject {
 
     private func perform(_ rawText: String) async {
         let text = String(rawText.prefix(ContextAssistLimits.maxUserChars))
+        pushUndo()
         appendUser(text)
         notice = nil
+        if MokorinAdviceEngine.mentionsFatigue(text) { mentionedFatigue = true }
+        declinedMeasurement = false
+        // 深刻な体の症状の言葉は外部AIへ送らず、端末内で相談を案内する（改善の推薦は止める）
+        if MokorinAdviceEngine.mentionsSeriousSymptom(text) {
+            safetyStop = true
+            askedSlot = nil
+            step = .review
+            appendMokorin(MokorinAdviceEngine.seekHelpMessage, origin: .fixed)
+            setPose(.sad, .nod)
+            isSending = false
+            return
+        }
         if usesRemoteAI {
             await requestReply(for: text)
         } else {
@@ -456,9 +746,31 @@ final class MokorinContextViewModel: ObservableObject {
             // 候補の検証（未知の値は throw → 下の catch で失敗として扱う）を済ませてから要求を完了にする
             let candidates = try response.result.typedCandidates()
             activeRequestID = nil
-            let changed = applyCandidates(scene: candidates.scene, conditions: candidates.conditions)
+            let askedBefore = askedSlot
+            // 会話の情報: AI の抽出（あれば）を優先し、端末内の抽出で補う（どちらも本人の発言から）
+            var extraction = CheckInExtractor.extract(text, asked: askedBefore)
+            if let ai = response.result.checkIn { extraction = ai.merged(over: extraction) }
+            let checkInChanged = checkIn.apply(extraction, at: Date())
+            syncFromCheckIn()
+            let changed = applyCandidates(scene: candidates.scene, conditions: candidates.conditions) || !checkInChanged.isEmpty
             handleTensionAnswer(tension: response.result.typedTension, otherInfo: changed)
-            step = computeStep()
+            if let note = response.result.situationNote.flatMap(MokorinSessionMemory.clippedNote) {
+                situationNote = note
+            } else if candidates.scene != nil {
+                situationNote = MokorinSessionMemory.clippedNote(text)
+            }
+            let intent = response.result.typedIntent
+            if intent == .declineMeasurement { declinedMeasurement = true }
+            if intent == .ready { markReadyWithCurrentSelection(); askedSlot = nil }
+            if intent == .question, !changed, let slot = askedBefore {
+                // 質問に答えたあとは同じ質問に戻る（端末内の判定と同じ）。次へ進めると、その項目が聞かれないまま残る
+                askedSlot = slot
+            } else if intent != .ready {
+                if let slot = askedBefore, !checkInChanged.contains(slot), intent == .answer { checkIn.declined.insert(slot) }
+                askedSlot = checkIn.nextSlot()
+                if let slot = askedSlot { checkIn.asked.append(slot) }
+            }
+            step = intent == .ready || askedSlot == nil ? .review : stepFor(askedSlot)
             unclearCountInStep = (step == previous && !changed && response.result.typedTension == nil) ? unclearCountInStep + 1 : 0
             let origin: Origin = response.isStub ? .stub(model: response.model) : .openAI(model: response.model)
             var reply = response.result.reply
@@ -471,15 +783,11 @@ final class MokorinContextViewModel: ObservableObject {
             setPose(expression.emotion, expression.action)
             // 返答に次の質問・確認が含まれない場合は、段階に合わせた定型の質問を添える（会話が止まらないように）
             let asksSomething = reply.contains("？") || reply.contains("?")
-            switch step {
-            case .review where !reply.contains("測定"):
-                appendMokorin(MokorinScript.summary(scene: selectedScene, conditions: selectedConditions), origin: .fixed)
-            case .tension where !asksSomething:
-                appendMokorin(MokorinScript.askTensionAgain, origin: .fixed)
-            case .scene where !asksSomething:
-                appendMokorin(MokorinScript.askScene(after: subjectiveTension), origin: .fixed)
-            case .condition where !asksSomething:
-                appendMokorin(MokorinScript.askCondition(scene: selectedScene), origin: .fixed)
+            switch declinedMeasurement ? nil : step {
+            case .review? where !reply.contains("測定") && !reply.contains("やってみ"):
+                appendMokorin(MokorinScript.checkInSummary(checkIn, recommendations: recommendations), origin: .fixed)
+            case _? where !asksSomething:
+                if let slot = askedSlot { appendMokorin(slot.question, origin: .fixed) }
             default:
                 break
             }
@@ -500,14 +808,35 @@ final class MokorinContextViewModel: ObservableObject {
 
     /// 端末内の判定で応答する（外部AIを使わないとき・利用者が「AIなしで続ける」を選んだとき）
     private func replyLocally(to text: String, previous: Step) {
-        let local = MokorinKeywordInterpreter.interpret(text)
-        let tension = MokorinKeywordInterpreter.interpretTension(text)
-        let changed = applyCandidates(scene: local.scene, conditions: local.conditions)
-        handleTensionAnswer(tension: tension, otherInfo: changed)
-        let unclear = !changed && !(previous == .tension && hasTensionAnswer)
-        advance(userText: text, clarifyIfUnchanged: !changed, tensionJustAnswered: previous == .tension && hasTensionAnswer)
-        unclearCountInStep = (unclear && step == previous) ? unclearCountInStep + 1 : 0
-        MindWaveDebugLogger.log(.insight, "mokorin local step=\(step) scene=\(local.scene != nil) conditions=\(local.conditions.count) tension=\(tension != nil)")
+        let intent = MokorinKeywordInterpreter.interpretIntent(text)
+        if intent == .declineMeasurement {
+            // 説得しない。選択はそのまま残し、「測定しないで終える」を出す
+            declinedMeasurement = true
+            appendMokorin(MokorinScript.declineAck, origin: .fixed)
+            setPose(.calm, .nod)
+            return
+        }
+        let extraction = CheckInExtractor.extract(text, asked: askedSlot)
+        let changed = checkIn.apply(extraction, at: Date())
+        syncFromCheckIn()
+        if intent == .question && changed.isEmpty {
+            // 質問・雑談: 端末内で答えられるものは答え、そうでなければ正直に伝えて、今の質問に戻る（同じ項目のまま）
+            let again = askedSlot?.question(variant: undoStack.count + 1)
+            let answer = MokorinScript.localAnswer(to: text) ?? MokorinScript.cannotAnswerLocally(canEnableAI: isServerConfigured && !isTextConsented)
+            appendMokorin([answer, again].compactMap { $0 }.joined(separator: "\n"), origin: .fixed)
+            setPose(.calm, .nod)
+            return
+        }
+        if intent == .ready {
+            markReadyWithCurrentSelection()
+            askedSlot = nil
+            step = .review
+            appendMokorin(MokorinScript.checkInSummary(checkIn, recommendations: recommendations), origin: .fixed)
+            setPose(.happy, .nod)
+            return
+        }
+        continueCheckIn(changed: changed, userText: text)
+        MindWaveDebugLogger.log(.insight, "mokorin local step=\(step) changed=\(changed.count) next=\(askedSlot?.rawValue ?? "none")")
     }
 
     /// 候補を「提案」として選択に反映する（利用者は画面で変更できる）。何か反映したら true
@@ -538,23 +867,32 @@ final class MokorinContextViewModel: ObservableObject {
         case .tension:
             appendMokorin(MokorinScript.askTensionAgain, origin: .fixed)
         case .scene:
+            let unknownReason = tensionJustAnswered && subjectiveTension != .calm && (userText?.contains("わから") ?? false)
             appendMokorin(previous == .scene && clarifyIfUnchanged ? MokorinScript.askScene
-                                                                   : MokorinScript.askScene(after: tensionJustAnswered ? subjectiveTension : nil), origin: .fixed)
+                          : unknownReason ? MokorinScript.askSceneUnknownReason
+                          : MokorinScript.askScene(after: tensionJustAnswered ? subjectiveTension : nil), origin: .fixed)
         case .condition:
             appendMokorin(previous == .condition && clarifyIfUnchanged ? MokorinScript.askConditionAgain
-                                                                       : MokorinScript.askCondition(scene: selectedScene), origin: .fixed)
+                                                                       : MokorinScript.askCondition(topic: topic, fatigue: mentionedFatigue), origin: .fixed)
         case .review:
-            appendMokorin(MokorinScript.summary(scene: selectedScene, conditions: selectedConditions), origin: .fixed)
+            appendMokorin(MokorinScript.summary(topic: topic, conditions: selectedConditions), origin: .fixed)
         }
         let e = MokorinExpressionRules.forReply(step: step, userText: userText, conditions: selectedConditions,
                                                 tension: tensionJustAnswered ? subjectiveTension : nil)
         setPose(e.0, e.1)
     }
 
+    /// 「もう測りたい」: 未確認の項目は聞かずに、今の選択のまとめへ進む（まとめで本人が確認・変更できる）
+    private func markReadyWithCurrentSelection() {
+        hasTensionAnswer = true
+        hasSceneAnswer = true
+        hasConditionAnswer = true
+    }
+
     /// 確認段階で選択を変えたら、まとめを更新する（直前のまとめを置き換え、会話を増やしすぎない）
     private func refreshSummaryIfReviewing() {
         guard step == .review else { return }
-        let summary = MokorinScript.summary(scene: selectedScene, conditions: selectedConditions)
+        let summary = MokorinScript.summary(topic: topic, conditions: selectedConditions)
         if let last = messages.last, last.speaker == .mokorin, last.origin == .fixed, last.text.hasPrefix("教えてくれてありがとう。") {
             messages.removeLast()
         }
@@ -578,7 +916,9 @@ final class MokorinContextViewModel: ObservableObject {
             current: ContextAssistCurrentDTO(
                 scene: hasSceneAnswer ? selectedScene.rawValue : nil,
                 conditions: hasConditionAnswer ? BodyCondition.allCases.filter { selectedConditions.contains($0) }.map(\.rawValue) : [],
-                tension: subjectiveTension?.rawValue
+                tension: subjectiveTension?.rawValue,
+                checkIn: ContextAssistCheckInDTO(checkIn),
+                nextSlot: askedSlot?.rawValue
             )
         )
     }

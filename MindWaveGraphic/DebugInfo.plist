@@ -2,6 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+
+	<key>MWDevServerHost</key>
+	<string>$(MW_DEV_SERVER_HOST)</string>
+	<key>MWDevServerPort</key>
+	<string>$(MW_DEV_SERVER_PORT)</string>
+	<key>MWDevClientToken</key>
+	<string>$(MW_DEV_CLIENT_TOKEN)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>開発中の動作確認で、同じ Wi-Fi にある Mac の開発用サーバーに接続するために使用します。</string>
+
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

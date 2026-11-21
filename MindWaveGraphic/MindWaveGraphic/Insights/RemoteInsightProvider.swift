@@ -22,12 +22,26 @@ nonisolated struct RemoteInsightConfiguration: Equatable {
     /// 設定を読み込む。DEBUG ビルドでは環境変数（MW_INSIGHT_BASE_URL / MW_INSIGHT_CLIENT_TOKEN）を優先する。
     /// どちらかが欠けていれば nil（= リモート無効）。
     static func load(defaults: UserDefaults = .standard,
-                     environment: [String: String] = ProcessInfo.processInfo.environment) -> RemoteInsightConfiguration? {
+                     environment: [String: String] = ProcessInfo.processInfo.environment,
+                     info: [String: Any] = Bundle.main.infoDictionary ?? [:],
+                     isSimulator: Bool = ServerConnectionDiagnostics.isSimulator) -> RemoteInsightConfiguration? {
         var urlText = defaults.string(forKey: baseURLKey)
         var token = defaults.string(forKey: clientTokenKey)
         #if DEBUG
-        if let v = environment["MW_INSIGHT_BASE_URL"], !v.isEmpty { urlText = v }
-        if let v = environment["MW_INSIGHT_CLIENT_TOKEN"], !v.isEmpty { token = v }
+        // Debug ビルドの開発用サーバー（scripts/dev-device-setup.sh → DevServer.local.xcconfig → DebugInfo.plist）。
+        // ホーム画面から起動したとき（スキームの環境変数が渡らない）にも使う
+        if let host = info["MWDevServerHost"] as? String, !host.isEmpty, !host.hasPrefix("$(") {
+            let port = (info["MWDevServerPort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "8787"
+            urlText = "http://\(host):\(port)"
+            if let t = info["MWDevClientToken"] as? String, !t.isEmpty, !t.hasPrefix("$(") { token = t }
+        }
+        // Xcode スキームの環境変数があれば優先（シミュレーターでの確認用）。
+        // ただし実機で 127.0.0.1 / localhost を指す場合は iPhone 自身になり届かないため、開発用サーバーの設定があればそちらを使う
+        if let v = environment["MW_INSIGHT_BASE_URL"], !v.isEmpty,
+           !(urlText != nil && URL(string: v).map { ServerConnectionDiagnostics.isLoopbackUnreachable($0, isSimulator: isSimulator) } == true) {
+            urlText = v
+            if let t = environment["MW_INSIGHT_CLIENT_TOKEN"], !t.isEmpty { token = t }
+        }
         #endif
         guard let urlText, let url = URL(string: urlText), let scheme = url.scheme,
               let token, !token.isEmpty else { return nil }
