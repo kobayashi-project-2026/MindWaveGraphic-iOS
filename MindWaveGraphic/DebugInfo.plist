@@ -1,15 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  Debug ビルド専用の Info.plist 追加項目（iPhone アプリの Debug 構成の INFOPLIST_FILE だけが参照する。Release では使われない）。
-  目的: 同じ Wi-Fi の Mac で動かす開発用サーバー（server/scripts/dev-server.ts の LAN モード）へ実機から接続する。docs/DEVICE_CONNECTION.md
-  - NSAllowsArbitraryLoads は使わない（インターネットへの http は引き続き ATS が禁止する）
-  - http を許可するのはローカルネットワーク（.local・ドットなしのホスト名）と、プライベート IP の範囲だけ
-    （iOS 17 以降は IP アドレスへの接続に NSExceptionDomains での IP / CIDR 指定が必要。Apple のドキュメントによる）
-  - 通信は暗号化されないため、信頼できる Wi-Fi でのみ使う
--->
 <plist version="1.0">
 <dict>
+
 	<key>MWDevServerHost</key>
 	<string>$(MW_DEV_SERVER_HOST)</string>
 	<key>MWDevServerPort</key>
@@ -18,23 +11,24 @@
 	<string>$(MW_DEV_CLIENT_TOKEN)</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>開発中の動作確認で、同じ Wi-Fi にある Mac の開発用サーバーに接続するために使用します。</string>
+
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
-			<key>192.168.0.0/16</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<true/>
-			</dict>
 			<key>10.0.0.0/8</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
 			</dict>
 			<key>172.16.0.0/12</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+			<key>192.168.0.0/16</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>

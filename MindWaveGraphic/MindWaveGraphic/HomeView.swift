@@ -235,22 +235,26 @@ struct HomeView: View {
             let dashH    = availH * 0.21
 
             ZStack(alignment: .top) {
-                // 1. 宇宙背景
-                Color(red: 0, green: 0.005, blue: 0.038).ignoresSafeArea()
-
-                // 2. 星グラフィック (主役)
-                GraphicHostView(input: displayInput)
-                    .environment(\.graphicDataStatus, graphicDataStatus)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: graphicH)
-                    .ignoresSafeArea(edges: .top)
-                    .allowsHitTesting(false)
-
-                // 3. コックピット窓枠 (ほぼ黒)
-                CockpitFrameCanvas(scoreIntensity: scoreIntensity, buttonPulse: buttonPulse)
-                    .frame(height: graphicH)
-                    .ignoresSafeArea(edges: .top)
-                    .allowsHitTesting(false)
+                // MARK: - 右端からひょこっと横スライドで登場するもこりんと吹き出し
+                VStack {
+                    Spacer()
+                    MokorinCockpitPopupView(
+                        isHyperTension: isHyperTensionState,
+                        score: displayInput.score,
+                        onTapNavigateToGuide: {
+                            selectedTab = 1 // 吹き出しタップで「改善」タブへ移動
+                        }
+                    )
+                    .padding(.bottom, 185) // 計器パネルと「STATUS : TENSION」のすぐ上に綺麗に収まる高さ
+                }
+                .zIndex(20)
+                            // 1〜3. 新コックピット＆宇宙シーン（星空・隕石・雷・コックピット・もこりん椅子・ステータス表示）
+                            CockpitSpaceSceneView(score: displayInput.score)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: graphicH)
+                                .clipped()
+                                .ignoresSafeArea(edges: .top)
+                                .allowsHitTesting(false)
 
                 // 4. ヘッダー上端グラデーション (可読性確保)
                 VStack(spacing: 0) {

@@ -54,10 +54,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		4D5EC0DE0000000000000001 /* DevServer.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = DevServer.xcconfig; sourceTree = "<group>"; };
 		43BF90722FD280F500607844 /* MindWaveGraphic.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MindWaveGraphic.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		43BF91282FD8A08D00607844 /* MindWaveGraphicWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MindWaveGraphicWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		43BF912D2FD8A08D00607844 /* MindWaveGraphicWatch Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MindWaveGraphicWatch Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		4D5EC0DE0000000000000001 /* DevServer.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = DevServer.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
