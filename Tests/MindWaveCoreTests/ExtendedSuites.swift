@@ -12,5 +12,6 @@ func runExtendedSuites() async {
     await MokorinVoiceTests.run()
     PrototypeScoreTests.run()
     MokorinCheckInTests.run()
+    await MokorinCheckInTests.runStep35Async()
     await MokorinFlowTests.run()
 }

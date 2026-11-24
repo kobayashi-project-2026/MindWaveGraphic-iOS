@@ -30,7 +30,7 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     @Published var latestWatchHeartRate: Double?      = nil
     /// 最新心拍サンプルのWatch側記録時刻
     @Published var latestWatchHeartRateDate: Date?    = nil
-    /// 受信したメッセージ総数（全チャネル合計）
+    /// 受理した新規心拍数（全チャネル合計、重複配送は除外）
     @Published var watchMessageCount: Int             = 0
     /// WCSession接続状態ラベル
     @Published var watchConnectionStatusLabel: String = "未接続"
@@ -194,11 +194,17 @@ extension WatchConnectivityManager: WCSessionDelegate {
 
     /// Watch から届いたメッセージを3段階で検証し、心拍数をコールバック経由でViewModelへ渡す。
     /// 検証失敗の種別（typeキーなし・heartRateキーなし・timestamp変換失敗）をログで区別する。
-    /// 範囲外の値は既存の有効範囲を変更せずログ警告のみ出す。
+    /// 値・時刻を検証し、3チャネルの重複と順序逆転を除外する。
     private nonisolated func handleIncomingMessage(
         _ message: [String: Any],
         channel: String
     ) {
+        // 既存decode内のInt変換へ巨大なschemaVersionを渡さない。正常なv0/v1契約は維持する。
+        if let version = message[WatchHeartRatePayload.Key.schemaVersion] as? Double,
+           !version.isFinite || version < Double(Int.min) || version >= Double(Int.max) {
+            MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=invalid schemaVersion")
+            return
+        }
         // Contracts/WatchPayloadContract.swift の契約で検証する（旧Watchアプリの schema v0 も受け付ける）
         let payload: WatchHeartRatePayload
         switch WatchHeartRatePayload.decode(message) {
@@ -221,19 +227,22 @@ extension WatchConnectivityManager: WCSessionDelegate {
         let hr = payload.heartRateBpm
         MindWaveDebugLogger.log(.contract, "watch payload decoded channel=\(channel) schemaVersion=\(payload.schemaVersion)")
 
-        // 範囲ログ（既存の有効範囲は変更しない）
-        if hr <= 0 {
-            MindWaveDebugLogger.log(.error, "decode warning channel=\(channel) bpm=\(hr) value ≤0")
-        } else if hr > 250 {
-            MindWaveDebugLogger.log(.error, "decode warning channel=\(channel) bpm=\(hr) unrealistic value >250")
-        }
-
         let sampleDate = payload.measuredAt
+        guard hr.isFinite, (35...220).contains(hr),
+              sampleDate.timeIntervalSince1970.isFinite,
+              sampleDate.timeIntervalSince1970 > 0, sampleDate <= Date() else {
+            MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=invalid HR or measurement timestamp")
+            return
+        }
         let summary    = String(format: "%.0f bpm", hr)
         let debugText  = String(format: "%.0f bpm | %@ | %@", hr, channel, formatTime(sampleDate))
 
         // MainActor でUIプロパティを更新し、ViewModelのコールバックを呼ぶ
         Task { @MainActor [self] in
+            guard latestWatchHeartRateDate == nil || sampleDate > latestWatchHeartRateDate! else {
+                MindWaveDebugLogger.log(.watch, "sample skipped channel=\(channel) reason=duplicate or older timestamp")
+                return
+            }
             latestWatchHeartRate     = hr
             latestWatchHeartRateDate = sampleDate
             watchMessageCount       += 1

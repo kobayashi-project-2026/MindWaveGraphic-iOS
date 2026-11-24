@@ -151,6 +151,74 @@ final class HealthKitManager {
         print("[HealthKit] 権限リクエスト完了")
     }
 
+    // MARK: - 個人別スコア用の実測心拍
+
+    /// 最新の実測1件。平均への代替や取得時刻による測定時刻の上書きはしない。
+    /// 鮮度の最終判定は呼び出し側で行う。
+    func fetchCurrentHeartRateSample() async -> HealthMetricFetchResult {
+        let now = Date()
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        guard Self.isAvailable,
+              let sample = await fetchLatestSample(type: heartRateType, unit: unit),
+              !sample.isUserEntered,
+              sample.value.isFinite, (35...220).contains(sample.value),
+              sample.sampleDate.timeIntervalSince1970.isFinite,
+              sample.endDate.timeIntervalSince1970.isFinite,
+              sample.sampleDate <= sample.endDate, sample.endDate <= now else {
+            return HealthMetricFetchResult(value: nil, source: "none", message: "有効な心拍実測なし",
+                sampleDate: nil, sampleIdentifier: nil, kind: .unavailable)
+        }
+        return HealthMetricFetchResult(value: sample.value, source: "最新実測1件",
+            message: "最新の心拍実測", sampleDate: sample.sampleDate,
+            sampleIdentifier: sample.identifier, sampleEndDate: sample.endDate,
+            sourceName: sample.sourceName, sourceBundleIdentifier: sample.bundleID,
+            kind: .discreteSample)
+    }
+
+    /// 過去30秒のApple Watch実測心拍を古い順に返す。各UUID・実測開始/終了時刻を保持する。
+    /// 名前だけではWatch由来と判定せず、機種情報を確認できないサンプルは除外する。
+    func fetchRecentWatchHeartRateSamples(now: Date = Date()) async -> [HealthMetricFetchResult] {
+        guard Self.isAvailable, now.timeIntervalSince1970.isFinite else { return [] }
+        let start = now.addingTimeInterval(-30)
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: now,
+            options: [.strictStartDate, .strictEndDate])
+        let unit = HKUnit.count().unitDivided(by: .minute())
+        let store = self.store
+        return await withCheckedContinuation { continuation in
+            let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: true)
+            let query = HKSampleQuery(sampleType: heartRateType, predicate: predicate,
+                limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, samples, error in
+                guard error == nil else {
+                    MindWaveDebugLogger.log(.error, "recent Watch HR query failed")
+                    continuation.resume(returning: [])
+                    return
+                }
+                var seen = Set<UUID>()
+                let results = (samples as? [HKQuantitySample] ?? []).compactMap { sample -> HealthMetricFetchResult? in
+                    let productType = sample.sourceRevision.productType ?? ""
+                    let deviceIsWatch = sample.device?.manufacturer == "Apple Inc." &&
+                        (sample.device?.model?.hasPrefix("Watch") == true)
+                    let value = sample.quantity.doubleValue(for: unit)
+                    guard productType.hasPrefix("Watch") || deviceIsWatch,
+                          sample.metadata?[HKMetadataKeyWasUserEntered] as? Bool != true,
+                          value.isFinite, (35...220).contains(value),
+                          sample.startDate.timeIntervalSince1970.isFinite,
+                          sample.endDate.timeIntervalSince1970.isFinite,
+                          sample.startDate >= start, sample.startDate <= sample.endDate,
+                          sample.endDate <= now, seen.insert(sample.uuid).inserted else { return nil }
+                    let source = sample.sourceRevision.source
+                    return HealthMetricFetchResult(value: value, source: "Watch実測・直近30秒",
+                        message: "Watch心拍実測", sampleDate: sample.startDate,
+                        sampleIdentifier: sample.uuid.uuidString, sampleEndDate: sample.endDate,
+                        sourceName: source.name, sourceBundleIdentifier: source.bundleIdentifier,
+                        kind: .discreteSample)
+                }
+                continuation.resume(returning: results)
+            }
+            store.execute(query)
+        }
+    }
+
     // MARK: - Best Current Heart Rate（段階的フォールバック）
 
     /// 最善の現在心拍数を取得する。
@@ -260,7 +328,7 @@ final class HealthKitManager {
     /// HRVとheartRateの両方で使用する共通メソッド。
     private func fetchLatestSample(
         type: HKQuantityType, unit: HKUnit
-    ) async -> (value: Double, sampleDate: Date, endDate: Date, identifier: String, sourceName: String, bundleID: String)? {
+    ) async -> (value: Double, sampleDate: Date, endDate: Date, identifier: String, sourceName: String, bundleID: String, isUserEntered: Bool)? {
         let store = self.store
         return await withCheckedContinuation { continuation in
             // startDate降順：最新のサンプルが先頭になる。HRV SDNNのendDateでも同様に最新が取れる。
@@ -278,7 +346,8 @@ final class HealthKitManager {
                 let value  = sample.quantity.doubleValue(for: unit)
                 let id     = sample.uuid.uuidString
                 let src    = sample.sourceRevision.source
-                continuation.resume(returning: (value, sample.startDate, sample.endDate, id, src.name, src.bundleIdentifier))
+                let isUserEntered = sample.metadata?[HKMetadataKeyWasUserEntered] as? Bool == true
+                continuation.resume(returning: (value, sample.startDate, sample.endDate, id, src.name, src.bundleIdentifier, isUserEntered))
             }
             store.execute(query)
         }

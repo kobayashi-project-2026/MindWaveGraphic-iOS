@@ -253,14 +253,16 @@ enum PipelineTests {
     }
 
     static func viewModel() {
-        T.test("起動直後は Mock（is_mock=true）でグラフィックを表示") {
+        T.test("起動直後は実測待機。Mockや未回答の緊張推定を自動表示しない") {
             let vm = makeVM("launch")
-            T.expectEqual(vm.activeDataSource, .mock)
-            T.expect(vm.lastAnalysisResult?.metadata.isMock == true, "mock analysis")
-            T.expect(vm.latestAnalysisContract?.isMock == true, "contract is_mock")
+            T.expectEqual(vm.activeDataSource, .unavailable)
+            T.expect(!vm.isMockMode && !vm.isUsingDemoData, "デモは明示操作で開始")
+            T.expect(vm.lastAnalysisResult == nil && vm.latestAnalysisContract == nil, "本人評価の入力前は解析なし")
+            T.expectEqual(vm.graphicInput, .neutral)
         }
         T.test("Mock ON 中の Watch 受信はグラフィックを変えないが診断値は更新") {
             let vm = makeVM("mockwatch")
+            vm.setMockMode(true)
             let before = vm.graphicInput
             vm.applyWatchHeartRate(110, sampleDate: Date())
             T.expectEqual(vm.graphicInput, before)
@@ -274,23 +276,35 @@ enum PipelineTests {
             T.expect(vm.latestAnalysisContract == nil, "no analysis")
             T.expect(vm.snapshotHeartRate == nil, "no snapshot hr")
         }
-        T.test("Mock OFF・Watch 受信 → 分析 → グラフィック → JSON 契約まで一貫") {
+        T.test("本人評価なしのWatch受信では旧式の38を推定結果として出さない") {
+            let vm = makeVM("unanswered-watch")
+            vm.applyWatchHeartRate(84, sampleDate: Date())
+            T.expectEqual(vm.latestWatchHeartRate, 84, "実測HRは受信")
+            T.expectEqual(vm.graphicInput, .neutral)
+            T.expect(vm.latestAnalysisContract == nil && vm.snapshotHeartRate == nil, "未回答は推定なし")
+        }
+        T.test("本人評価 → Watch受信 → 急性スコア → グラフィック → JSON契約が一貫") {
             let vm = makeVM("watch")
-            vm.setMockMode(false)
-            let t = Date()
-            vm.applyWatchHeartRate(84, sampleDate: t)
+            defer { vm.finishAcuteSession() }
+            let start = Date().addingTimeInterval(-29)
+            T.expect(vm.beginAcuteSession(tensionRating: 4, exercisedRecently: false, now: start), "本人評価で開始")
+            for offset in [0.0, 10, 20] {
+                vm.applyWatchHeartRate(84, sampleDate: start.addingTimeInterval(offset))
+            }
+            vm.refreshAcuteScore(now: start.addingTimeInterval(30))
             T.expectEqual(vm.activeDataSource, .watchLive)
-            T.expectEqual(vm.graphicInput.score, 38)   // HRV なし → 既存計算式の中立値
-            T.expectEqual(vm.graphicInput.confidence, 0.5)
+            T.expectEqual(vm.graphicInput.score, 40)
+            T.expectEqual(vm.graphicInput.confidence, 0, "未検証の推定に精度を付けない")
             guard let dto = vm.latestAnalysisContract else { return T.fail("no contract") }
             try dto.validate()
             T.expectEqual(dto.source, .watchLive)
             T.expect(!dto.isMock, "real")
-            T.expectEqual(dto.inputs.hrvStatus, "missing")
-            T.expectEqual(dto.inputs.baselineStatus, "provisional")
+            T.expectEqual(dto.analyzerId, MWAcuteTensionEngine.modelVersion)
+            T.expectEqual(dto.tensionScore, vm.graphicInput.score)
+            T.expectEqual(dto.inputs.hrvStatus, "not_applicable")
+            T.expectEqual(dto.inputs.baselineStatus, "personal")
             T.expectEqual(dto.inputs.heartRateBpm, 84)
             T.expectEqual(vm.snapshotHeartRate, 84)
-            T.expectEqual(vm.baseline.collectedHeartRateCount, 1)
         }
         T.test("Watch 重複・逆順パケットは無視（3チャネル重複対策の維持）") {
             let vm = makeVM("dup")
@@ -303,12 +317,18 @@ enum PipelineTests {
         }
         T.test("ガイド記録: 実測は source 付き・Mock は isMockData で学習対象外") {
             let vm = makeVM("guide")
+            defer { vm.finishAcuteSession() }
+            vm.setMockMode(true)
             let mockSnap = GuideSnapshot(timestamp: Date(), score: vm.graphicInput.score, confidence: vm.graphicInput.confidence,
                                          state: vm.graphicInput.state, heartRate: vm.snapshotHeartRate, hrv: vm.snapshotHRV,
                                          isMockData: vm.isMockMode, heartRateSampleDate: nil, hrvSampleDate: nil,
                                          dataSource: vm.activeDataSource)
-            vm.setMockMode(false)
-            vm.applyWatchHeartRate(90, sampleDate: Date())
+            let start = Date().addingTimeInterval(-29)
+            T.expect(vm.beginAcuteSession(tensionRating: 4, exercisedRecently: false, now: start), "実測セッション開始")
+            for offset in [0.0, 10, 20] {
+                vm.applyWatchHeartRate(90, sampleDate: start.addingTimeInterval(offset))
+            }
+            vm.refreshAcuteScore(now: start.addingTimeInterval(30))
             let realSnap = GuideSnapshot(timestamp: Date(), score: vm.graphicInput.score, confidence: vm.graphicInput.confidence,
                                          state: vm.graphicInput.state, heartRate: vm.snapshotHeartRate, hrv: vm.snapshotHRV,
                                          isMockData: vm.isMockMode, heartRateSampleDate: nil, hrvSampleDate: nil,

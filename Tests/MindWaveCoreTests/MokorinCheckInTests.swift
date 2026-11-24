@@ -81,7 +81,7 @@ enum MokorinCheckInTests {
                 T.expect(!asked.contains(next), "同じ質問を繰り返さない: \(next)")
                 asked.append(next); c.asked.append(next)
                 switch next {
-                case .tension: c.apply(CheckInExtractor.extract("70", asked: .tension), at: now)
+                case .tension: c.applyAcuteTension(.moderate, at: now)
                 case .support: c.apply(CheckInExtractor.extract("落ち着きたい", asked: .support), at: now)
                 default: c.apply(CheckInExtractor.extract("わからない", asked: next), at: now)
                 }
@@ -101,6 +101,81 @@ enum MokorinCheckInTests {
             let ctx = c.measurementContext(base: .default)
             T.expectEqual(ctx.scene, .interview)
             T.expectEqual(ctx.conditions, [.running, .sleepLack])
+        }
+
+        T.suite("STEP 3.5 / 急性スコアの本人回答")
+        T.test("3択は指定文言の順番で、Q0を整数へ丸めず保持する") {
+            T.expectEqual(CheckInSlot.tension.question, "今、どのくらい緊張やストレスを感じている？")
+            T.expectEqual(CheckInSlot.tension.question(variant: 5), CheckInSlot.tension.question)
+            T.expectEqual(CheckInSlot.tension.options.map(\.label), ["少し感じる", "ある程度感じる", "とても強く感じる"])
+            T.expectEqual(AcuteTensionChoice.allCases.map(\.q0), [100.0 / 60.0, 5.0, 500.0 / 60.0])
+            for choice in AcuteTensionChoice.allCases {
+                var c = MokorinCheckIn()
+                c.applyAcuteTension(choice, at: now)
+                T.expectEqual(c.acuteQ0, choice.q0)
+                T.expect(c.tension == nil, "旧0〜100回答を作らない")
+            }
+        }
+        T.test("STEP 3の感情・旧数値・AIの推定からQ0を作らず、質問上限後でも3.5を先に尋ねる") {
+            for feeling in FeelingKind.allCases {
+                var c = MokorinCheckIn()
+                var e = CheckInExtraction()
+                e.emotion = feeling
+                e.tension = 75
+                c.apply(e, source: .inferred, at: now)
+                c.asked = Array(repeating: .cause, count: MokorinCheckIn.questionBudget)
+                T.expect(c.acuteQ0 == nil, "気持ち・旧数値から推測しない")
+                T.expectEqual(c.nextSlot(), .tension, "3.5を飛ばさない")
+            }
+        }
+        T.test("STEP 3.5は明示した回答だけを使い、推定由来の値は不採用") {
+            var c = MokorinCheckIn()
+            c.acuteTension = .init(value: .strong, source: .inferred, updatedAt: now, confidence: 1)
+            T.expect(c.acuteQ0 == nil && !c.isKnown(.tension), "inferredは本人の回答ではない")
+            c.applyAcuteTension(.slight, at: now)
+            T.expectEqual(c.acuteQ0, 100.0 / 60.0)
+            c.applyAcuteTension(.strong, at: now)
+            T.expectEqual(c.acuteQ0, 500.0 / 60.0, "訂正は小数のまま上書き")
+            var skip = CheckInExtraction()
+            skip.declined = [.tension]
+            c.apply(skip, at: now)
+            T.expect(c.acuteQ0 == nil && c.isSettled(.tension), "明示スキップは欠損のまま")
+        }
+        T.test("STEP 3・4・5の質問文と選択肢は変えない") {
+            T.expectEqual(CheckInSlot.emotion.question, "今の気持ちに一番近いものはどれ？")
+            T.expectEqual(CheckInSlot.cause.question, "今、一番気になっていることはある？")
+            T.expectEqual(CheckInSlot.body.question, "今、体に何か変化はある？いくつでも教えてね。")
+            T.expectEqual(CheckInSlot.emotion.options, FeelingKind.allCases.map { .emotion($0) })
+            T.expectEqual(CheckInSlot.cause.options, WorryCause.allCases.map { .cause($0) })
+            T.expectEqual(CheckInSlot.body.options, BodySignal.allCases.map { .body($0) })
+        }
+        T.test("画面の回答順はSTEP3→3.5→4。戻る・やり直すとQ0も取り消す") {
+            let vm = localStep35VM("order")
+            answerThroughEmotion(vm)
+            T.expectEqual(vm.askedSlot, .tension)
+            T.expectEqual(vm.quickReplies.map(\.label), ["少し感じる", "ある程度感じる", "とても強く感じる"])
+            vm.answer(options: [.acuteTension(.strong)])
+            T.expectEqual(vm.checkIn.acuteQ0, 500.0 / 60.0)
+            T.expectEqual(vm.sessionMemory.checkIn?.acuteQ0, 500.0 / 60.0)
+            T.expectEqual(vm.askedSlot, .cause)
+            vm.goBack()
+            T.expect(vm.checkIn.acuteQ0 == nil, "戻るで取消")
+            T.expectEqual(vm.askedSlot, .tension)
+            vm.answer(options: [.acuteTension(.slight)])
+            T.expectEqual(vm.checkIn.acuteQ0, 100.0 / 60.0)
+            vm.restart()
+            T.expect(vm.checkIn.acuteQ0 == nil, "やり直しで取消")
+        }
+        T.test("3.5以外の画面や複数選択からの回答はQ0を変更しない") {
+            let vm = localStep35VM("stale-options")
+            vm.answer(options: [.acuteTension(.strong)])
+            T.expect(vm.checkIn.acuteQ0 == nil, "別の質問では受け付けない")
+            answerThroughEmotion(vm)
+            vm.answer(options: [.acuteTension(.slight), .acuteTension(.strong)])
+            T.expect(vm.checkIn.acuteQ0 == nil, "単一選択だけ")
+            vm.skipQuestion()
+            T.expect(vm.checkIn.acuteQ0 == nil, "スキップは欠損")
+            T.expect(vm.askedSlot != .tension, "明示スキップなら次へ")
         }
 
         T.suite("もこりん / 改善方法の推薦（パターン A〜E）")
@@ -146,5 +221,63 @@ enum MokorinCheckInTests {
             let later = MokorinMethodAdvisor.recommend(checkIn([("明日発表があって不安、整理したい", nil)]))
             T.expectEqual(later.first?.suggestedSeconds, 180)
         }
+    }
+
+    static func runStep35Async() async {
+        T.suite("STEP 3.5 / 文字・音声・AI経路")
+        await T.test("数値・曖昧な緊張表現・開始希望でQ0を作らず、完全一致の本人回答だけを採用する") {
+            let vm = localStep35VM("text")
+            answerThroughEmotion(vm)
+            for text in ["75", "すごく緊張してる", "測定したい"] {
+                await vm.submit(text)
+                T.expect(vm.checkIn.acuteQ0 == nil, "未回答: \(text)")
+                T.expectEqual(vm.askedSlot, .tension, "3択または明示スキップを待つ")
+            }
+            await vm.submit(" ある程度感じる ")
+            T.expectEqual(vm.checkIn.acuteQ0, 5.0)
+            T.expectEqual(vm.askedSlot, .cause)
+        }
+        await T.test("AIがSTEP4の質問・推定緊張度・readyを返しても、3.5だけを表示しQ0を推測しない") {
+            let consent = ChatTextConsentStore(defaults: T.freshDefaults("step35-remote"))
+            consent.setConsented(true)
+            let configuration = RemoteInsightConfiguration(baseURL: URL(string: "https://example.invalid")!, clientToken: "test")
+            let client = Step35RemoteClient()
+            let vm = MokorinContextViewModel(consentStore: consent, configurationProvider: { configuration }, clientFactory: { _ in client })
+            vm.answer(options: [.condition(.energetic)])
+            vm.answer(options: [.situation(.presentation)])
+            vm.answer(options: [.timing(.soon)])
+            T.expectEqual(vm.askedSlot, .emotion)
+            await vm.submit("不安です")
+            T.expectEqual(vm.askedSlot, .tension)
+            T.expectEqual(vm.currentTurn?.text, CheckInSlot.tension.question, "AIのSTEP4質問を同時表示しない")
+            T.expectEqual(vm.latestMokorinMessage?.origin, .fixed)
+            T.expect(vm.checkIn.acuteQ0 == nil && !vm.checkIn.declined.contains(.tension), "AIの数値・skipを採用しない")
+            await vm.submit("とても強く感じる")
+            T.expectEqual(vm.checkIn.acuteQ0, 500.0 / 60.0, "本人の完全一致ラベルを小数で保存")
+            T.expectEqual(vm.askedSlot, .cause)
+        }
+    }
+
+    private struct Step35RemoteClient: ContextAssistClient {
+        func send(_ request: ContextAssistRequestDTO) async throws -> ContextAssistResponseDTO {
+            ContextAssistResponseDTO(schemaVersion: 1, requestId: request.requestId, conversationId: request.conversationId,
+                provider: "openai", model: "test", generatedAt: Date(),
+                result: ContextAssistResultDTO(reply: "今、一番気になっていることはある？", sceneCandidate: nil,
+                    conditionCandidates: [], needsClarification: true, clarificationQuestion: "体の変化もある？",
+                    userIntent: "ready", checkIn: ContextAssistCheckInResultDTO(emotion: "anxious", tensionLevel: 100, declined: ["tension"])),
+                usage: nil)
+        }
+    }
+
+    static func localStep35VM(_ name: String) -> MokorinContextViewModel {
+        MokorinContextViewModel(consentStore: ChatTextConsentStore(defaults: T.freshDefaults("step35-" + name)),
+                                configurationProvider: { nil })
+    }
+
+    static func answerThroughEmotion(_ vm: MokorinContextViewModel) {
+        vm.answer(options: [.condition(.energetic)])
+        vm.answer(options: [.situation(.presentation)])
+        vm.answer(options: [.timing(.soon)])
+        vm.answer(options: [.emotion(.anxious)])
     }
 }

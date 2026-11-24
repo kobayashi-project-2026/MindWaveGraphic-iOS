@@ -22,6 +22,8 @@ struct HomeView: View {
     @Binding var selectedTab: Int
 
     @State private var showStatusDetail     = false
+    @State private var showAcuteStart       = false
+    @State private var openAcuteCheckInAfterDismiss = false
     /// 緊張の高まりの知らせ（状態が高い緊張に変わったときだけ数秒表示）
     @State private var buttonPulse: Bool    = false
     #if DEBUG
@@ -36,81 +38,21 @@ struct HomeView: View {
 
     // MARK: - Computed display properties
 
-    // 実際のPULSE表示に使う心拍数値（Simulator demo override → DEMO_HEART_RATE → 実データ）
-    private var heartRateNumeric: Double {
-        #if DEBUG && targetEnvironment(simulator)
-        if simDemoOverrideEnabled { return simDemoBPM }
-        if let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
-           let val = Double(str) { return val }
-        #endif
-        if let w = viewModel.latestWatchHeartRate { return w }
-        if viewModel.didFetchHeartRate { return viewModel.currentHeartRate }
-        return 0
-    }
-
-    // 心拍数から表示色スコアの下限を決定（表示のみ。計算値は変えない）
-    private var heartRateVisualFloor: Double {
-        let hr = heartRateNumeric
-        if hr >= 130 { return 85 }
-        if hr >= 115 { return 72 }
-        if hr >= 100 { return 55 }
-        return 0
-    }
-
-    // MARK: - 試作スコア（主観評価＋HR・SDNN）
-
-    /// 会話で聞いた緊張の強さ（S0）
-    private var subjectiveS0: Int? { flowState.mokorinMemory?.checkIn?.tension?.value }
-
-    /// 今の計測値（ViewModel が現在値として扱う値だけ。値がなければ nil で、作らない）
-    private var currentPrototypeReadings: (hr: TimedReading?, sdnn: TimedReading?) {
-        let hr = viewModel.snapshotHeartRate.map {
-            TimedReading(value: $0, measuredAt: viewModel.latestWatchHeartRateDate ?? viewModel.latestHeartRateSampleDate ?? Date())
-        }
-        let sdnn = viewModel.snapshotHRV.map { TimedReading(value: $0, measuredAt: viewModel.latestHRVSampleDate ?? Date()) }
-        return (hr, sdnn)
-    }
-
-    /// 試作スコア（S0 があるときだけ）。グラフィックと説明に使う
-    private var prototypeLive: PrototypeTensionResult? {
-        guard let s0 = subjectiveS0 else { return nil }
-        let base = flowState.prototypeBaseline
-        let cur = currentPrototypeReadings
-        return PrototypeTensionScore.calculate(PrototypeTensionInput(
-            subjectiveBaseline: Double(s0), baselineHR: base?.hr, currentHR: cur.hr,
-            baselineSDNN: base?.sdnn, currentSDNN: cur.sdnn, now: Date()))
-    }
-
-    /// S0 を聞いた会話のあと、最初の計測値を基準（HR0・SDNN0）として残す
-    private func captureBaselineIfNeeded() {
-        guard subjectiveS0 != nil, let memory = flowState.mokorinMemory else { return }
-        if flowState.prototypeBaseline?.capturedFor == memory.capturedAt { return }
-        let cur = currentPrototypeReadings
-        guard cur.hr != nil || cur.sdnn != nil else { return }
-        flowState.prototypeBaseline = PrototypeBaseline(hr: cur.hr, sdnn: cur.sdnn, capturedFor: memory.capturedAt)
-    }
-
-    // 表示用 GraphicInput（Simulator demo override → 試作スコア → 心拍フロア補正）
+    // 実測スコアはViewModelの急性スコアをそのまま渡す。
+    // 旧HR・SDNN式や心拍による表示下限で上書きしない。
     private var displayInput: GraphicInput {
         let base = viewModel.graphicInput
         #if DEBUG && targetEnvironment(simulator)
-        if simDemoOverrideEnabled {
-            let corrected = max(simDemoScore, heartRateVisualFloor)
-            return GraphicInput(score: corrected, confidence: base.confidence,
-                                state: MindState.from(score: corrected))
+        if viewModel.isMockMode, simDemoOverrideEnabled {
+            let demoScore = min(100, max(0, simDemoScore))
+            return GraphicInput(score: demoScore, confidence: base.confidence,
+                                state: MindState.from(score: demoScore))
         }
         #endif
-        // 会話で緊張の強さ（S0）を聞いていれば、試作スコアでグラフィックを動かす（計算はアプリ内で決定的に行う）
-        if let s = prototypeLive?.score {
-            return GraphicInput(score: s, confidence: base.confidence, state: MindState.from(score: s))
-        }
-        let correctedScore = max(base.score, heartRateVisualFloor)
-        guard correctedScore > base.score else { return base }
-        return GraphicInput(score: correctedScore, confidence: base.confidence, state: base.state)
+        return base
     }
 
-    // 過緊張状態かどうか（コックピットの赤アラート閾値 scoreIntensity > 0.66 と連動）
-    /// 実測値のときだけ（未計測・デモ値では出さない。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ値でも出す）
+    // 表示上のスコア帯。心理状態の診断や検知には使わない。
     private var isHyperTensionState: Bool {
         guard displayInput.score >= 66.0, hasDisplayData else { return false }
         #if DEBUG
@@ -119,32 +61,22 @@ struct HomeView: View {
         return !viewModel.isMockMode
     }
 
-    private var hasDisplayData: Bool { viewModel.didFetchHeartRate || viewModel.didFetchHRV }
+    private var hasDisplayData: Bool { viewModel.isMockMode || viewModel.acuteResult != nil }
 
     /// 現在の状態のカード（2026-11-11 改修: 状態・大きな数値・データの種類を一目で）
     private var statusHero: some View {
         let score = Int(displayInput.score.rounded())
-        let label: String = {
-            switch displayState {
-            case .underAroused: return "落ち着いている"
-            case .optimalTension: return "適度な緊張"
-            case .overTense: return "緊張が高め"
-            }
-        }()
+        let label = viewModel.isMockMode ? "デモ表示" : "試作・検証中"
         let source: (text: String, color: Color) = {
-            if let p = prototypeLive { return ("試作スコア・" + (p.status == .subjectiveOnly ? "本人の評価のみ" : p.status == .complete ? "評価＋心拍・SDNN" : "評価＋一部の生体情報"), .cyan) }
-            if !hasDisplayData { return ("未計測", Color.white.opacity(0.5)) }
-            return viewModel.isMockMode ? ("デモ値", .orange) : ("実測", .green)
+            if viewModel.isMockMode { return ("デモ値", .orange) }
+            if let result = viewModel.acuteResult { return (acuteStatusText(result.status), .cyan) }
+            return ("未計測", Color.white.opacity(0.5))
         }()
-        let hasValue = hasDisplayData || prototypeLive != nil
-        // 全体UI 8 ページ: もこりんが今の評価を伝える（計測データがあるときは PR #5 のポップアップが出るため、ここには出さない）
+        let hasValue = hasDisplayData
+        // 値から心理状態を断定せず、本人の感じ方を促す。
         let mokorinLine: String = {
-            guard hasValue else { return "計測すると様子が分かるよ" }
-            switch displayState {
-            case .underAroused: return "落ち着いているね"
-            case .optimalTension: return "いい集中だね"
-            case .overTense: return "「改善」で一緒に整えよう"
-            }
+            guard hasValue else { return "回答を確認して計測を始めよう" }
+            return "今の感じ方も大切にしよう"
         }()
         return HStack(alignment: .center, spacing: 8) {
             if !edgeGuideActive, GraphicStyle.current != .haruka {
@@ -159,13 +91,13 @@ struct HomeView: View {
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.black.opacity(0.45))
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(accentColor.opacity(0.35), lineWidth: 0.8)))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("今の状態 \(hasValue ? "\(score) \(label)" : "計測前")。\(source.text)\(edgeGuideActive ? "" : "。もこりん：\(mokorinLine)")")
+        .accessibilityLabel("急性緊張スコア \(hasValue ? "\(score) \(label)" : "計測前")。\(source.text)\(edgeGuideActive ? "" : "。もこりん：\(mokorinLine)")")
         .accessibilityIdentifier("home_status_hero")
     }
 
     private func statusHeroText(score: Int, label: String, source: (text: String, color: Color), hasValue: Bool, mokorinLine: String?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("今の状態")
+            Text("急性緊張スコア")
                 .font(.system(size: 10, weight: .medium)).foregroundStyle(.white.opacity(0.55))
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(hasValue ? "\(score)" : "--")
@@ -191,23 +123,21 @@ struct HomeView: View {
 
     /// グラフィックに渡す値の出どころ（未計測は待機の表示にする。GraphicInput は変えない）
     private var graphicDataStatus: GraphicDataStatus {
-        #if DEBUG && targetEnvironment(simulator)
-        if simDemoOverrideEnabled { return .demo }
-        #endif
-        if prototypeLive != nil { return .prototype }
-        if !hasDisplayData { return .unmeasured }
-        return viewModel.isMockMode ? .demo : .measured
+        if viewModel.isMockMode { return .demo }
+        if viewModel.acuteResult != nil { return .prototype }
+        return .unmeasured
     }
 
     /// 表示中のスコアから決めた状態（グラフィックの色と一致させる）
     private var displayState: MindState { MindState.from(score: displayInput.score) }
 
-    /// もこりんのポップアップを出すか（計測データがあるときだけ。DEBUG のシミュレーター検証では MW_EDGE_GUIDE_DEMO=1 でデモ表示でも出す）
+    /// 旧ポップアップは明示的なMock検証に限定する。
     private var edgeGuideActive: Bool {
         #if DEBUG
-        if ProcessInfo.processInfo.environment["MW_EDGE_GUIDE_DEMO"] == "1" { return true }
+        if viewModel.isMockMode, ProcessInfo.processInfo.environment["MW_EDGE_GUIDE_DEMO"] == "1" { return true }
         #endif
-        return hasDisplayData
+        // 旧ポップアップの確定的な状態文言は実測の試作スコアに適用しない。
+        return false
     }
 
     private var scoreIntensity: Double { min(max(displayInput.score / 100.0, 0), 1) }
@@ -293,12 +223,24 @@ struct HomeView: View {
                 // 6. ヘッダー ＋ 過緊張時の上部通知バナー（PR #5）＋ 改善途中（全体UI 24〜25 ページ）。医学的な警告ではない
                 VStack(spacing: 10) {
                     headerBar
-                    HyperTensionTopBanner(isVisible: isHyperTensionState) {
-                        withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
-                            selectedTab = 1
+                    if viewModel.isMockMode {
+                        HyperTensionTopBanner(isVisible: isHyperTensionState) {
+                            withAnimation(.spring(response: 0.26, dampingFraction: 0.64)) {
+                                selectedTab = 1
+                            }
                         }
+                        .accessibilityIdentifier("tension_banner")
+                    } else if isHyperTensionState {
+                        Button { selectedTab = 1 } label: {
+                            Label("スコアは参考値です。「整える」を開く", systemImage: "wind")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                                .background(Capsule().fill(Color.black.opacity(0.7)))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("tension_banner")
                     }
-                    .accessibilityIdentifier("tension_banner")
                     if let p = flowState.pendingImprovement {
                         Button { selectedTab = 1 } label: {
                             Text("改善途中（\(p.exercise.title)・残り\(p.remainingSeconds / 60):\(String(format: "%02d", p.remainingSeconds % 60))）  再開 ›")
@@ -346,9 +288,18 @@ struct HomeView: View {
                 buttonPulse = true
             }
         }
-        .onAppear { captureBaselineIfNeeded() }
-        .onChange(of: viewModel.snapshotHeartRate) { _, _ in captureBaselineIfNeeded() }
-        .onChange(of: viewModel.snapshotHRV) { _, _ in captureBaselineIfNeeded() }
+        .sheet(isPresented: $showAcuteStart, onDismiss: {
+            if openAcuteCheckInAfterDismiss {
+                openAcuteCheckInAfterDismiss = false
+                navManager.navigate(to: .dialogue)
+            }
+        }) {
+            HomeAcuteStartSheet(initialRating: flowState.mokorinMemory?.checkIn?.acuteQ0) {
+                openAcuteCheckInAfterDismiss = true
+                showAcuteStart = false
+            }
+            .environmentObject(viewModel)
+        }
         #if DEBUG
         .sheet(isPresented: $showDebugDiagnostics) {
             NavigationStack {
@@ -382,7 +333,7 @@ struct HomeView: View {
         #endif
         .sheet(isPresented: $showStatusDetail) {
             statusDetailSheet
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
         }
     }
 
@@ -648,10 +599,16 @@ struct HomeView: View {
     // MARK: - Main measurement button
 
     private var mainButton: some View {
-        let ac: Color = viewModel.isLiveMonitoring ? .orange : accentColor
+        let ac: Color = viewModel.isAcuteSessionRunning ? .orange : accentColor
         let gi = 0.68 + scoreIntensity * 0.28
 
-        return Button { viewModel.toggleLiveMonitoring() } label: {
+        return Button {
+            if viewModel.isAcuteSessionRunning {
+                viewModel.finishAcuteSession()
+            } else {
+                showAcuteStart = true
+            }
+        } label: {
             ZStack {
                 Circle()
                     .stroke(AngularGradient(
@@ -679,7 +636,7 @@ struct HomeView: View {
                 Circle()
                     .fill(RadialGradient(
                         colors: [
-                            Color(hue: viewModel.isLiveMonitoring ? 0.07
+                            Color(hue: viewModel.isAcuteSessionRunning ? 0.07
                                   : max(0, 0.635 - scoreIntensity * 0.50),
                                   saturation: 0.90, brightness: 0.14 + scoreIntensity * 0.18),
                             Color(red: 0.02, green: 0.04, blue: 0.14),
@@ -697,11 +654,11 @@ struct HomeView: View {
                     .frame(width: 68, height: 68)
 
                 VStack(spacing: 4) {
-                    Image(systemName: viewModel.isLiveMonitoring ? "waveform" : "waveform.path.ecg")
+                    Image(systemName: viewModel.isAcuteSessionRunning ? "waveform" : "waveform.path.ecg")
                         .font(.system(size: 15, weight: .ultraLight))
                         .foregroundStyle(ac.opacity(0.98))
                         .shadow(color: ac, radius: 8)
-                    Text(viewModel.isLiveMonitoring ? "停止" : "計測開始")
+                    Text(viewModel.isAcuteSessionRunning ? "停止" : "計測開始")
                         .font(.system(size: 8.5, weight: .semibold, design: .monospaced))
                         .foregroundStyle(Color.white.opacity(0.78))
                         .tracking(0.6)
@@ -719,9 +676,9 @@ struct HomeView: View {
             )
         }
         .buttonStyle(.plain)
-        .animation(.easeInOut(duration: 0.20), value: viewModel.isLiveMonitoring)
+        .animation(.easeInOut(duration: 0.20), value: viewModel.isAcuteSessionRunning)
         .accessibilityIdentifier("home_measure_start_button")
-        .accessibilityLabel(viewModel.isLiveMonitoring ? "計測を停止する" : "ライブ計測を開始する")
+        .accessibilityLabel(viewModel.isAcuteSessionRunning ? "計測を停止する" : "急性緊張の計測前確認を開く")
         .overlay(
             Canvas { ctx, size in
                 let cx = size.width / 2, cy = size.height / 2
@@ -738,7 +695,7 @@ struct HomeView: View {
                     var tp = Path()
                     tp.move(to: CGPoint(x: x1, y: y1))
                     tp.addLine(to: CGPoint(x: x2, y: y2))
-                    let cc = viewModel.isLiveMonitoring ? Color.orange : accentColor
+                    let cc = viewModel.isAcuteSessionRunning ? Color.orange : accentColor
                     ctx.stroke(tp, with: .color(cc.opacity(isCard ? 0.52 : 0.24)),
                                lineWidth: isCard ? 1.0 : 0.55)
                     if isCard {
@@ -895,6 +852,7 @@ struct HomeView: View {
 
     private var statusDetailSheet: some View {
         NavigationStack {
+          ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 10) {
                     Circle().fill(statusDot).frame(width: 9, height: 9)
@@ -911,16 +869,42 @@ struct HomeView: View {
                     metricCell(label: "データソース", value: dataSourceText, color: statusDot)
                     Divider().frame(height: 24)
                     metricCell(label: "状態",
-                               value: viewModel.isLiveMonitoring ? "計測中" : "停止中",
-                               color: viewModel.isLiveMonitoring ? .cyan : Color.white.opacity(0.3))
+                               value: viewModel.isAcuteSessionRunning ? "急性スコア計測中" : "停止中",
+                               color: viewModel.isAcuteSessionRunning ? .cyan : Color.white.opacity(0.3))
                 }
                 .padding(.vertical, 7)
                 .background(Color.white.opacity(0.03))
                 .clipShape(RoundedRectangle(cornerRadius: 7))
-                Spacer()
+                if let result = viewModel.acuteResult, !viewModel.isMockMode {
+                    Text("急性緊張スコア：試作・検証中")
+                        .font(.system(size: 14, weight: .semibold)).foregroundStyle(.cyan)
+                    Text(acuteStatusText(result.status))
+                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.8))
+                    acuteDetailRow("開始時30秒の平均HR", value: bpmText(result.baselineHeartRate))
+                    acuteDetailRow(result.status == .staleHR ? "最後に有効だった30秒平均HR" : "直近30秒の平均HR",
+                                   value: bpmText(result.currentMeanHeartRate))
+                    acuteDetailRow("心拍変化による補正", value: String(format: "%+.1f", result.hrAdjustmentPoints))
+                    Text("開始前の回答を基準に、心拍の変化を反映する研究用の試作です。心理状態の診断や、集中・パフォーマンスの良否の判定には使えません。")
+                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.55))
+                    if viewModel.isAcuteSessionRunning && result.status != .exerciseExcluded {
+                        Button("計測中に運動した：心拍による補正を停止") {
+                            viewModel.pauseAcuteCorrectionForExercise()
+                        }
+                        .font(.system(size: 12)).foregroundStyle(.orange)
+                    }
+                }
+                Divider().background(Color.white.opacity(0.10))
+                acuteDetailRow("SDNN（スコア補正には不使用）",
+                    value: !viewModel.isMockMode && viewModel.didFetchHRV
+                        ? String(format: "%.1f ms", viewModel.currentHRV) : "未取得")
+                acuteDetailRow("SDNN実測時刻",
+                    value: !viewModel.isMockMode && viewModel.didFetchHRV
+                        ? viewModel.latestHRVSampleDate.map { $0.formatted(date: .abbreviated, time: .standard) } ?? "時刻不明"
+                        : "—")
             }
             .padding(22)
             .frame(maxWidth: .infinity, alignment: .leading)
+          }
             .background(Color(red: 0.02, green: 0.02, blue: 0.07).ignoresSafeArea())
             .navigationTitle("ミッションステータス")
             .navigationBarTitleDisplayMode(.inline)
@@ -941,9 +925,30 @@ struct HomeView: View {
         .frame(maxWidth: .infinity)
     }
 
+    private func acuteDetailRow(_ label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+            Text(value).font(.system(size: 13, design: .monospaced)).foregroundStyle(.white.opacity(0.85))
+        }
+    }
+
+    private func bpmText(_ value: Double?) -> String {
+        value.map { String(format: "%.1f bpm", $0) } ?? "未取得"
+    }
+
+    private func acuteStatusText(_ status: MWAcuteScoreStatus) -> String {
+        switch status {
+        case .inactive: return "計測前"
+        case .awaitingBaseline: return "開始時の心拍を収集中・本人の回答を表示"
+        case .liveExperimental: return "本人の回答＋心拍変化（未検証）"
+        case .staleHR: return "新しい心拍がなく、最後のスコアを保持"
+        case .exerciseExcluded: return "運動の影響を避け、本人の回答を保持"
+        }
+    }
+
     // MARK: - Helpers
 
-    private var isDemoMode: Bool { viewModel.activeDataSource == .mock }
+    private var isDemoMode: Bool { viewModel.isMockMode }
 
     private var hasRealHR: Bool {
         viewModel.latestWatchHeartRate != nil || viewModel.didFetchHeartRate
@@ -951,8 +956,8 @@ struct HomeView: View {
 
     private var heartRateText: String {
         #if DEBUG && targetEnvironment(simulator)
-        if simDemoOverrideEnabled { return String(format: "%.0f", simDemoBPM) }
-        if let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
+        if viewModel.isMockMode, simDemoOverrideEnabled { return String(format: "%.0f", simDemoBPM) }
+        if viewModel.isMockMode, let str = ProcessInfo.processInfo.environment["DEMO_HEART_RATE"],
            let val = Double(str) { return String(format: "%.0f", val) }
         #endif
         if let w = viewModel.latestWatchHeartRate { return String(format: "%.0f", w) }
@@ -1004,10 +1009,13 @@ struct HomeView: View {
     }
 
     private var statusBody: String {
+        if let result = viewModel.acuteResult, !viewModel.isMockMode {
+            return acuteStatusText(result.status)
+        }
         switch viewModel.activeDataSource {
         case .watchLive:
             return (viewModel.didFetchHeartRate || viewModel.didFetchHRV)
-                ? "状態グラフィックがリアルタイムの心理的揺らぎを反映しています。"
+                ? "心拍データを受信しています。急性スコアは開始前の回答を確認してから計測します。"
                 : "Apple Watch を装着したままお待ちください。"
         case .healthKit:   return "HealthKit に記録された最新データを表示しています。"
         case .mock:        return "Apple Watch を接続すると実データへ切り替わります。"
@@ -1015,6 +1023,129 @@ struct HomeView: View {
         }
     }
 
+}
+
+/// STEP 3.5の回答を再利用し、計測直前の運動だけを確認する。
+/// 認可ダイアログの待ち時間は、開始時30秒の計測窓に含めない。
+private struct HomeAcuteStartSheet: View {
+    @EnvironmentObject var viewModel: MindWaveViewModel
+    @Environment(\.dismiss) private var dismiss
+    let initialRating: Double?
+    let onReviewCheckIn: () -> Void
+
+    @State private var exercisedRecently: Bool? = nil
+    @State private var isStarting = false
+    @State private var cancelled = false
+    @State private var startError: String? = nil
+    @State private var startTask: Task<Void, Never>?
+
+    private var hasInitialRating: Bool {
+        initialRating.map { $0.isFinite && (0...10).contains($0) } ?? false
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    if hasInitialRating {
+                        Text("STEP 3.5で答えた緊張の強さを、今回の計測の基準にします。")
+                            .font(.system(size: 14))
+                        Text("直近5分に運動しましたか？")
+                            .font(.system(size: 17, weight: .semibold))
+                        HStack(spacing: 12) {
+                            exerciseChoice("はい", value: true)
+                            exerciseChoice("いいえ", value: false)
+                        }
+                        .disabled(isStarting)
+                        Text("運動した場合は心拍による補正を行わず、開始前の回答を表示します。")
+                            .font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
+                        Text("許可の確認後に計測を開始します。最初の30秒は基準となる心拍を集め、その後もデータが不足する間は本人の回答を保持します。")
+                            .font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
+                        if let startError {
+                            Text(startError).font(.system(size: 12)).foregroundStyle(.orange)
+                        }
+                        Button(action: beginAfterAuthorization) {
+                            HStack(spacing: 8) {
+                                if isStarting { ProgressView().tint(.black) }
+                                Text(isStarting ? "許可を確認しています" : "計測を開始")
+                            }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.black)
+                            .frame(maxWidth: .infinity).padding(.vertical, 14)
+                            .background(RoundedRectangle(cornerRadius: 12).fill(Color.cyan))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(exercisedRecently == nil || isStarting)
+                        .opacity(exercisedRecently == nil ? 0.4 : 1)
+                    } else {
+                        Text("計測を始めるには、状況確認のSTEP 3.5で今の緊張の強さを回答してください。")
+                            .font(.system(size: 15))
+                        Button("STEP 3.5へ回答") { onReviewCheckIn() }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.cyan)
+                    }
+                    Text("急性緊張スコアは試作・検証中です。心理状態の診断には使えません。")
+                        .font(.system(size: 11)).foregroundStyle(.white.opacity(0.5))
+                }
+                .padding(24)
+                .foregroundStyle(.white.opacity(0.9))
+            }
+            .background(Color(red: 0.02, green: 0.02, blue: 0.07).ignoresSafeArea())
+            .navigationTitle("計測前の確認")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("キャンセル") {
+                        cancelled = true
+                        startTask?.cancel()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .interactiveDismissDisabled(isStarting)
+        .onDisappear {
+            cancelled = true
+            startTask?.cancel()
+        }
+    }
+
+    private func exerciseChoice(_ title: String, value: Bool) -> some View {
+        Button { exercisedRecently = value } label: {
+            HStack {
+                Text(title)
+                Image(systemName: exercisedRecently == value ? "checkmark.circle.fill" : "circle")
+            }
+            .font(.system(size: 15))
+            .foregroundStyle(exercisedRecently == value ? Color.cyan : Color.white.opacity(0.7))
+            .frame(maxWidth: .infinity).padding(.vertical, 14)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.07)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("直近5分の運動：\(title)")
+        .accessibilityValue(exercisedRecently == value ? "選択済み" : "未選択")
+    }
+
+    private func beginAfterAuthorization() {
+        guard !isStarting, hasInitialRating, let rating = initialRating,
+              let exercised = exercisedRecently else { return }
+        isStarting = true
+        startError = nil
+        cancelled = false
+        startTask = Task { @MainActor in
+            await viewModel.requestHealthKitAuthorization()
+            guard !Task.isCancelled, !cancelled else { return }
+            guard viewModel.beginAcuteSession(tensionRating: rating, exercisedRecently: exercised) else {
+                startError = "計測を開始できませんでした。回答を確認して再試行してください。"
+                isStarting = false
+                return
+            }
+            viewModel.startLiveMonitoring()
+            isStarting = false
+            dismiss()
+        }
+    }
 }
 
 // MARK: - CockpitFrameCanvas (imageUI.png: ほぼ黒のストラット)
@@ -1427,16 +1558,11 @@ private struct SimulatorDemoControlsView: View {
     @AppStorage("sim_demo_bpm")             private var demoBPM:         Double = 72.0
     @AppStorage("sim_demo_score")           private var demoScore:       Double = 12.0
 
-    private var hrFloor: Double {
-        if demoBPM >= 130 { return 85 }
-        if demoBPM >= 115 { return 72 }
-        if demoBPM >= 100 { return 55 }
-        return 0
+    private var displayScore: Double {
+        viewModel.isMockMode && overrideEnabled ? min(100, max(0, demoScore)) : viewModel.graphicInput.score
     }
 
-    private var displayScore: Double {
-        overrideEnabled ? max(demoScore, hrFloor) : viewModel.graphicInput.score
-    }
+    private var overrideIsActive: Bool { viewModel.isMockMode && overrideEnabled }
 
     private var derivedStateName: String {
         let s = displayScore / 100.0
@@ -1478,12 +1604,13 @@ private struct SimulatorDemoControlsView: View {
                             .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundStyle(overrideEnabled ? Color.cyan : Color.white.opacity(0.55))
                             .tracking(1)
-                        Text(overrideEnabled ? "ON — demo values active" : "OFF — real sensor data")
+                        Text(!viewModel.isMockMode ? "実測中：上書きは無効" : overrideEnabled ? "ON — demo values active" : "OFF — ViewModel values")
                             .font(.system(size: 9, weight: .regular, design: .monospaced))
                             .foregroundStyle(Color.white.opacity(0.35))
                     }
                     Spacer()
                     Toggle("", isOn: $overrideEnabled).labelsHidden().tint(.cyan)
+                        .disabled(!viewModel.isMockMode)
                 }
 
                 Divider().background(Color.white.opacity(0.08))
@@ -1498,12 +1625,12 @@ private struct SimulatorDemoControlsView: View {
                         Spacer()
                         Text(String(format: "%.0f BPM", demoBPM))
                             .font(.system(size: 16, weight: .thin, design: .monospaced))
-                            .foregroundStyle(overrideEnabled ? Color.white : Color.white.opacity(0.30))
+                            .foregroundStyle(overrideIsActive ? Color.white : Color.white.opacity(0.30))
                             .monospacedDigit()
                     }
                     Slider(value: $demoBPM, in: 40...170, step: 1)
                         .tint(derivedStateColor)
-                        .disabled(!overrideEnabled)
+                        .disabled(!overrideIsActive)
 
                     // BPM プリセット
                     HStack(spacing: 6) {
@@ -1527,12 +1654,12 @@ private struct SimulatorDemoControlsView: View {
                         Spacer()
                         Text(String(format: "%.0f / 100", demoScore))
                             .font(.system(size: 14, weight: .thin, design: .monospaced))
-                            .foregroundStyle(overrideEnabled ? Color.white : Color.white.opacity(0.30))
+                            .foregroundStyle(overrideIsActive ? Color.white : Color.white.opacity(0.30))
                             .monospacedDigit()
                     }
                     Slider(value: $demoScore, in: 0...100, step: 1)
                         .tint(derivedStateColor)
-                        .disabled(!overrideEnabled)
+                        .disabled(!overrideIsActive)
                 }
 
                 Divider().background(Color.white.opacity(0.08))
@@ -1557,10 +1684,10 @@ private struct SimulatorDemoControlsView: View {
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 5) {
-                            infoRow("BPM",           overrideEnabled ? String(format: "%.0f", demoBPM) : "—")
+                            infoRow("BPM",           overrideIsActive ? String(format: "%.0f", demoBPM) : "—")
                             infoRow("raw score",     String(format: "%.0f", viewModel.graphicInput.score))
                             infoRow("display score", String(format: "%.0f", displayScore))
-                            infoRow("source",        overrideEnabled ? "simulator demo" : "real / sensor")
+                            infoRow("source",        overrideIsActive ? "simulator demo" : "ViewModel")
                         }
                     }
                     .padding(14)

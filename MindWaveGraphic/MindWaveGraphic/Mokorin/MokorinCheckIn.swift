@@ -24,7 +24,7 @@ nonisolated enum CheckInSlot: String, CaseIterable, Codable, Sendable {
         case .situation: v = ["このあと、何か予定はある？", "今日はこれから、どんな場面が待ってるの？", "今はどんな場面にいるのかな？"]
         case .timing:    v = ["それはいつ頃なの？", "その予定は、もうすぐ？それとも少し先？"]
         case .emotion:   v = ["今はどんな気持ちに近い？", "今の気持ちに一番近いのはどれかな？"]
-        case .tension:   v = ["緊張の強さを0から100で言うと、どのくらい？", "今の緊張はどのくらい？0（全然）〜100（とても強い）で教えてね。"]
+        case .tension:   v = ["今、どのくらい緊張やストレスを感じている？"]
         case .cause:     v = ["今、どんなことが一番気になってる？", "一番気がかりなのは、どんなこと？"]
         case .body:      v = ["体に何か変化はある？ドキドキや震えなど、いくつでも教えてね。", "今、体で気になるところはある？"]
         case .sleep:     v = ["昨日はどのくらい眠れた？", "昨夜はよく眠れた？"]
@@ -42,7 +42,7 @@ nonisolated enum CheckInSlot: String, CaseIterable, Codable, Sendable {
         case .situation: return "今、どんな場面にいる？"
         case .timing:    return "その出来事はいつ頃？"
         case .emotion:   return "今の気持ちに一番近いものはどれ？"
-        case .tension:   return "緊張の強さはどのくらい？0（全く緊張していない）から100（とても強い）で教えてね。"
+        case .tension:   return "今、どのくらい緊張やストレスを感じている？"
         case .cause:     return "今、一番気になっていることはある？"
         case .body:      return "今、体に何か変化はある？いくつでも教えてね。"
         case .support:   return "今、どんなことをしてみたい？"
@@ -58,7 +58,7 @@ nonisolated enum CheckInSlot: String, CaseIterable, Codable, Sendable {
         case .situation: return SituationKind.allCases.map { .situation($0) }
         case .timing:    return EventTiming.allCases.map { .timing($0) }
         case .emotion:   return FeelingKind.allCases.map { .emotion($0) }
-        case .tension:   return [0, 20, 50, 75, 100].map { .tension($0) }
+        case .tension:   return AcuteTensionChoice.allCases.map { .acuteTension($0) }
         case .cause:     return WorryCause.allCases.map { .cause($0) }
         case .body:      return BodySignal.allCases.map { .body($0) }
         case .support:   return SupportWish.allCases.map { .support($0) }
@@ -187,6 +187,28 @@ nonisolated enum FeelingKind: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// STEP 3.5 の本人の選択。感情や旧 0〜100 回答からは推測しない。
+nonisolated enum AcuteTensionChoice: String, CaseIterable, Codable, Sendable {
+    case slight, moderate, strong
+
+    var label: String {
+        switch self {
+        case .slight: return "少し感じる"
+        case .moderate: return "ある程度感じる"
+        case .strong: return "とても強く感じる"
+        }
+    }
+
+    /// 急性式の Q0（0〜10）。整数へ丸めず、指定された対応値を保持する。
+    var q0: Double {
+        switch self {
+        case .slight: return 100.0 / 60.0
+        case .moderate: return 5.0
+        case .strong: return 500.0 / 60.0
+        }
+    }
+}
+
 nonisolated enum WorryCause: String, CaseIterable, Codable, Sendable {
     case failure, othersView = "others_view", speaking, outcome, ability, comparison, unknown, other
     var label: String {
@@ -237,7 +259,7 @@ nonisolated enum SupportWish: String, CaseIterable, Codable, Sendable {
 /// 画面の選択肢 1 つ
 nonisolated enum CheckInOption: Hashable, Sendable {
     case sleep(SleepAmount), activity(ActivityLevel), condition(DailyCondition), situation(SituationKind)
-    case timing(EventTiming), emotion(FeelingKind), tension(Int), cause(WorryCause), body(BodySignal), support(SupportWish)
+    case timing(EventTiming), emotion(FeelingKind), tension(Int), acuteTension(AcuteTensionChoice), cause(WorryCause), body(BodySignal), support(SupportWish)
 
     var label: String {
         switch self {
@@ -248,6 +270,7 @@ nonisolated enum CheckInOption: Hashable, Sendable {
         case .timing(let v): return v.label
         case .emotion(let v): return v.label
         case .tension(let v): return MokorinCheckIn.tensionLabel(v)
+        case .acuteTension(let v): return v.label
         case .cause(let v): return v.label
         case .body(let v): return v.label
         case .support(let v): return v.label
@@ -310,6 +333,13 @@ nonisolated struct MokorinCheckIn: Equatable, Sendable {
     var emotion: CheckInValue<FeelingKind>?
     /// 主観的な緊張の強さ S0（0〜100。試作の表示尺度で、医学的な区分ではない）
     var tension: CheckInValue<Int>?
+    /// STEP 3.5 で本人が選んだ急性式用の回答。旧 tension とは独立して保持する。
+    var acuteTension: CheckInValue<AcuteTensionChoice>?
+
+    var acuteQ0: Double? {
+        guard let acuteTension, acuteTension.source == .user else { return nil }
+        return acuteTension.value.q0
+    }
     var causes: CheckInValue<Set<WorryCause>>?
     var body: CheckInValue<Set<BodySignal>>?
     var support: CheckInValue<SupportWish>?
@@ -346,7 +376,7 @@ nonisolated struct MokorinCheckIn: Equatable, Sendable {
         case .situation: return situation != nil
         case .timing: return timing != nil
         case .emotion: return emotion != nil
-        case .tension: return tension != nil
+        case .tension: return acuteQ0 != nil
         case .cause: return !(causes?.value.isEmpty ?? true)
         case .body: return !(body?.value.isEmpty ?? true)
         case .support: return support != nil
@@ -370,6 +400,8 @@ nonisolated struct MokorinCheckIn: Equatable, Sendable {
     /// 次に尋ねる項目（nil = 質問を終えて提案へ）
     func nextSlot() -> CheckInSlot? {
         if needsRestFirst || declinedMeasurement { return nil }
+        // STEP 3 の後は必ず 3.5 へ。質問済み・質問予算・旧 tension の抽出では省略しない。
+        if isSettled(.emotion) && !isSettled(.tension) { return .tension }
         let remainingRequired = Self.required.filter { !isSettled($0) }
         let spare = Self.questionBudget - asked.count - remainingRequired.count
         for slot in Self.priority where !isSettled(slot) && !asked.contains(slot) && isRelevant(slot) {
@@ -398,8 +430,16 @@ nonisolated struct MokorinCheckIn: Equatable, Sendable {
         if !e.body.isEmpty { body = .init(value: Self.consistentBody(e.body), source: source, updatedAt: now, confidence: conf(.body)); changed.insert(.body) }
         if let v = e.support { support = .init(value: v, source: source, updatedAt: now, confidence: conf(.support)); changed.insert(.support) }
         declined.formUnion(e.declined)
-        declined.subtract(changed)
+        if e.declined.contains(.tension) { acuteTension = nil }
+        // 旧数値の訂正では、STEP 3.5 を明示的にスキップした選択を取り消さない。
+        declined.subtract(changed.subtracting([.tension]))
         return changed
+    }
+
+    /// 選択肢または質問中の完全一致ラベルで本人が回答したときだけ呼ぶ。
+    mutating func applyAcuteTension(_ choice: AcuteTensionChoice, at now: Date) {
+        acuteTension = .init(value: choice, source: .user, updatedAt: now, confidence: 1)
+        declined.remove(.tension)
     }
 
     /// 「特にない」「分からない」は具体的な症状と同時に持たない（具体的な症状を優先）

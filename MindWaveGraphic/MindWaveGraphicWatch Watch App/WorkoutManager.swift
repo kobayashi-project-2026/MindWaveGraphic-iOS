@@ -59,6 +59,7 @@ final class WorkoutManager: NSObject, ObservableObject {
     private let store = HKHealthStore()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
+    private var lastSentHeartRateDate: Date?
 
     // MARK: - 初期化
 
@@ -196,14 +197,18 @@ final class WorkoutManager: NSObject, ObservableObject {
     ///   常に実行。最新値を1件保持。エラー時のみログを出す。
     /// チャネル3: transferUserInfo
     ///   sendMessage 失敗時 or isReachable=false 時のキュー転送フォールバック。
-    private func sendHeartRateToiPhone(_ heartRate: Double) {
-        let now = Date().timeIntervalSince1970
+    private func sendHeartRateToiPhone(_ heartRate: Double, measuredAt: Date) {
+        guard heartRate.isFinite, (35...220).contains(heartRate),
+              measuredAt.timeIntervalSince1970.isFinite, measuredAt.timeIntervalSince1970 > 0,
+              measuredAt <= Date(),
+              lastSentHeartRateDate == nil || measuredAt > lastSentHeartRateDate! else { return }
+        lastSentHeartRateDate = measuredAt
         // iPhone 側 Contracts/WatchPayloadContract.swift（schema v1）と対応。
         // 既存3キーは変更しない。schemaVersion は追加キーのため旧iPhoneアプリでも無視されるだけで互換。
         let payload: [String: Any] = [
             "type":          "heartRate",
             "heartRate":     heartRate,
-            "timestamp":     now,
+            "timestamp":     measuredAt.timeIntervalSince1970,
             "schemaVersion": 1
         ]
 
@@ -312,8 +317,15 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
         guard let stats = workoutBuilder.statistics(for: HKQuantityType(.heartRate)),
               let hr = stats.mostRecentQuantity()?.doubleValue(
                 for: HKUnit.count().unitDivided(by: .minute())
-              ) else {
+              ),
+              let measuredAt = stats.mostRecentQuantityDateInterval()?.end else {
             WatchDebugLogger.log("ERROR", "failed to get HR statistics from builder")
+            return
+        }
+
+        guard hr.isFinite, (35...220).contains(hr),
+              measuredAt.timeIntervalSince1970.isFinite, measuredAt <= Date() else {
+            WatchDebugLogger.log("ERROR", "rejected invalid HR or measurement timestamp")
             return
         }
 
@@ -322,7 +334,7 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
         // MainActor でUI更新 + iPhoneへ送信
         Task { @MainActor [self] in
             currentHeartRate = hr
-            sendHeartRateToiPhone(hr)
+            sendHeartRateToiPhone(hr, measuredAt: measuredAt)
         }
     }
 }
