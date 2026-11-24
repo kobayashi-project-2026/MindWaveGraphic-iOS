@@ -42,6 +42,45 @@ struct AIChatView: View {
                         .ignoresSafeArea()
 
                     VStack(spacing: 0) {
+                        // AIChatView.swift の VStack(spacing: 0) の先頭（mokorinHeader の上）に追加
+                        HStack {
+                            Button(action: onClose) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "chevron.left")
+                                        .font(.system(size: 13, weight: .bold))
+                                    Text("戻る")
+                                        .font(.system(size: 14, weight: .semibold))
+                                }
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(Color.white.opacity(0.14)))
+                                .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.35), lineWidth: 0.8))
+                            }
+                            .buttonStyle(.plain)
+
+                            Spacer()
+
+                            Text("AI相談")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+
+                            Spacer()
+
+                            Button {
+                                isResetConfirmationPresented = true
+                            } label: {
+                                Image(systemName: "arrow.counterclockwise")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(chat.messages.isEmpty ? .white.opacity(0.3) : .white)
+                                    .padding(8)
+                                    .background(Circle().fill(Color.white.opacity(0.10)))
+                            }
+                            .disabled(chat.messages.isEmpty)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 12)
+                        .padding(.bottom, 4)
                         statusBanner
                         // 全体UI 13・17・21: もこりんを会話の中心に大きく置く
                         mokorinHero(compact: compactHero, availableHeight: geo.size.height)
@@ -120,6 +159,8 @@ struct AIChatView: View {
             }
         }
     }
+    // AIChatView.swift の VStack(spacing: 0) の先頭（mokorinHeader の上）に追加
+   
 
     // MARK: - もこりん（会話の中心）
 
