@@ -7,35 +7,51 @@ import Foundation
 import HealthKit
 
 // ─────────────────────────────────────────────────────────
+// HealthMetricResultKind
+// 実際のHKQuantitySampleか集計値かを区別する。
+// discreteSample: UUID・startDate・endDate を持つ実サンプル
+// aggregateFallback: 30分平均等の集計値（UUID・endDateなし）
+// unavailable: 値なし
+// ─────────────────────────────────────────────────────────
+enum HealthMetricResultKind {
+    case discreteSample
+    case aggregateFallback
+    case unavailable
+}
+
+// ─────────────────────────────────────────────────────────
 // HealthMetricFetchResult
 // HealthKitから1つの指標を取得した結果をまとめる構造体。
 // ─────────────────────────────────────────────────────────
 struct HealthMetricFetchResult {
     /// 取得できた値。取得失敗の場合は nil。
     let value: Double?
-    /// 取得方法（例: "最新1件", "直近5分平均"）
+    /// 取得方法（例: "最新実サンプル", "直近30分平均"）
     let source: String
     /// 診断・ログ用メッセージ
     let message: String
-    /// HealthKitサンプル自体の記録時刻（startDate）
+    /// HealthKitサンプル自体の記録時刻（startDate）。集計値はnil。
     let sampleDate: Date?
-    /// サンプルのUUID文字列（新旧判定に使う。nilは平均値など識別子がない場合）
+    /// サンプルのUUID文字列（新旧判定に使う。nilは集計値など識別子がない場合）
     let sampleIdentifier: String?
-    /// サンプルの終了時刻（HRVのendDate診断用。heartRateではnil）
+    /// サンプルの終了時刻（HRVのendDate診断用。集計値はnil）
     let sampleEndDate: Date?
-    /// サンプルのSource名（診断用。nilは平均値など）
+    /// サンプルのSource名（診断用。nilは集計値など）
     let sourceName: String?
     /// サンプルのBundleIdentifier（診断用）
     let sourceBundleIdentifier: String?
+    /// 結果の種別（実サンプル / 集計フォールバック / 取得不能）
+    let kind: HealthMetricResultKind
 
     var isSuccess: Bool { value != nil }
 
-    /// 既存コード互換のinit。新規フィールドは省略可（デフォルトnil）。
+    /// 既存コード互換のinit。新規フィールドはデフォルト値あり。
     init(value: Double?, source: String, message: String,
          sampleDate: Date?, sampleIdentifier: String?,
          sampleEndDate: Date? = nil,
          sourceName: String? = nil,
-         sourceBundleIdentifier: String? = nil) {
+         sourceBundleIdentifier: String? = nil,
+         kind: HealthMetricResultKind = .aggregateFallback) {
         self.value = value
         self.source = source
         self.message = message
@@ -44,6 +60,7 @@ struct HealthMetricFetchResult {
         self.sampleEndDate = sampleEndDate
         self.sourceName = sourceName
         self.sourceBundleIdentifier = sourceBundleIdentifier
+        self.kind = kind
     }
 }
 
@@ -62,6 +79,27 @@ struct HRVDiagnosticSample {
 }
 
 // ─────────────────────────────────────────────────────────
+// HRVObserverPhase / HRVObserverBatch
+// AnchoredObjectQueryの1 callbackをViewModelへ渡す型。
+// resultsHandler / updateHandler それぞれに1 Batchを生成する。
+// サンプル0件・全件除外・エラー時も必ずBatchを送信する。
+// ─────────────────────────────────────────────────────────
+enum HRVObserverPhase: String {
+    case initial = "initial"
+    case update  = "update"
+}
+
+struct HRVObserverBatch {
+    let phase: HRVObserverPhase
+    let callbackDate: Date
+    let rawSampleCount: Int
+    let acceptedResults: [HealthMetricFetchResult]
+    let duplicateRejectedCount: Int
+    let staleRejectedCount: Int
+    let errorDescription: String?
+}
+
+// ─────────────────────────────────────────────────────────
 // HealthKitManager
 // 読み取り専用。書き込みは行わない。
 // 対象: heartRate / heartRateVariabilitySDNN
@@ -72,7 +110,29 @@ final class HealthKitManager {
     private let heartRateType = HKQuantityType(.heartRate)
     private let hrvType       = HKQuantityType(.heartRateVariabilitySDNN)
 
-    private var hrvObserverQuery: HKObserverQuery?
+    private var hrvAnchoredQuery: HKAnchoredObjectQuery?
+    private var hrvQueryAnchor: HKQueryAnchor?
+    private var isHRVMonitoringActive = false
+    private var lastAcceptedHRVEndDate: Date?
+    private var lastAcceptedHRVUUID: String?
+    private(set) var hrvAcceptedCount = 0
+    private(set) var hrvDuplicateCount = 0
+    private(set) var hrvStaleCount = 0
+    // callback回数・時刻（呼ばれた時点で計上、サンプル採否に関係なし）
+    private(set) var initialCallbackCount: Int = 0
+    private(set) var updateCallbackCount: Int  = 0
+    private(set) var lastInitialCallbackDate: Date? = nil
+    private(set) var lastUpdateCallbackDate: Date?  = nil
+    // raw sample総数（acceptSample通過前）
+    private(set) var initialRawSampleTotal: Int = 0
+    private(set) var updateRawSampleTotal: Int  = 0
+    // accepted sample総数（acceptSample通過後）
+    private(set) var initialAcceptedTotal: Int = 0
+    private(set) var updateAcceptedTotal: Int  = 0
+    // 直近callback診断
+    private(set) var lastCallbackRawCount: Int      = 0
+    private(set) var lastCallbackHKMAcceptedCount: Int = 0
+    private(set) var lastQueryError: String?        = nil
 
     // MARK: - Availability
 
@@ -104,7 +164,6 @@ final class HealthKitManager {
         // ① 最新の1サンプル（サンプル自体の記録時刻 + UUID を取得する）
         if let s = await fetchLatestSample(type: heartRateType, unit: unit) {
             let msg = "latest HR: \(String(format: "%.1f", s.value)) bpm"
-            print("[HealthKit] \(msg) (recorded: \(formatDate(s.sampleDate)))")
             return HealthMetricFetchResult(
                 value: s.value, source: "最新1件",
                 message: msg, sampleDate: s.sampleDate, sampleIdentifier: s.identifier,
@@ -115,7 +174,6 @@ final class HealthKitManager {
         // ② 直近1分の平均
         if let v = await fetchRecentAverage(type: heartRateType, unit: unit, minutes: 1) {
             let msg = "HR 直近1分平均: \(String(format: "%.1f", v)) bpm"
-            print("[HealthKit] \(msg)")
             return HealthMetricFetchResult(value: v, source: "直近1分平均", message: msg,
                                           sampleDate: Date(), sampleIdentifier: nil)
         }
@@ -123,7 +181,6 @@ final class HealthKitManager {
         // ③ 直近5分の平均
         if let v = await fetchRecentAverage(type: heartRateType, unit: unit, minutes: 5) {
             let msg = "HR 直近5分平均: \(String(format: "%.1f", v)) bpm"
-            print("[HealthKit] \(msg)")
             return HealthMetricFetchResult(value: v, source: "直近5分平均", message: msg,
                                           sampleDate: Date(), sampleIdentifier: nil)
         }
@@ -131,55 +188,54 @@ final class HealthKitManager {
         // ④ 直近30分の平均
         if let v = await fetchRecentAverage(type: heartRateType, unit: unit, minutes: 30) {
             let msg = "HR 直近30分平均: \(String(format: "%.1f", v)) bpm"
-            print("[HealthKit] \(msg)")
             return HealthMetricFetchResult(value: v, source: "直近30分平均", message: msg,
                                           sampleDate: Date(), sampleIdentifier: nil)
         }
 
         let msg = "心拍取得失敗（Apple Watch未接続または未同期）"
-        print("[HealthKit] \(msg)")
         return HealthMetricFetchResult(value: nil, source: "none", message: msg,
                                       sampleDate: nil, sampleIdentifier: nil)
     }
 
-    // MARK: - Best Current HRV（段階的フォールバック）
+    // MARK: - Best Current HRV（実サンプル優先・集計フォールバック）
 
     /// 最善のHRV値を取得する。
-    /// HRVは深呼吸・睡眠中のみ記録されるため直近30分→24時間→最新1件でフォールバック。
+    /// 実HRVサンプルを最優先とし、なければ集計フォールバック。
+    /// 順序: 最新実サンプル → 30分平均 → 24時間平均 → 取得不能
     func fetchBestCurrentHRV() async -> HealthMetricFetchResult {
         let unit = HKUnit.secondUnit(with: .milli)
 
-        // ① 直近30分（最もリアルタイムに近い）
-        if let v = await fetchRecentAverage(type: hrvType, unit: unit, minutes: 30) {
-            let msg = "HRV 直近30分: \(String(format: "%.1f", v)) ms"
-            print("[HealthKit] \(msg)")
-            return HealthMetricFetchResult(value: v, source: "直近30分", message: msg,
-                                          sampleDate: Date(), sampleIdentifier: nil)
-        }
-
-        // ② 直近24時間（睡眠中のHRVを捕捉）
-        if let v = await fetchRecentAverage(type: hrvType, unit: unit, minutes: 60 * 24) {
-            let msg = "HRV 直近24時間: \(String(format: "%.1f", v)) ms"
-            print("[HealthKit] \(msg)")
-            return HealthMetricFetchResult(value: v, source: "直近24時間", message: msg,
-                                          sampleDate: Date(), sampleIdentifier: nil)
-        }
-
-        // ③ 全期間の最新1件（記録時刻 + UUID + Source を取得する）
+        // ① 最新の実HRVサンプル（UUID・startDate・endDate あり）— 最優先
         if let s = await fetchLatestSample(type: hrvType, unit: unit) {
-            let msg = "HRV 最新記録: \(String(format: "%.1f", s.value)) ms"
-            print("[HealthKit] \(msg) (start: \(formatDate(s.sampleDate)) end: \(formatDate(s.endDate)) src: \(s.sourceName))")
+            let msg = "HRV最新実サンプル"
             return HealthMetricFetchResult(
-                value: s.value, source: "最新記録",
+                value: s.value, source: "最新実サンプル",
                 message: msg, sampleDate: s.sampleDate, sampleIdentifier: s.identifier,
-                sampleEndDate: s.endDate, sourceName: s.sourceName, sourceBundleIdentifier: s.bundleID
+                sampleEndDate: s.endDate, sourceName: s.sourceName, sourceBundleIdentifier: s.bundleID,
+                kind: .discreteSample
             )
         }
 
+        // ② 直近30分平均（集計値・UUID なし）
+        if let v = await fetchRecentAverage(type: hrvType, unit: unit, minutes: 30) {
+            let msg = "HRV 直近30分平均: \(String(format: "%.1f", v)) ms"
+            return HealthMetricFetchResult(value: v, source: "直近30分平均", message: msg,
+                                          sampleDate: nil, sampleIdentifier: nil,
+                                          kind: .aggregateFallback)
+        }
+
+        // ③ 直近24時間平均（集計値・UUID なし）
+        if let v = await fetchRecentAverage(type: hrvType, unit: unit, minutes: 60 * 24) {
+            let msg = "HRV 直近24時間平均: \(String(format: "%.1f", v)) ms"
+            return HealthMetricFetchResult(value: v, source: "直近24時間平均", message: msg,
+                                          sampleDate: nil, sampleIdentifier: nil,
+                                          kind: .aggregateFallback)
+        }
+
         let msg = "HRVデータなし（Apple WatchのHRV測定が必要）"
-        print("[HealthKit] \(msg)")
         return HealthMetricFetchResult(value: nil, source: "none", message: msg,
-                                      sampleDate: nil, sampleIdentifier: nil)
+                                      sampleDate: nil, sampleIdentifier: nil,
+                                      kind: .unavailable)
     }
 
     // MARK: - Average（個人ベースライン）
@@ -187,15 +243,13 @@ final class HealthKitManager {
     func fetchAverageHeartRate(days: Int = 7) async -> Double? {
         let v = await fetchAverage(type: heartRateType,
                                    unit: HKUnit.count().unitDivided(by: .minute()), days: days)
-        if let v { print("[HealthKit] \(days)日平均HR: \(String(format: "%.1f", v)) bpm") }
-        else       { print("[HealthKit] \(days)日平均HR：データなし") }
+        if let v { _ = v }  // 値はHealthMetricFetchResult.messageで管理
         return v
     }
 
     func fetchAverageHRV(days: Int = 7) async -> Double? {
         let v = await fetchAverage(type: hrvType, unit: .secondUnit(with: .milli), days: days)
-        if let v { print("[HealthKit] \(days)日平均HRV: \(String(format: "%.1f", v)) ms") }
-        else       { print("[HealthKit] \(days)日平均HRV：データなし") }
+        if let v { _ = v }  // 値はHealthMetricFetchResult.messageで管理
         return v
     }
 
@@ -280,10 +334,7 @@ final class HealthKitManager {
         MindWaveDebugLogger.log(.healthKit, "initial HRV query started")
         if let s = await fetchLatestSample(type: hrvType, unit: unit) {
             let msg = "HRV 最新サンプル: \(String(format: "%.1f", s.value)) ms"
-            MindWaveDebugLogger.log(.healthKit,
-                "initial HRV loaded value=\(String(format: "%.1f", s.value))ms " +
-                "start=\(formatDate(s.sampleDate)) end=\(formatDate(s.endDate)) " +
-                "source=\(s.sourceName) id=\(String(s.identifier.prefix(8)))")
+            MindWaveDebugLogger.log(.healthKit, "[HRV] initial sample loaded")
             return HealthMetricFetchResult(
                 value: s.value,
                 source: "最新サンプル",
@@ -292,7 +343,8 @@ final class HealthKitManager {
                 sampleIdentifier: s.identifier,
                 sampleEndDate: s.endDate,
                 sourceName: s.sourceName,
-                sourceBundleIdentifier: s.bundleID
+                sourceBundleIdentifier: s.bundleID,
+                kind: .discreteSample
             )
         }
         MindWaveDebugLogger.log(.healthKit, "initial HRV query completed count=0")
@@ -301,7 +353,8 @@ final class HealthKitManager {
             source: "none",
             message: "HRVサンプルなし",
             sampleDate: nil,
-            sampleIdentifier: nil
+            sampleIdentifier: nil,
+            kind: .unavailable
         )
     }
 
@@ -336,11 +389,7 @@ final class HealthKitManager {
                 let result = cast.enumerated().map { (i, s) -> HRVDiagnosticSample in
                     let val = s.quantity.doubleValue(for: unit)
                     let src = s.sourceRevision.source
-                    MindWaveDebugLogger.log(.healthKit,
-                        "HRV sample[\(i)] value=\(String(format: "%.1f", val))ms " +
-                        "start=\(s.startDate) end=\(s.endDate) " +
-                        "source=\(src.name) bundle=\(src.bundleIdentifier) " +
-                        "id=\(String(s.uuid.uuidString.prefix(8)))")
+                    MindWaveDebugLogger.log(.healthKit, "[HRV] diagnostic sample[\(i)] loaded")
                     return HRVDiagnosticSample(
                         valueMilliseconds: val,
                         startDate: s.startDate,
@@ -357,43 +406,201 @@ final class HealthKitManager {
         }
     }
 
-    /// HealthKit HRVの新規サンプル追加を監視する。
-    /// 新しいサンプルが保存されるたびに handler が呼ばれる。
+    /// HRV新規サンプルを連続監視する（HKAnchoredObjectQuery）。
+    /// resultsHandler: 起動時に既存サンプルを最新1件処理（anchor保持済みの場合は新着のみ）。
+    /// updateHandler: 以降の新着サンプルが届くたびに呼ばれる。
+    /// 二重起動ガード付き。anchor・重複状態は停止後も保持し再開時に再利用する。
     /// handler はバックグラウンドスレッドから呼ばれるため、呼び出し側で MainActor dispatch が必要。
-    func startHRVObserver(handler: @escaping (HealthMetricFetchResult) -> Void) {
+    /// 1 callbackごとに HRVObserverBatch を生成して handler へ渡す。
+    /// 0件・全除外・エラー時も必ず Batch を送信するため、A〜F の状態を区別できる。
+    func startHRVObserver(handler: @escaping (HRVObserverBatch) -> Void) {
         guard Self.isAvailable else { return }
-
-        // 既存オブザーバーを停止してから再登録
-        if let existing = hrvObserverQuery {
-            store.stop(existing)
+        guard !isHRVMonitoringActive else {
+            MindWaveDebugLogger.log(.healthKit, "[HRV] monitor already active, skipping")
+            return
         }
 
-        let query = HKObserverQuery(sampleType: hrvType, predicate: nil) { [weak self] _, completionHandler, error in
-            guard let self else { completionHandler(); return }
+        isHRVMonitoringActive = true
+        MindWaveDebugLogger.log(.healthKit, "[HRV] monitor starting type=HKAnchoredObjectQuery")
+
+        let unit = HKUnit.secondUnit(with: .milli)
+
+        let query = HKAnchoredObjectQuery(
+            type: hrvType,
+            predicate: nil,
+            anchor: hrvQueryAnchor,          // 保持済みanchorを使用（nil=全履歴、非nil=差分のみ）
+            limit: HKObjectQueryNoLimit
+        ) { [weak self] _, samples, _, newAnchor, error in
+            guard let self else { return }
+            let callbackDate = Date()
+            if let newAnchor { self.hrvQueryAnchor = newAnchor }
+
+            self.initialCallbackCount += 1
+            self.lastInitialCallbackDate = callbackDate
+
             if let error = error {
-                MindWaveDebugLogger.log(.error, "HRV observer error: \(error.localizedDescription)")
-                completionHandler()
+                self.lastQueryError = error.localizedDescription
+                MindWaveDebugLogger.log(.error, "[HRV] initial callback error")
+                self.lastCallbackRawCount = 0
+                self.lastCallbackHKMAcceptedCount = 0
+                let batch = HRVObserverBatch(
+                    phase: .initial, callbackDate: callbackDate,
+                    rawSampleCount: 0, acceptedResults: [],
+                    duplicateRejectedCount: 0, staleRejectedCount: 0,
+                    errorDescription: error.localizedDescription)
+                handler(batch)
                 return
             }
-            Task {
-                let result = await self.fetchLatestHRVSample()
-                handler(result)
-                // HealthKitへ処理完了を通知（background delivery使用時に必要）
-                completionHandler()
+
+            let qs = (samples as? [HKQuantitySample]) ?? []
+            let rawCount = qs.count
+            self.initialRawSampleTotal += rawCount
+            self.lastCallbackRawCount = rawCount
+            self.lastQueryError = nil  // 正常callbackでエラー状態を解除
+            MindWaveDebugLogger.log(.healthKit, "[HRV] initial callback rawCount=\(rawCount)")
+
+            var accepted: [HealthMetricFetchResult] = []
+            let dupeBefore  = self.hrvDuplicateCount
+            let staleBefore = self.hrvStaleCount
+
+            // endDate降順で最新1件だけ受理判定する（resultsHandler）
+            if let latest = qs.sorted(by: { $0.endDate > $1.endDate }).first,
+               self.acceptSample(latest) {
+                accepted.append(self.makeHRVResult(from: latest, unit: unit))
             }
+
+            let dupeCount  = self.hrvDuplicateCount - dupeBefore
+            let staleCount = self.hrvStaleCount     - staleBefore
+            self.initialAcceptedTotal += accepted.count
+            self.lastCallbackHKMAcceptedCount = accepted.count
+
+            MindWaveDebugLogger.log(.healthKit,
+                "[HRV] initial callback acceptedCount=\(accepted.count)")
+
+            let batch = HRVObserverBatch(
+                phase: .initial, callbackDate: callbackDate,
+                rawSampleCount: rawCount, acceptedResults: accepted,
+                duplicateRejectedCount: dupeCount, staleRejectedCount: staleCount,
+                errorDescription: nil)
+            handler(batch)
         }
-        hrvObserverQuery = query
+
+        query.updateHandler = { [weak self] _, samples, _, newAnchor, error in
+            guard let self else { return }
+            let callbackDate = Date()
+            if let newAnchor { self.hrvQueryAnchor = newAnchor }
+
+            self.updateCallbackCount += 1
+            self.lastUpdateCallbackDate = callbackDate
+
+            if let error = error {
+                self.lastQueryError = error.localizedDescription
+                MindWaveDebugLogger.log(.error, "[HRV] update callback error")
+                self.lastCallbackRawCount = 0
+                self.lastCallbackHKMAcceptedCount = 0
+                let batch = HRVObserverBatch(
+                    phase: .update, callbackDate: callbackDate,
+                    rawSampleCount: 0, acceptedResults: [],
+                    duplicateRejectedCount: 0, staleRejectedCount: 0,
+                    errorDescription: error.localizedDescription)
+                handler(batch)
+                return
+            }
+
+            let qs = (samples as? [HKQuantitySample]) ?? []
+            let rawCount = qs.count
+            self.updateRawSampleTotal += rawCount
+            self.lastCallbackRawCount = rawCount
+            self.lastQueryError = nil  // 正常callbackでエラー状態を解除
+            MindWaveDebugLogger.log(.healthKit, "[HRV] update callback rawCount=\(rawCount)")
+
+            var accepted: [HealthMetricFetchResult] = []
+            let dupeBefore  = self.hrvDuplicateCount
+            let staleBefore = self.hrvStaleCount
+
+            // endDate昇順で処理（古い順に採用判定）
+            for sample in qs.sorted(by: { $0.endDate < $1.endDate }) {
+                if self.acceptSample(sample) {
+                    accepted.append(self.makeHRVResult(from: sample, unit: unit))
+                }
+            }
+
+            let dupeCount  = self.hrvDuplicateCount - dupeBefore
+            let staleCount = self.hrvStaleCount     - staleBefore
+            self.updateAcceptedTotal += accepted.count
+            self.lastCallbackHKMAcceptedCount = accepted.count
+
+            MindWaveDebugLogger.log(.healthKit,
+                "[HRV] update callback rawCount=\(rawCount) acceptedCount=\(accepted.count)")
+
+            let batch = HRVObserverBatch(
+                phase: .update, callbackDate: callbackDate,
+                rawSampleCount: rawCount, acceptedResults: accepted,
+                duplicateRejectedCount: dupeCount, staleRejectedCount: staleCount,
+                errorDescription: nil)
+            handler(batch)
+        }
+
+        hrvAnchoredQuery = query
         store.execute(query)
-        MindWaveDebugLogger.log(.healthKit, "HRV observer started")
+        MindWaveDebugLogger.log(.healthKit, "[WatchHRV] monitor started")
     }
 
-    /// HRV observerを停止する。
+    /// HRV監視を停止する。
+    /// anchor・重複管理状態は保持し、同一セッション内の再開で過去サンプルを再処理しない。
     func stopHRVObserver() {
-        if let query = hrvObserverQuery {
+        if let query = hrvAnchoredQuery {
             store.stop(query)
-            hrvObserverQuery = nil
-            MindWaveDebugLogger.log(.healthKit, "HRV observer stopped")
+            hrvAnchoredQuery = nil
         }
+        isHRVMonitoringActive = false
+        MindWaveDebugLogger.log(.healthKit, "[HRV] monitor stopped")
+        // hrvQueryAnchor / lastAcceptedHRVEndDate / lastAcceptedHRVUUID は保持
+    }
+
+    // MARK: - Private: sample 受理判定
+
+    /// UUID重複・古いendDateを除外し、受理の場合は計上して true を返す。
+    @discardableResult
+    private func acceptSample(_ sample: HKQuantitySample) -> Bool {
+        let uuid = sample.uuid.uuidString
+
+        if uuid == lastAcceptedHRVUUID {
+            hrvDuplicateCount += 1
+            MindWaveDebugLogger.log(.healthKit, "[HRV] HKM duplicate rejected")
+            return false
+        }
+
+        if let lastDate = lastAcceptedHRVEndDate, sample.endDate <= lastDate {
+            hrvStaleCount += 1
+            MindWaveDebugLogger.log(.healthKit, "[HRV] HKM stale rejected")
+            return false
+        }
+
+        lastAcceptedHRVUUID    = uuid
+        lastAcceptedHRVEndDate = sample.endDate
+        hrvAcceptedCount      += 1
+        MindWaveDebugLogger.log(.healthKit, "[HRV] HKM accepted")
+        return true
+    }
+
+    // MARK: - Private: HKQuantitySample → HealthMetricFetchResult 変換
+
+    /// 鮮度判定に endDate を使用する（HRV は測定完了時刻が鮮度の基準）。
+    private func makeHRVResult(from sample: HKQuantitySample, unit: HKUnit) -> HealthMetricFetchResult {
+        let value = sample.quantity.doubleValue(for: unit)
+        let src   = sample.sourceRevision.source
+        return HealthMetricFetchResult(
+            value:                  value,
+            source:                 "AnchoredObserver",
+            message:                "HRV anchored sample",
+            sampleDate:             sample.endDate,
+            sampleIdentifier:       sample.uuid.uuidString,
+            sampleEndDate:          sample.endDate,
+            sourceName:             src.name,
+            sourceBundleIdentifier: src.bundleIdentifier,
+            kind:                   .discreteSample
+        )
     }
 
     // MARK: - Private: ログ用日時フォーマット

@@ -1,7 +1,3 @@
-//
-//  MindWaveGraphicApp.swift
-//  MindWaveGraphic
-//
 
 import SwiftUI
 
@@ -9,14 +5,15 @@ import SwiftUI
 struct MindWaveGraphicApp: App {
 
     init() {
-        // アプリ起動時にWatchConnectivityをアクティベートする。
-        // これによりApple Watchアプリからの心拍数メッセージを受信できるようになる。
+        // Apple Watchとの通信を初期化する
         WatchConnectivityManager.shared.setup()
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            // 既存の認証・画面遷移フローを起動する
+            AppRootContainerView()
         }
     }
 }
+

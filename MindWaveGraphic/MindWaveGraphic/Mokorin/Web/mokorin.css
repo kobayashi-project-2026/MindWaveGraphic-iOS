@@ -1,0 +1,301 @@
+/*
+  もこりん（統合先のコピー）。原本: third_party/mokorin_friend_source/static/style.css
+  原本からの変更（キャラクターの形・色・芽・顔・表情・アニメーションの定義は原本のまま）:
+  - body: 背景を透明に（アプリの暗い背景の上に重ねるため）、スクロール無効。元の淡いグラデーションは使わない
+  - .app / h1 / ボタンの定義を削除（ページ部品は使わない）
+  - #fit を追加: 220×250 の枠でキャラクターを包み、JavaScript で表示サイズに合わせて縮小する
+  - #character の margin を 0 に（元は 35px auto 15px。枠の中で位置を合わせるため。ジャンプ分の余白は #fit の上部で確保）
+  - #emotion / #dialogue は既定で非表示（SwiftUI 側の吹き出しを使う。必要な画面だけ表示できる）
+  - 2026-10-28: 末尾に表示品質の改善（光沢・陰影・手足・まばたき・呼吸・話す口・滑らかな動き）を追加。
+    原本の定義はそのまま残し、後ろの規則で上書きしている
+*/
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  color: #65566e;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+#fit {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 220px;
+  height: 250px;
+  padding-top: 35px;
+  transform-origin: center center;
+  transform: translate(-50%, -50%) scale(var(--mokorin-scale, 1));
+}
+
+/* ── ここから原本のキャラクター定義（変更なし。#character の margin のみ変更） ── */
+
+#character {
+  position: relative;
+  width: 220px;
+  height: 215px;
+  margin: 0;
+  animation: float 3s ease-in-out infinite;
+}
+
+.body {
+  position: absolute;
+  bottom: 12px;
+  left: 10px;
+  width: 200px;
+  height: 160px;
+  border: 2px solid #b5a18d;
+  border-radius: 48% 48% 43% 43%;
+  background: linear-gradient(145deg, #fffdf5, #f2dfc9);
+  box-shadow: inset -8px -8px 0 #ead6c1,
+              0 15px 30px #b8a6c633;
+}
+
+.sprout {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 95px;
+  width: 30px;
+  height: 35px;
+}
+
+.sprout::before {
+  content: "";
+  position: absolute;
+  width: 4px;
+  height: 25px;
+  left: 14px;
+  top: 10px;
+  background: #9ba77b;
+}
+
+.sprout span {
+  position: absolute;
+  top: 5px;
+  left: -3px;
+  width: 20px;
+  height: 14px;
+  border-radius: 100% 0 100% 0;
+  background: #c5d7a5;
+  border: 1px solid #8b9d75;
+  transform: rotate(25deg);
+}
+
+.sprout span + span {
+  left: 14px;
+  transform: rotate(-25deg) scaleX(-1);
+}
+
+.eyes {
+  position: absolute;
+  top: 57px;
+  left: 55px;
+  display: flex;
+  gap: 47px;
+}
+
+.eyes span {
+  width: 15px;
+  height: 21px;
+  border-radius: 50%;
+  background: #65566b;
+}
+
+.cheek {
+  position: absolute;
+  top: 85px;
+  width: 25px;
+  height: 15px;
+  border-radius: 50%;
+  background: #ffd9d3;
+}
+
+.cheek.left { left: 22px; }
+.cheek.right { right: 22px; }
+
+.mouth {
+  position: absolute;
+  top: 91px;
+  left: 87px;
+  width: 20px;
+  height: 10px;
+  border-bottom: 3px solid #a96f7c;
+  border-radius: 0 0 50% 50%;
+}
+
+#dialogue {
+  margin: 20px auto;
+  padding: 16px;
+  max-width: 350px;
+  background: #ffffffc9;
+  border: 1px solid #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 8px 25px #b8a6c622;
+}
+
+.happy .body { background: #fff0d7; }
+
+.happy .mouth {
+  height: 15px;
+  background: #d88c9d;
+  border-radius: 5px 5px 50% 50%;
+}
+
+.sad .mouth {
+  top: 100px;
+  border-top: 3px solid #a96f7c;
+  border-bottom: 0;
+  border-radius: 50%;
+}
+
+.sleepy .eyes span {
+  height: 4px;
+  margin-top: 9px;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes jump {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-30px); }
+}
+
+@keyframes wave {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(12deg); }
+}
+
+@keyframes nod {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(8deg); }
+}
+
+#character.wave { animation: wave .6s ease-in-out 3; }
+#character.jump { animation: jump .5s ease-in-out 4; }
+#character.nod { animation: nod .6s ease-in-out 3; }
+
+/* ── 原本ここまで ── */
+
+/* ── 表示品質の改善（2026-10-28、完成イメージ ~/Desktop/mokorin.png を参考）──
+   原本の定義は上にそのまま残し、ここで上書き・追加する。表情（happy/calm/sad/sleepy）と
+   動作（wave/jump/nod）のクラスと意味は変えていない。 */
+
+/* 立体感: 左上の光沢・右下の内側の影・柔らかい輪郭と青みの外光 */
+.body {
+  border-color: rgba(181, 161, 141, 0.45);
+  background:
+    radial-gradient(ellipse 55% 45% at 34% 26%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(145deg, #fffdf5, #f2dfc9);
+  box-shadow: inset -10px -12px 18px rgba(214, 186, 156, 0.55),
+              inset 6px 8px 14px rgba(255, 255, 255, 0.6),
+              0 18px 30px rgba(0, 0, 0, 0.35),
+              0 0 36px rgba(120, 180, 255, 0.18);
+  animation: breathe 4.2s ease-in-out infinite;
+  transform-origin: 50% 100%;
+}
+.happy .body {
+  background:
+    radial-gradient(ellipse 55% 45% at 34% 26%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0) 70%),
+    linear-gradient(145deg, #fff6e4, #fff0d7);
+}
+
+/* 芽: 葉にやわらかいグラデーション */
+.sprout span {
+  background: linear-gradient(135deg, #d6e8b4, #a9c483);
+}
+
+/* 目: 小さなハイライトとまばたき */
+.eyes span {
+  position: relative;
+  transform-origin: 50% 50%;
+  animation: blink 5.2s ease-in-out infinite;
+}
+.eyes span::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+}
+.sleepy .eyes span { animation: none; }
+.sleepy .eyes span::after { display: none; }
+
+/* ほっぺ: ふんわりとにじませる */
+.cheek { filter: blur(1.5px); opacity: 0.95; }
+
+/* 小さな手足 */
+.feet {
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  width: 220px;
+  height: 26px;
+  pointer-events: none;
+}
+.feet span {
+  position: absolute;
+  bottom: 0;
+  width: 40px;
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 40% 30%, #fffdf5, #ecd6bd);
+  box-shadow: inset -3px -4px 6px rgba(214, 186, 156, 0.6), 0 6px 10px rgba(0, 0, 0, 0.25);
+}
+.feet span:first-child { left: 52px; }
+.feet span + span { right: 52px; }
+
+/* 話している間: 口をやさしく開け閉めする（setSpeaking で付け外し） */
+#character.speaking .mouth { animation: talk 0.28s ease-in-out infinite alternate; transform-origin: 50% 0; }
+
+/* 動作をより自然に（タイミングは原本と同じ回数・長さ。曲線だけを滑らかに） */
+#character.wave { animation: wave .6s cubic-bezier(.45, .05, .35, 1) 3; }
+#character.jump { animation: jump .5s cubic-bezier(.33, 0, .2, 1) 4; }
+#character.nod  { animation: nod .6s cubic-bezier(.45, .05, .35, 1) 3; }
+
+@keyframes breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50% { transform: scale(1.015, 0.99); }
+}
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.12); }
+}
+@keyframes talk {
+  from { transform: scaleY(1); }
+  to { transform: scaleY(1.7); }
+}
+
+/* 会話の状態（setActivity）: 聞き取り中は少し傾いて耳を傾ける、考え中はゆっくり浮かび目線が上がる */
+#character.activity-listening { animation: lean 1.6s ease-in-out infinite; }
+#character.activity-listening .body { box-shadow: inset -10px -12px 18px rgba(214, 186, 156, 0.55),
+                                                  inset 6px 8px 14px rgba(255, 255, 255, 0.6),
+                                                  0 18px 30px rgba(0, 0, 0, 0.35),
+                                                  0 0 46px rgba(120, 180, 255, 0.35); }
+#character.activity-thinking { animation: float 4.5s ease-in-out infinite; }
+#character.activity-thinking .eyes { transform: translateY(-3px); transition: transform .4s ease; }
+@keyframes lean {
+  0%, 100% { transform: rotate(-3deg) translateY(0); }
+  50% { transform: rotate(-3deg) translateY(-4px); }
+}
+
+/* 視差効果を減らす設定: 常時動くアニメーション（浮遊・呼吸・まばたき・口）を止める。
+   動作 wave/jump/nod は利用者の操作に応じた短時間のものなので維持する */
+@media (prefers-reduced-motion: reduce) {
+  #character, #character.activity-listening, #character.activity-thinking { animation: none; }
+  .body, .eyes span, #character.speaking .mouth { animation: none; }
+}

@@ -1,0 +1,189 @@
+// ContextAssistContracts.swift
+// Contracts
+//
+// もこりんとの会話による「測定前の状況整理」（POST /v1/context-assist）の JSON 契約。
+// サーバー側の正本: server/src/context.ts。片方を変えたら、もう片方・docs/MOKORIN_CONTEXT_INTEGRATION.md・テストを同時に更新する。
+//
+// - AI が返すのは「候補」だけ。確定・測定開始はアプリ上で利用者が行う
+// - 候補は ContextScene / BodyCondition の rawValue に限定。未知の値を含む応答は採用しない
+// - 心拍・HRV などの計測データを送る項目はない
+
+import Foundation
+
+/// 会話の段階（アプリ側の進行）
+nonisolated enum ContextAssistStepCode: String, Codable, Equatable, Sendable {
+    case tension, scene, condition, review
+}
+
+/// 利用者の主観的な緊張（自己申告）。心拍・HRV から計算する緊張スコアとは別物で、
+/// StressScoreCalculator・MeasurementContext・保存データには入れない（会話の進行と表情にだけ使う）
+/// 利用者の発言の意図（会話の進め方の補助。測定値や候補の採否には使わない）
+nonisolated enum MokorinUserIntent: String, Codable, Equatable, Sendable {
+    case answer, question
+    case declineMeasurement = "decline_measurement"
+    case ready
+}
+
+nonisolated enum SubjectiveTension: String, Codable, Equatable, Sendable, CaseIterable {
+    case calm, slight, high
+
+    /// 選択肢の表示
+    var replyLabel: String {
+        switch self {
+        case .slight: return "少し緊張してる"
+        case .high:   return "かなり緊張してる"
+        case .calm:   return "今は落ち着いてる"
+        }
+    }
+}
+
+/// 画面で現在選ばれている内容
+nonisolated struct ContextAssistCurrentDTO: Codable, Equatable, Sendable {
+    /// ContextScene.rawValue（未回答は null）
+    var scene: String?
+    /// BodyCondition.rawValue
+    var conditions: [String]
+    /// 主観的な緊張（SubjectiveTension.rawValue、未回答は null）
+    var tension: String? = nil
+    /// 会話の情報（STEP 0〜6。2026-11-11 追加。省略可能）
+    var checkIn: ContextAssistCheckInDTO? = nil
+    /// 今尋ねている項目（CheckInSlot.rawValue。省略可能）
+    var nextSlot: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case scene, conditions, tension
+        case checkIn = "check_in", nextSlot = "next_slot"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(scene, forKey: .scene)
+        try c.encode(conditions, forKey: .conditions)
+        try c.encode(tension, forKey: .tension)
+        try c.encodeIfPresent(checkIn, forKey: .checkIn)
+        try c.encodeIfPresent(nextSlot, forKey: .nextSlot)
+    }
+}
+
+/// POST /v1/context-assist リクエスト
+nonisolated struct ContextAssistRequestDTO: Codable, Equatable, Sendable {
+    var schemaVersion: Int = MindWaveContract.schemaVersion
+    var requestId: UUID
+    var conversationId: UUID
+    var locale: String = "ja-JP"
+    var step: ContextAssistStepCode
+    /// 古い順。最後は必ず user（ChatMessageDTO を共用）
+    var messages: [ChatMessageDTO]
+    var current: ContextAssistCurrentDTO
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion  = "schema_version"
+        case requestId      = "request_id"
+        case conversationId = "conversation_id"
+        case locale, step, messages, current
+    }
+}
+
+/// AI が整理した候補（サーバーで検証済み。アプリでも enum へ変換できることを確認する）
+nonisolated struct ContextAssistResultDTO: Codable, Equatable, Sendable {
+    var reply: String
+    var sceneCandidate: String?
+    var conditionCandidates: [String]
+    var needsClarification: Bool
+    var clarificationQuestion: String?
+    /// 利用者が述べた主観的な緊張（calm / slight / high）。古いサーバーでは無い。不正な値は無視
+    var tensionCandidate: String? = nil
+    /// もこりんの表情（happy / calm / sad / sleepy）。古いサーバーでは無い。不正な値は無視して calm
+    var emotion: String? = nil
+    /// もこりんの動作（wave / jump / nod）。不正な値は無視して nod
+    var action: String? = nil
+    /// 利用者が述べた予定の短い要約（2026-11-05 追加。古いサーバーでは無い）
+    var situationNote: String? = nil
+    /// 利用者の発言の意図（2026-11-05 追加。古いサーバーでは無い。不正な値は answer 扱い）
+    var userIntent: String? = nil
+    /// 今回の発言から取り出した会話の情報（2026-11-11 追加。古いサーバーでは無い）
+    var checkIn: ContextAssistCheckInResultDTO? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case reply, emotion, action
+        case situationNote         = "situation_note"
+        case userIntent            = "user_intent"
+        case checkIn               = "check_in"
+        case sceneCandidate        = "scene_candidate"
+        case conditionCandidates   = "condition_candidates"
+        case needsClarification    = "needs_clarification"
+        case clarificationQuestion = "clarification_question"
+        case tensionCandidate      = "tension_candidate"
+    }
+
+    /// 発言の意図（不正・欠落は answer）
+    var typedIntent: MokorinUserIntent { userIntent.flatMap(MokorinUserIntent.init(rawValue:)) ?? .answer }
+
+    /// 主観的な緊張の候補（不正・欠落は nil。候補の採否には影響させない）
+    var typedTension: SubjectiveTension? { tensionCandidate.flatMap(SubjectiveTension.init(rawValue:)) }
+
+    /// 表情・動作は見た目だけのため、不正・欠落は既定値にする（候補の採否には影響させない。原本 app.py と同じ既定値）
+    var typedExpression: (emotion: MokorinEmotion, action: MokorinAction) {
+        (emotion.flatMap(MokorinEmotion.init(rawValue:)) ?? .calm, action.flatMap(MokorinAction.init(rawValue:)) ?? .nod)
+    }
+
+    /// 既存の enum に変換した候補。未知の値があれば throw（採用しない）
+    func typedCandidates() throws -> (scene: ContextScene?, conditions: Set<BodyCondition>) {
+        var scene: ContextScene? = nil
+        if let raw = sceneCandidate {
+            guard let s = ContextScene(rawValue: raw) else { throw ContractError.inconsistent("unknown scene_candidate") }
+            scene = s
+        }
+        var conditions = Set<BodyCondition>()
+        for raw in conditionCandidates {
+            guard let c = BodyCondition(rawValue: raw) else { throw ContractError.inconsistent("unknown condition_candidate") }
+            conditions.insert(c)
+        }
+        // 「特になし」と他の状態は同時に選べない（既存の画面の規則と同じ）
+        if conditions.contains(.none) && conditions.count > 1 { conditions.remove(.none) }
+        return (scene, conditions)
+    }
+}
+
+/// POST /v1/context-assist の 200 レスポンス
+nonisolated struct ContextAssistResponseDTO: Codable, Equatable, Sendable {
+    var schemaVersion: Int
+    var requestId: UUID
+    var conversationId: UUID
+    /// "openai" = 実際の OpenAI / "openai-stub" = ローカル開発用スタブ（実際の AI ではない）
+    var provider: String
+    var model: String
+    var generatedAt: Date
+    var result: ContextAssistResultDTO
+    var usage: ChatUsageDTO?
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion  = "schema_version"
+        case requestId      = "request_id"
+        case conversationId = "conversation_id"
+        case provider, model, result, usage
+        case generatedAt    = "generated_at"
+    }
+
+    var isStub: Bool { provider != "openai" }
+}
+
+/// 上限（server/src/context.ts の CONTEXT_LIMITS と同じ値）
+nonisolated enum ContextAssistLimits {
+    static let maxMessages = 12
+    static let maxUserChars = 300
+    static let maxAssistantChars = 300
+    static let maxReplyChars = 160
+}
+
+nonisolated enum ContextAssistValidation {
+    static func validate(_ r: ContextAssistResponseDTO, expectedRequestId: UUID, expectedConversationId: UUID) throws {
+        guard MindWaveContract.isSupported(schemaVersion: r.schemaVersion) else { throw ContractError.unsupportedSchemaVersion(r.schemaVersion) }
+        guard r.requestId == expectedRequestId else { throw ContractError.inconsistent("request_id mismatch") }
+        guard r.conversationId == expectedConversationId else { throw ContractError.inconsistent("conversation_id mismatch") }
+        guard r.provider == "openai" || r.provider == "openai-stub" else { throw ContractError.inconsistent("unknown provider") }
+        let reply = r.result.reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty, reply.count <= ContextAssistLimits.maxReplyChars else { throw ContractError.inconsistent("reply length") }
+        _ = try r.result.typedCandidates()
+    }
+}

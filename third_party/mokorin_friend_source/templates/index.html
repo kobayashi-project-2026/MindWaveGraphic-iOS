@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MindWave - モコりん</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="app">
+    <h1>MindWave</h1>
+    <p>あなたの心に、そっと寄り添う。</p>
+
+    <div id="character" class="mocorin calm">
+      <div class="sprout"><span></span><span></span></div>
+      <div class="body">
+        <div class="cheek left"></div>
+        <div class="cheek right"></div>
+        <div class="eyes"><span></span><span></span></div>
+        <div class="mouth"></div>
+      </div>
+    </div>
+
+    <p id="emotion">RELAX</p>
+    <div id="dialogue">こんにちは！今日はどんな気分？</div>
+
+    <div class="buttons">
+      <button onclick="setEmotion('happy')">うれしい</button>
+      <button onclick="setEmotion('calm')">リラックス</button>
+      <button onclick="setEmotion('sad')">かなしい</button>
+      <button onclick="setEmotion('sleepy')">ねむい</button>
+    </div>
+
+    <div class="buttons">
+      <button onclick="setAction('wave')">手をふる</button>
+      <button onclick="setAction('jump')">ぴょんぴょん</button>
+      <button onclick="setAction('nod')">うなずく</button>
+    </div>
+  </main>
+  <script src="/static/script.js"></script>
+</body>
+</html>

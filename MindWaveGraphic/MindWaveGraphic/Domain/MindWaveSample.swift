@@ -1,7 +1,7 @@
 import Foundation
 
 // データソースを区別するenum。1か所で管理する。
-enum MindDataSource: String, Equatable, Sendable {
+nonisolated enum MindDataSource: String, Equatable, Sendable {
     case mock
     case watchLive
     case healthKit
@@ -10,7 +10,7 @@ enum MindDataSource: String, Equatable, Sendable {
 
 // Watch / HealthKit / Mock の生体データを共通化する型。
 // HealthKitオブジェクト・WCSessionへの参照を持たない。
-struct MindWaveSample: Equatable, Sendable {
+nonisolated struct MindWaveSample: Equatable, Sendable {
     let heartRate: Double?
     let hrv: Double?
     // Mockモードなどで計算済みスコアを直接渡す場合に使う。

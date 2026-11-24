@@ -41,6 +41,25 @@ final class WatchConnectivityManager: NSObject, ObservableObject {
     /// 最後に受信したチャネル名
     @Published var lastReceiveChannel: String         = "---"
 
+    // MARK: - WCSession 診断プロパティ（DebugDiagnosticsView 用）
+
+    /// WCSession の isReachable（WatchConnectivity 非対応デバイスでは常に false）
+    var isWatchReachable: Bool { WCSession.isSupported() && WCSession.default.isReachable }
+    /// WCSession の isPaired（activation 前は false）
+    var isWatchPaired: Bool { WCSession.isSupported() && WCSession.default.isPaired }
+    /// WCSession の isWatchAppInstalled（activation 前は false）
+    var isWatchAppInstalled: Bool { WCSession.isSupported() && WCSession.default.isWatchAppInstalled }
+    /// WCSession の activationState をラベル文字列で返す
+    var wcActivationStateLabel: String {
+        guard WCSession.isSupported() else { return "非対応" }
+        switch WCSession.default.activationState {
+        case .activated:    return "activated"
+        case .inactive:     return "inactive"
+        case .notActivated: return "notActivated"
+        @unknown default:   return "unknown"
+        }
+    }
+
     // MARK: - コールバック
 
     /// Watch心拍受信時に呼ばれる。MindWaveViewModel.subscribeToWatchHeartRate() で登録される。
@@ -180,22 +199,27 @@ extension WatchConnectivityManager: WCSessionDelegate {
         _ message: [String: Any],
         channel: String
     ) {
-        // type: "heartRate" を確認する
-        guard let type = message["type"] as? String, type == "heartRate" else {
+        // Contracts/WatchPayloadContract.swift の契約で検証する（旧Watchアプリの schema v0 も受け付ける）
+        let payload: WatchHeartRatePayload
+        switch WatchHeartRatePayload.decode(message) {
+        case .success(let decoded):
+            payload = decoded
+        case .failure(.typeMissingOrNotHeartRate):
             let keys = message.keys.sorted().joined(separator: ",")
             MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=type missing or not heartRate keys=\(keys)")
             return
-        }
-        // heartRate キーと型を確認する
-        guard let hr = message["heartRate"] as? Double else {
+        case .failure(.heartRateMissingOrWrongType):
             MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=heartRate key missing or wrong type")
             return
-        }
-        // timestamp キーと型を確認する
-        guard let timestamp = message["timestamp"] as? TimeInterval else {
+        case .failure(.timestampMissingOrWrongType):
             MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=timestamp key missing or wrong type")
             return
+        case .failure(.unsupportedSchemaVersion(let version)):
+            MindWaveDebugLogger.log(.error, "decode failed channel=\(channel) reason=unsupported schemaVersion=\(version)")
+            return
         }
+        let hr = payload.heartRateBpm
+        MindWaveDebugLogger.log(.contract, "watch payload decoded channel=\(channel) schemaVersion=\(payload.schemaVersion)")
 
         // 範囲ログ（既存の有効範囲は変更しない）
         if hr <= 0 {
@@ -204,7 +228,7 @@ extension WatchConnectivityManager: WCSessionDelegate {
             MindWaveDebugLogger.log(.error, "decode warning channel=\(channel) bpm=\(hr) unrealistic value >250")
         }
 
-        let sampleDate = Date(timeIntervalSince1970: timestamp)
+        let sampleDate = payload.measuredAt
         let summary    = String(format: "%.0f bpm", hr)
         let debugText  = String(format: "%.0f bpm | %@ | %@", hr, channel, formatTime(sampleDate))
 
@@ -217,7 +241,7 @@ extension WatchConnectivityManager: WCSessionDelegate {
             lastPayloadDebug         = debugText
             lastReceiveChannel       = channel
             MindWaveDebugLogger.log(.watch, "decoded channel=\(channel) bpm=\(Int(hr)) count=\(watchMessageCount)")
-            MindWaveDebugLogger.log(.watch, "delivering heart rate to MindWaveViewModel")
+            MindWaveDebugLogger.log(.watch, "[PhoneLink] payload received channel=\(channel) fields=type,heartRate,timestamp bpm=\(Int(hr))")
             onHeartRateReceived?(hr, sampleDate)
         }
     }

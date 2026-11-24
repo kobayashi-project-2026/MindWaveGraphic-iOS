@@ -18,6 +18,10 @@ enum MindWaveLogCategory: String {
     case graphic   = "GRAPHIC"
     case error     = "ERROR"
     case flow      = "FLOW"      // ガイドフロー遷移ログ
+    case navigation = "NAV"      // 画面遷移（AppNavigationManager）ログ
+    case contract  = "CONTRACT"  // JSON契約の encode/decode ログ
+    case baseline  = "BASELINE"  // 個人ベースライン更新ログ
+    case insight   = "INSIGHT"   // AIインサイト（ローカル/リモート）ログ
 }
 
 enum MindWaveDebugLogger {

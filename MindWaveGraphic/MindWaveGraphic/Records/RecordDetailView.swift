@@ -1,0 +1,305 @@
+// RecordDetailView.swift
+// Records
+//
+// 既存ロジックを維持したUI統合：Cyber UIデザインを適用。
+// 表示データ・変化要約ロジック・deltaSummaryは変更しない。
+
+import SwiftUI
+
+struct RecordDetailView: View {
+
+    let record: GuideSessionRecord
+    @EnvironmentObject private var historyStore: GuideHistoryStore
+    @EnvironmentObject private var flowState: AppFlowState
+    /// もこりんと振り返る（求めたときだけ開く）
+    @State private var showMokorinCompanion = false
+
+    // MARK: - Helpers（変更なし）
+
+    private var durationLabel: String {
+        let m = record.durationSeconds / 60
+        let s = record.durationSeconds % 60
+        return s == 0 ? "\(m)分" : "\(m)分\(s)秒"
+    }
+
+    private var dateTimeLabel: String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy/M/d（E）HH:mm"
+        f.locale = Locale(identifier: "ja_JP")
+        return f.string(from: record.startedAt)
+    }
+
+    private var scoreDelta: Double? {
+        guard let after = record.after else { return nil }
+        return after.score - record.before.score
+    }
+
+    private func hrText(_ value: Double?) -> String {
+        guard let v = value else { return "未取得" }
+        return String(format: "%.0f bpm", v)
+    }
+
+    private func scoreText(_ value: Double) -> String {
+        String(format: "%.0f", value)
+    }
+
+    // MARK: - Body
+
+    var body: some View {
+        ZStack {
+            MindWaveCyberBackground()
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 16) {
+
+                    // ── ログID風ヘッダー ──────────────────────────────
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Rectangle()
+                                .fill(MindWaveCyberTheme.cyan)
+                                .frame(width: 2, height: 16)
+                                .shadow(color: MindWaveCyberTheme.cyan.opacity(0.8), radius: 4)
+                            Text("DETAIL REPORT")
+                                .font(.system(size: 16, weight: .ultraLight, design: .monospaced))
+                                .foregroundStyle(MindWaveCyberTheme.textPrimary)
+                                .tracking(2)
+                        }
+                        Text("ID: \(record.id.uuidString.prefix(8).uppercased())")
+                            .font(.system(size: 10, weight: .light, design: .monospaced))
+                            .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                            .tracking(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // ── 基本情報 ──────────────────────────────────────
+                    MindWaveCyberPanel(title: "SESSION INFO") {
+                        VStack(spacing: 8) {
+                            cyberRow("実施日時",   dateTimeLabel)
+                            Divider().background(MindWaveCyberTheme.borderColor)
+                            cyberRow("場面",       record.scene.displayName)
+                            Divider().background(MindWaveCyberTheme.borderColor)
+                            cyberRow("ガイド",     record.exercise.title)
+                            Divider().background(MindWaveCyberTheme.borderColor)
+                            cyberRow("所要時間",   durationLabel)
+                            if record.before.isMockData {
+                                Divider().background(MindWaveCyberTheme.borderColor)
+                                cyberRow("データ種別", "Mockデータ")
+                            }
+                        }
+                    }
+
+                    // ── 前後状態 ────────────────────────────────────
+                    MindWaveCyberPanel(title: "SESSION STATE") {
+                        HStack(spacing: 0) {
+                            cyberStateColumn("セッション前", score: record.before.score)
+                            Divider().background(MindWaveCyberTheme.borderColor).frame(width: 1)
+                            cyberStateColumn("セッション後", score: record.after?.score)
+                        }
+                        .padding(.vertical, 4)
+
+                        if let delta = scoreDelta {
+                            Divider().background(MindWaveCyberTheme.borderColor).padding(.top, 4)
+                            HStack(spacing: 6) {
+                                Text("変化")
+                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                                Spacer()
+                                Text(deltaSummary(delta))
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(deltaColor(delta))
+                            }
+                            .padding(.top, 6)
+                        }
+                    }
+
+                    // ── 心拍数・HRV ───────────────────────────────────
+                    MindWaveCyberPanel(title: "BIOMETRICS", accentColor: MindWaveCyberTheme.emerald) {
+                        VStack(spacing: 8) {
+                            cyberRow("前 心拍数", hrText(record.before.heartRate))
+                            Divider().background(MindWaveCyberTheme.borderColor)
+                            cyberRow("後 心拍数", hrText(record.after?.heartRate))
+                        }
+                    }
+
+                    // ── 感情メモ ──────────────────────────────────────
+                    MindWaveCyberPanel(title: "EMOTION MEMO", accentColor: MindWaveCyberTheme.purple) {
+                        if let memo = record.emotionMemo, !memo.isEmpty {
+                            Text(memo)
+                                .font(.system(size: 14, weight: .light))
+                                .foregroundStyle(MindWaveCyberTheme.textPrimary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .multilineTextAlignment(.leading)
+                        } else {
+                            Text("（メモなし）")
+                                .font(.system(size: 13, weight: .light))
+                                .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                        }
+                    }
+
+                    // ── 変化要約 ──────────────────────────
+                    if let delta = scoreDelta {
+                        MindWaveCyberPanel(title: "SUMMARY") {
+                            HStack(spacing: 12) {
+                                Image(systemName: delta < -5 ? "arrow.down.circle.fill" : delta > 5 ? "arrow.up.circle.fill" : "equal.circle.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundStyle(deltaColor(delta))
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(deltaSummary(delta))
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundStyle(MindWaveCyberTheme.textPrimary)
+                                    Text(delta < -5 ? "呼吸セッション後、状態が改善しました"
+                                         : delta > 5 ? "呼吸セッション後、状態が変化しました"
+                                         : "呼吸セッション完了")
+                                        .font(.system(size: 12, weight: .light))
+                                        .foregroundStyle(MindWaveCyberTheme.textSecondary)
+                                }
+                            }
+                        }
+                    }
+
+                    // もこりんと振り返る（同じ場面の過去の記録との比較・次にできること）
+                    Button { showMokorinCompanion = true } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bubble.left.and.text.bubble.right")
+                            Text("もこりんと振り返る")
+                        }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(MindWaveCyberTheme.cyan)
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        .background(Capsule().strokeBorder(MindWaveCyberTheme.cyan.opacity(0.45), lineWidth: 0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("もこりんがこの記録を説明し、同じ場面の過去の記録と比べます")
+                    .accessibilityIdentifier("mokorin_review_button")
+
+                    Text("これは医療診断ではありません。\n数値は計測環境により変動します。参考値としてご確認ください。")
+                        .font(.system(size: 10, weight: .light))
+                        .foregroundStyle(MindWaveCyberTheme.textTertiary.opacity(0.6))
+                        .multilineTextAlignment(.center)
+                        .padding(.bottom, 40)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+            }
+        }
+        .navigationTitle("詳細レポート")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            print("[Record] detail opened: \(record.id.uuidString.prefix(8))")
+            #if DEBUG
+            // シミュレーター検証用: MW_COMPANION=review で詳細を開いたときに振り返りを開く
+            if ProcessInfo.processInfo.environment["MW_COMPANION"] == "review" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { showMokorinCompanion = true }
+            }
+            #endif
+        }
+        .sheet(isPresented: $showMokorinCompanion) {
+            MokorinCompanionView(title: "もこりんと振り返る", model: makeMokorinCompanion()) { showMokorinCompanion = false }
+        }
+    }
+
+    // MARK: - Helpers（変更なし）
+
+    /// 振り返りでは測定前の会話の内容は使わない（その記録のときの会話とは限らないため）。自由な質問は POST /v1/chat（同意時のみ）
+    private func makeMokorinCompanion() -> MokorinCompanionViewModel {
+        let input = MokorinResultInput(record: record)
+        let history = historyStore.records
+        let scene = flowState.measurementContext.scene
+        let chat = ChatViewModel(sceneProvider: { scene })
+        return MokorinCompanionViewModel(chat: chat) { recent in
+            MokorinResultExplainer.explain(input, history: history, memory: nil, purpose: .review, recentUserText: recent)
+        }
+    }
+
+    private func deltaSummary(_ delta: Double) -> String {
+        if delta < -5  { return "（下がりました）" }
+        if delta > 5   { return "（上がりました）" }
+        return "（ほぼ変化なし）"
+    }
+
+    private func deltaColor(_ delta: Double) -> Color {
+        if delta < -3 { return MindWaveCyberTheme.cyan }
+        if delta > 3  { return MindWaveCyberTheme.orange }
+        return MindWaveCyberTheme.textSecondary
+    }
+
+    // MARK: - Sub Views
+
+    private func cyberRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(MindWaveCyberTheme.textTertiary)
+                .tracking(0.5)
+            Spacer()
+            Text(value)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(MindWaveCyberTheme.textSecondary)
+        }
+    }
+
+    private func cyberScoreColumn(_ label: String, score: Double?) -> some View {
+        cyberStateColumn(label, score: score)
+    }
+
+    private func cyberStateColumn(_ label: String, score: Double?) -> some View {
+        VStack(spacing: 6) {
+            Text(label)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(MindWaveCyberTheme.textTertiary)
+            if let s = score {
+                Text(stateLabel(for: s))
+                    .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(stateColor(for: s))
+            } else {
+                Text("未取得")
+                    .font(.system(size: 14, weight: .light))
+                    .foregroundStyle(MindWaveCyberTheme.textTertiary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    private func stateLabel(for score: Double) -> String {
+        switch score {
+        case ..<25: return "CALM"
+        case ..<55: return "FOCUS"
+        case ..<78: return "ALERT"
+        default:    return "OVLD"
+        }
+    }
+
+    private func stateColor(for score: Double) -> Color {
+        switch score {
+        case ..<25: return Color(hue: 0.62, saturation: 0.80, brightness: 0.88)
+        case ..<55: return Color(hue: 0.48, saturation: 0.85, brightness: 0.90)
+        case ..<78: return Color(hue: 0.08, saturation: 0.92, brightness: 0.98)
+        default:    return Color(hue: 0.01, saturation: 0.96, brightness: 1.0)
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    let snap = GuideSnapshot(
+        timestamp: Date(),
+        score: 68, confidence: 0.72,
+        state: .overTense,
+        heartRate: 85, hrv: 44,
+        isMockData: true,
+        heartRateSampleDate: Date(), hrvSampleDate: Date()
+    )
+    NavigationStack {
+        RecordDetailView(record: GuideSessionRecord(
+            id: UUID(), startedAt: Date(),
+            scene: .interview, exercise: .breathing478,
+            durationSeconds: 180,
+            before: snap, after: nil,
+            hrvUpdated: false,
+            emotionMemo: "少し緊張が残っているが落ち着いてきた。"
+        ))
+    }
+    .preferredColorScheme(.dark)
+}

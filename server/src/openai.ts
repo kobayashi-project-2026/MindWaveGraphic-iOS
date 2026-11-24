@@ -1,0 +1,230 @@
+// openai.ts
+// OpenAI Responses API（POST /v1/responses）を Structured Outputs（strict JSON Schema）で呼び出す。
+// APIキーはこのサーバーの環境変数だけが持つ。リクエスト内容・応答本文はログに出さない。
+// 参照: https://developers.openai.com/api/docs/guides/structured-outputs
+
+import {
+  FIXED_CAUTION,
+  INSIGHT_JSON_SCHEMA,
+  type InsightBody,
+  type InsightRequest,
+  validateInsightBody,
+} from "./contract.ts";
+
+export interface OpenAIConfig {
+  apiKey: string;
+  model: string;
+  /** 既定 https://api.openai.com/v1（ローカルのスタブへ向ける場合のみ変更） */
+  baseUrl: string;
+  timeoutMs: number;
+  /** 推論の深さ（"none" / "low" など）。未設定ならパラメーター自体を送らない（非推論モデル向け） */
+  reasoningEffort?: string;
+  fetchImpl: typeof fetch;
+}
+
+export type UpstreamErrorCode =
+  | "upstream_error"
+  | "upstream_timeout"
+  | "upstream_refusal"
+  | "upstream_rate_limited"
+  | "upstream_auth_error"
+  | "invalid_upstream_response";
+
+export class UpstreamError extends Error {
+  readonly code: UpstreamErrorCode;
+  readonly upstreamStatus: number | undefined;
+  /** OpenAI のエラー応答の種類（type / code / param のみ。メッセージ本文は保持しない） */
+  readonly detail: UpstreamErrorDetail | undefined;
+
+  constructor(code: UpstreamErrorCode, message: string, upstreamStatus?: number, detail?: UpstreamErrorDetail) {
+    super(message);
+    this.code = code;
+    this.upstreamStatus = upstreamStatus;
+    this.detail = detail;
+  }
+}
+
+export interface UpstreamErrorDetail {
+  type: string | null;
+  code: string | null;
+  param: string | null;
+}
+
+/** OpenAI のエラー応答から、診断に必要な分類（type / code / param）だけを取り出す。
+ *  message は入力の一部を含みうるため読まない・記録しない */
+export async function readUpstreamErrorDetail(response: Response): Promise<UpstreamErrorDetail | undefined> {
+  try {
+    const body = await response.json() as { error?: Record<string, unknown> };
+    const e = body?.error;
+    if (!e || typeof e !== "object") return undefined;
+    const pick = (v: unknown) => (typeof v === "string" ? v.slice(0, 80) : null);
+    return { type: pick(e.type), code: pick(e.code), param: pick(e.param) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** HTTP 状態から UpstreamError を作る（エラー応答の分類を添える） */
+export async function upstreamErrorFromResponse(response: Response): Promise<UpstreamError> {
+  const detail = await readUpstreamErrorDetail(response);
+  const status = response.status;
+  if (status === 429) return new UpstreamError("upstream_rate_limited", `openai status=${status}`, status, detail);
+  if (status === 401 || status === 403) return new UpstreamError("upstream_auth_error", `openai status=${status}`, status, detail);
+  return new UpstreamError("upstream_error", `openai status=${status}`, status, detail);
+}
+
+const SCENE_LABELS: Record<string, string> = {
+  interview: "面接・面談前", study: "勉強・試験", sports: "試合・大会前", social: "人付き合い",
+  daily: "日常", other: "その他", meeting: "重要な会議", speech: "スピーチ・発表",
+};
+const EXERCISE_LABELS: Record<string, string> = {
+  breathing478: "4-7-8呼吸", box: "ボックス呼吸", breathing214: "2-1-4呼吸",
+};
+const STATE_LABELS: Record<string, string> = {
+  under_aroused: "落ち着き", optimal_tension: "集中中間域", over_tense: "高緊張",
+};
+
+/** モデルへの指示（システム側）。医療的表現の禁止・入力にない数値の創作禁止を明示する */
+export const INSTRUCTIONS = [
+  "あなたは呼吸ガイドアプリ「Mind Wave Graphic」のセルフケア振り返りコーチです。",
+  "ユーザーが行った呼吸ガイド1回分の要約(JSON)をもとに、日本語で短い振り返りを作成します。",
+  "必ず守ること:",
+  "- 医療的な診断・病名・治療・薬・生理学的な仕組み（神経系など）には触れない。断定しない。",
+  "- 入力にない数値・事実を作らない。心拍が null の場合は心拍に言及しない。",
+  "- スコアは緊張の揺らぎの目安であり、良い/悪いと評価しない。",
+  "- 前向きで具体的、1〜2文で簡潔に。敬体（です・ます）で書く。",
+  "- tone は after（なければ before）の状態に合わせる: 落ち着き=calm, 集中中間域=focus, 高緊張=alert（スコア80以上は ovld）。",
+  `- caution は「${FIXED_CAUTION}」とする。`,
+].join("\n");
+
+/** モデルへ渡すユーザー入力。検証済みの要約だけを使い、ラベルを補う */
+export function buildUserInput(req: InsightRequest): string {
+  const s = req.session;
+  const summary = {
+    scene: SCENE_LABELS[s.scene] ?? s.scene,
+    exercise: EXERCISE_LABELS[s.exercise] ?? s.exercise,
+    duration_seconds: s.duration_seconds,
+    completed: s.completed,
+    before: { ...s.before, state_label: STATE_LABELS[s.before.state] },
+    after: s.after ? { ...s.after, state_label: STATE_LABELS[s.after.state] } : null,
+    hrv_trend: s.hrv_trend,
+    self_report_before: s.self_report_before,
+    self_report_after: s.self_report_after,
+    measurement_confidence: s.confidence,
+  };
+  return `以下はガイド1回分の要約です。self_report は 0=落ち着いている〜3=強く緊張。\n${JSON.stringify(summary)}`;
+}
+
+/** Responses API のリクエスト本文（APIキーは含めない） */
+export function buildResponsesRequest(req: InsightRequest, model: string, reasoningEffort?: string): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    instructions: INSTRUCTIONS,
+    input: [{ role: "user", content: buildUserInput(req) }],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "mindwave_insight",
+        schema: INSIGHT_JSON_SCHEMA,
+        strict: true,
+      },
+    },
+    max_output_tokens: 1200,
+    // 入出力を OpenAI 側に保存しない
+    store: false,
+  };
+  if (reasoningEffort) body.reasoning = { effort: reasoningEffort };
+  return body;
+}
+
+/** Responses API の応答から出力テキストを取り出す。拒否・未完了はエラー */
+export function extractOutputText(json: unknown): string {
+  if (typeof json !== "object" || json === null) {
+    throw new UpstreamError("invalid_upstream_response", "応答が JSON オブジェクトではない");
+  }
+  const res = json as Record<string, unknown>;
+  if (res.status !== undefined && res.status !== "completed") {
+    throw new UpstreamError("invalid_upstream_response", `status=${String(res.status)}`);
+  }
+  const output = Array.isArray(res.output) ? res.output : [];
+  for (const item of output) {
+    if (typeof item !== "object" || item === null) continue;
+    const msg = item as Record<string, unknown>;
+    if (msg.type !== "message" || !Array.isArray(msg.content)) continue;
+    for (const part of msg.content) {
+      if (typeof part !== "object" || part === null) continue;
+      const p = part as Record<string, unknown>;
+      if (p.type === "refusal") throw new UpstreamError("upstream_refusal", "モデルが応答を拒否");
+      if (p.type === "output_text" && typeof p.text === "string") return p.text;
+    }
+  }
+  // SDK 互換の集約フィールドがあれば使う
+  if (typeof res.output_text === "string" && res.output_text.length > 0) return res.output_text;
+  throw new UpstreamError("invalid_upstream_response", "output_text がない");
+}
+
+/** OpenAI を呼び出し、検証済みのインサイトを返す */
+export async function generateInsight(
+  req: InsightRequest,
+  cfg: OpenAIConfig,
+): Promise<{ insight: InsightBody; model: string }> {
+  const controller = new AbortController();
+  // タイムアウトは応答ヘッダーだけでなく本文の読み込みまで含める（本文の受信が止まった場合も打ち切る）
+  const timer = setTimeout(() => controller.abort(), cfg.timeoutMs);
+  let json: unknown;
+  try {
+    let response: Response;
+    try {
+      response = await cfg.fetchImpl(`${cfg.baseUrl.replace(/\/$/, "")}/responses`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${cfg.apiKey}`,
+        },
+        body: JSON.stringify(buildResponsesRequest(req, cfg.model, cfg.reasoningEffort)),
+        signal: controller.signal,
+      });
+    } catch {
+      if (controller.signal.aborted) {
+        throw new UpstreamError("upstream_timeout", `timeout after ${cfg.timeoutMs}ms`);
+      }
+      throw new UpstreamError("upstream_error", "network error");
+    }
+
+    if (!response.ok) {
+      // エラー応答は分類（type / code / param）だけを読む。メッセージ本文は読まない・ログに出さない
+      throw await upstreamErrorFromResponse(response);
+    }
+
+    try {
+      json = await response.json();
+    } catch {
+      if (controller.signal.aborted) {
+        throw new UpstreamError("upstream_timeout", `timeout after ${cfg.timeoutMs}ms (body)`);
+      }
+      throw new UpstreamError("invalid_upstream_response", "応答が JSON ではない");
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+  const text = extractOutputText(json);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new UpstreamError("invalid_upstream_response", "output_text が JSON ではない");
+  }
+  // 免責文はモデル出力に依存させず固定文言にする
+  if (typeof parsed === "object" && parsed !== null) {
+    (parsed as Record<string, unknown>).caution = FIXED_CAUTION;
+  }
+  const validated = validateInsightBody(parsed);
+  if (!validated.ok) {
+    throw new UpstreamError("invalid_upstream_response", validated.message);
+  }
+  const model = typeof (json as Record<string, unknown>).model === "string"
+    ? ((json as Record<string, unknown>).model as string)
+    : cfg.model;
+  return { insight: validated.value, model };
+}

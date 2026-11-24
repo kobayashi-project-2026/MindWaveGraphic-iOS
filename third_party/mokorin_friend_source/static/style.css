@@ -1,0 +1,198 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f9f0e7, #eee8fa, #e4f4ef);
+  color: #65566e;
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.app {
+  max-width: 480px;
+  margin: auto;
+  padding: 35px 22px;
+  text-align: center;
+}
+
+h1 {
+  font-size: 30px;
+  letter-spacing: 3px;
+  margin-bottom: 8px;
+}
+
+.app > p {
+  color: #9788a5;
+  font-size: 13px;
+}
+
+#character {
+  position: relative;
+  width: 220px;
+  height: 215px;
+  margin: 35px auto 15px;
+  animation: float 3s ease-in-out infinite;
+}
+
+.body {
+  position: absolute;
+  bottom: 12px;
+  left: 10px;
+  width: 200px;
+  height: 160px;
+  border: 2px solid #b5a18d;
+  border-radius: 48% 48% 43% 43%;
+  background: linear-gradient(145deg, #fffdf5, #f2dfc9);
+  box-shadow: inset -8px -8px 0 #ead6c1,
+              0 15px 30px #b8a6c633;
+}
+
+.sprout {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 95px;
+  width: 30px;
+  height: 35px;
+}
+
+.sprout::before {
+  content: "";
+  position: absolute;
+  width: 4px;
+  height: 25px;
+  left: 14px;
+  top: 10px;
+  background: #9ba77b;
+}
+
+.sprout span {
+  position: absolute;
+  top: 5px;
+  left: -3px;
+  width: 20px;
+  height: 14px;
+  border-radius: 100% 0 100% 0;
+  background: #c5d7a5;
+  border: 1px solid #8b9d75;
+  transform: rotate(25deg);
+}
+
+.sprout span + span {
+  left: 14px;
+  transform: rotate(-25deg) scaleX(-1);
+}
+
+.eyes {
+  position: absolute;
+  top: 57px;
+  left: 55px;
+  display: flex;
+  gap: 47px;
+}
+
+.eyes span {
+  width: 15px;
+  height: 21px;
+  border-radius: 50%;
+  background: #65566b;
+}
+
+.cheek {
+  position: absolute;
+  top: 85px;
+  width: 25px;
+  height: 15px;
+  border-radius: 50%;
+  background: #ffd9d3;
+}
+
+.cheek.left { left: 22px; }
+.cheek.right { right: 22px; }
+
+.mouth {
+  position: absolute;
+  top: 91px;
+  left: 87px;
+  width: 20px;
+  height: 10px;
+  border-bottom: 3px solid #a96f7c;
+  border-radius: 0 0 50% 50%;
+}
+
+#dialogue {
+  margin: 20px auto;
+  padding: 16px;
+  max-width: 350px;
+  background: #ffffffc9;
+  border: 1px solid #ffffff;
+  border-radius: 20px;
+  box-shadow: 0 8px 25px #b8a6c622;
+}
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+button {
+  padding: 10px 14px;
+  border: 1px solid #ded3e8;
+  border-radius: 22px;
+  background: #ffffffc9;
+  color: #716487;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #e8def8;
+}
+
+.happy .body { background: #fff0d7; }
+
+.happy .mouth {
+  height: 15px;
+  background: #d88c9d;
+  border-radius: 5px 5px 50% 50%;
+}
+
+.sad .mouth {
+  top: 100px;
+  border-top: 3px solid #a96f7c;
+  border-bottom: 0;
+  border-radius: 50%;
+}
+
+.sleepy .eyes span {
+  height: 4px;
+  margin-top: 9px;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes jump {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-30px); }
+}
+
+@keyframes wave {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(12deg); }
+}
+
+@keyframes nod {
+  0%, 100% { transform: rotate(0); }
+  50% { transform: rotate(8deg); }
+}
+
+#character.wave { animation: wave .6s ease-in-out 3; }
+#character.jump { animation: jump .5s ease-in-out 4; }
+#character.nod { animation: nod .6s ease-in-out 3; }
